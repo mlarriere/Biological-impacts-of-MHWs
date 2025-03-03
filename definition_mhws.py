@@ -256,6 +256,16 @@ det1deg_potential_mhw_spatial = (det1deg_sum_yr_spatial > 0).astype(np.float32) 
 det1deg_sum_yr = det1deg_sum_yr_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 det1deg_potential_mhw = det1deg_potential_mhw_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 
+max_year = det1deg_potential_mhw.years[det1deg_potential_mhw.argmax().item()].item()
+min_year = det1deg_potential_mhw.years[det1deg_potential_mhw.argmin().item()].item()
+
+# Retrieve max and min values
+# max_value = det3deg_potential_mhw[det3deg_potential_mhw.argmax().item()].item()
+# min_value = det3deg_potential_mhw[det3deg_potential_mhw.argmin().item()].item()
+
+print(f"Maximum MHW Events (for thresh=1°C) in year {max_year}")
+print(f"Minimum MHW Events (for thresh=1°C) in year {min_year}")
+
 del det1deg_south_of_60
 
 # Absolute threshold = 2°C
@@ -266,6 +276,15 @@ det2deg_potential_mhw_spatial = (det2deg_sum_yr_spatial > 0).astype(np.float32) 
 det2deg_sum_yr = det2deg_sum_yr_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 det2deg_potential_mhw = det2deg_potential_mhw_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 
+max_year = det2deg_potential_mhw.years[det2deg_potential_mhw.argmax().item()].item()
+min_year = det2deg_potential_mhw.years[det2deg_potential_mhw.argmin().item()].item()
+
+# Retrieve max and min values
+# max_value = det3deg_potential_mhw[det3deg_potential_mhw.argmax().item()].item()
+# min_value = det3deg_potential_mhw[det3deg_potential_mhw.argmin().item()].item()
+
+print(f"Maximum MHW Events (for thresh=2°C) in year {max_year}")
+print(f"Minimum MHW Events (for thresh=2°C) in year {min_year}")
 del det2deg_south_of_60
 
 # Absolute threshold = 3°C
@@ -275,6 +294,17 @@ det3deg_potential_mhw_spatial = (det3deg_sum_yr_spatial > 0).astype(np.float32) 
 # ------ Remove spatial dimensions ------
 det3deg_sum_yr = det3deg_sum_yr_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 det3deg_potential_mhw = det3deg_potential_mhw_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
+
+# Find the index of max and min values
+max_year = det3deg_potential_mhw.years[det3deg_potential_mhw.argmax().item()].item()
+min_year = det3deg_potential_mhw.years[det3deg_potential_mhw.argmin().item()].item()
+
+# Retrieve max and min values
+# max_value = det3deg_potential_mhw[det3deg_potential_mhw.argmax().item()].item()
+# min_value = det3deg_potential_mhw[det3deg_potential_mhw.argmin().item()].item()
+
+print(f"Maximum MHW Events (for thresh=3°C) in year {max_year}")
+print(f"Minimum MHW Events (for thresh=3°C) in year {min_year}")
 
 del det3deg_south_of_60
 
@@ -314,7 +344,7 @@ ax.plot(years, det3deg_potential_mhw, marker='o', linestyle='-', color='#9B2808'
 
 # Labels and title
 ax.set_xlabel("Year")
-ax.set_ylabel("Potential MHW presence")
+ax.set_ylabel("Counts")
 ax.set_title("Potential MHW presence - South 60°S", fontsize=14)
 fig.text(0.5, 0.93, "Sum of the events: 1 if at least one event occurs in a cell, else 0",
          ha='center', fontsize=10, style='italic')
@@ -328,97 +358,71 @@ plt.show()
 # %% -------------------------------- PLOTS --------------------------------
 # -------------------- SPATIAL
 # Define variable to plot
+keys = ["det1deg_yearly", "det2deg_yearly", "det3deg_yearly"]
+titles = ["1°C threshold", "2°C threshold", "3°C threshold"]
+colors = ['#5A7854', '#8780C6', '#9B2808']
 time_label="years" # season
 time_idx = 3
-years = 2019
+years = 2015
 
-dataset_toplot= 'det_yearly'
+# dataset_toplot= 'det_yearly'
 
 datasets = {
-            # "intensity_yearly": intensity_avg_yr_spatial, 
+#             # "intensity_yearly": intensity_avg_yr_spatial, 
             "det1deg_yearly": det1deg_potential_mhw_spatial,
             "det2deg_yearly": det2deg_potential_mhw_spatial,
             "det3deg_yearly": det3deg_potential_mhw_spatial,
-            # "det2deg_yearly": det2deg_sum_yr_spatial,
-            # "det3deg_yearly": det3deg_sum_yr_spatial,
-            # "intensity_season": intensity_avg_sn_spatial, 
-            # "det_season": det_sum_sn_spatial
+#             # "det2deg_yearly": det2deg_sum_yr_spatial,
+#             # "det3deg_yearly": det3deg_sum_yr_spatial,
+#             # "intensity_season": intensity_avg_sn_spatial, 
+#             # "det_season": det_sum_sn_spatial
             }
 
-mhw_data_toplot = datasets[dataset_toplot].sel(years=years)
-print(np.max(mhw_data_toplot.lon_rho.values)-np.min(mhw_data_toplot.lon_rho.values))
+fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(20, 15), 
+                         subplot_kw={'projection': ccrs.Orthographic(central_latitude=-90, central_longitude=0)})
 
-plt.figure(figsize=(10, 10))
-ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
-ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
-# Circular map boundary
-theta = np.linspace(0, 2 * np.pi, 100)
-center, radius = [0.5, 0.5], 0.5
-verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-circle = mpath.Path(verts * radius + center)
-ax.set_boundary(circle, transform=ax.transAxes)
+for ax, key, title, col in zip(axes, keys, titles, colors):
+    mhw_data_toplot = datasets[key].sel(years=years)
+    print(np.max(mhw_data_toplot.lon_rho.values)-np.min(mhw_data_toplot.lon_rho.values))
 
-# Plot temperature events
-if dataset_toplot == 'intensity_season':
-    vmin, vmax = (0, 4) #np.max(mhw_data_toplot.sel(season=time_idx)))
-elif dataset_toplot == 'det_yearly':
-    vmin, vmax = (0, 365)
-else:
-    vmin, vmax = (0, 90)#np.max(mhw_data_toplot.sel(season=time_idx)))
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
-if time_label=="years":
+    # Circular map boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
     pcolormesh = mhw_data_toplot.plot.pcolormesh(
-        ax=ax, transform=ccrs.PlateCarree(),
-        x="lon_rho", y="lat_rho",
-        add_colorbar=False, 
-        vmin=vmin, vmax=vmax,
-        cmap='inferno')
+            ax=ax, transform=ccrs.PlateCarree(),
+            x="lon_rho", y="lat_rho",
+            add_colorbar=False, vmin=0, vmax=1,
+            cmap=plt.matplotlib.colors.ListedColormap(['grey', col])
+        )
+        
     
-if time_label=="season":
-    pcolormesh = mhw_data_toplot.sel(season=time_idx).plot.pcolormesh(
-        ax=ax, transform=ccrs.PlateCarree(),
-        x="lon_rho", y="lat_rho",
-        add_colorbar=False, 
-        vmin=vmin, vmax=vmax,
-        cmap='inferno')
-
-# Colorbar
-cbar_label = None
-if dataset_toplot in ['intensity_season', 'intensity_yearly']:
-    cbar_label = 'Cumulative intensity (°C)'
-elif dataset_toplot in ['det_season', 'det_yearly']:
-    cbar_label = 'Number of days'
-
-if cbar_label:
-    cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
-    cbar.set_label(cbar_label, fontsize=13)
-    cbar.ax.tick_params(labelsize=12)  
-
-# Add features
-ax.coastlines(color='black', linewidth=1.5, zorder=1)
-ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
-ax.set_facecolor('lightgrey')
-
-# # Legend
-# legend_elements = [
-#     Line2D([0], [0], color='#BBC6A9', lw=6, label=f'Temp < {temp_threshold}°C'),
-#     Line2D([0], [0], color='#BE2323', lw=6, label=f'Temp > {temp_threshold}°C')
-# ]
-# ax.legend(handles=legend_elements, loc='lower left', fontsize=14, borderpad=0.8, frameon=True, bbox_to_anchor=(-0.05, -0.05))
-
-# Convert time index to label
-if time_label == "season":
-    time_str = season_names[time_idx]
-else:
-    time_str = time_label  # Keep numerical index for year and day
-
-# Title
-if dataset_toplot=='intensity_season' or dataset_toplot=='intensity_yearly':
-    ax.set_title(f"Intensity of events above Temperature in 1980 \n{time_str} - {years}", fontsize=20, pad=30)
-elif dataset_toplot=='det_yearly':
-    ax.set_title(f"Cumulative MHW events - defined as > 1°C \n{time_str} - {years}", fontsize=20, pad=30)
-
+    # Add features
+    ax.coastlines(color='black', linewidth=1.5, zorder=1)
+    ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
+    ax.set_facecolor('lightgrey')
+ 
+ 
+    # Legend
+    threshold = title.split(" ")[0]
+    
+    # Create a binary legend for the current threshold
+    legend_elements = [
+        Line2D([0], [0], marker='s', color='w', label=f'T°C < {threshold}',
+               markerfacecolor='lightgray', markersize=10),
+        Line2D([0], [0], marker='s', color='w', label=f'T°C ≥ {threshold}',
+               markerfacecolor=col, markersize=10)
+    ]
+    ax.legend(handles=legend_elements, loc='center', fontsize=14,
+              borderpad=0.8, frameon=True, bbox_to_anchor=(0.5, -0.15))
+    
+plt.suptitle('Potential Presence of MHW - Absolute Thresholds', fontsize=20, y=0.8)
 plt.tight_layout()
 plt.show()
 
