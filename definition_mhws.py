@@ -265,7 +265,6 @@ min_year = det1deg_potential_mhw.years[det1deg_potential_mhw.argmin().item()].it
 
 print(f"Maximum MHW Events (for thresh=1°C) in year {max_year}")
 print(f"Minimum MHW Events (for thresh=1°C) in year {min_year}")
-
 del det1deg_south_of_60
 
 # Absolute threshold = 2°C
