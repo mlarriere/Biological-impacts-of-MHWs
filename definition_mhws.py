@@ -209,15 +209,30 @@ mask_da = xr.DataArray(spatial_domain_reshaped, dims=["eta_rho", "xi_rho"])
 
 # Absolute threshold = 1°C
 det1deg_south_of_60 = det_ds.mhw_events1.where(mask_da, drop=True) # long computing - non Nans values in mhw_evnts and intensity
+# Save output
+output_file = os.path.join(output_path, f"det1deg.nc")
+if not os.path.exists(output_file):
+    det1deg_south_of_60.to_netcdf(output_file, mode='w') 
 
 # Absolute threshold = 2°C
 det2deg_south_of_60 = det_ds.mhw_events2.where(mask_da, drop=True) # long computing - non Nans values in mhw_evnts and intensity
+# Save output
+output_file = os.path.join(output_path, f"det2deg.nc")
+if not os.path.exists(output_file):
+    det2deg_south_of_60.to_netcdf(output_file, mode='w') 
 
 # Absolute threshold = 3°C
 det3deg_south_of_60 = det_ds.mhw_events3.where(mask_da, drop=True) # long computing - non Nans values in mhw_evnts and intensity
+# Save output
+output_file = os.path.join(output_path, f"det3deg.nc")
+if not os.path.exists(output_file):
+    det3deg_south_of_60.to_netcdf(output_file, mode='w') 
 
 # Intensity
 # intensity_south_of_60 = det_ds.mhw_intensity.where(mask_da, drop=True) # long computing - non Nans values in mhw_evnts and intensity
+
+
+
 
 # def apply_spatial_mask(yr):
 #     # Read only 1 year
@@ -247,6 +262,10 @@ det3deg_south_of_60 = det_ds.mhw_events3.where(mask_da, drop=True) # long comput
 # del det_ds, spatial_domain, spatial_domain_reshaped
 
 # %% ------ Averages
+det1deg_south_of_60 = xr.open_dataset(os.path.join(output_path, "det1deg.nc"))
+det2deg_south_of_60 = xr.open_dataset(os.path.join(output_path, "det2deg.nc"))
+det3deg_south_of_60 = xr.open_dataset(os.path.join(output_path, "det3deg.nc"))
+
 # --- YEARLY
 # Absolute threshold = 1°C
 # ------ Keep spatial dimensions ------
@@ -256,15 +275,10 @@ det1deg_potential_mhw_spatial = (det1deg_sum_yr_spatial > 0).astype(np.float32) 
 det1deg_sum_yr = det1deg_sum_yr_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 det1deg_potential_mhw = det1deg_potential_mhw_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 
-max_year = det1deg_potential_mhw.years[det1deg_potential_mhw.argmax().item()].item()
-min_year = det1deg_potential_mhw.years[det1deg_potential_mhw.argmin().item()].item()
-
 # Retrieve max and min values
-# max_value = det3deg_potential_mhw[det3deg_potential_mhw.argmax().item()].item()
-# min_value = det3deg_potential_mhw[det3deg_potential_mhw.argmin().item()].item()
+print(f"Maximum MHW Events (for thresh=1°C) in year {int(det1deg_potential_mhw.mhw_events1.idxmax().values)}")
+print(f"Minimum MHW Events (for thresh=1°C) in year {int(det1deg_potential_mhw.mhw_events1.idxmin().values)}")
 
-print(f"Maximum MHW Events (for thresh=1°C) in year {max_year}")
-print(f"Minimum MHW Events (for thresh=1°C) in year {min_year}")
 del det1deg_south_of_60
 
 # Absolute threshold = 2°C
@@ -275,15 +289,9 @@ det2deg_potential_mhw_spatial = (det2deg_sum_yr_spatial > 0).astype(np.float32) 
 det2deg_sum_yr = det2deg_sum_yr_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 det2deg_potential_mhw = det2deg_potential_mhw_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 
-max_year = det2deg_potential_mhw.years[det2deg_potential_mhw.argmax().item()].item()
-min_year = det2deg_potential_mhw.years[det2deg_potential_mhw.argmin().item()].item()
-
 # Retrieve max and min values
-# max_value = det3deg_potential_mhw[det3deg_potential_mhw.argmax().item()].item()
-# min_value = det3deg_potential_mhw[det3deg_potential_mhw.argmin().item()].item()
-
-print(f"Maximum MHW Events (for thresh=2°C) in year {max_year}")
-print(f"Minimum MHW Events (for thresh=2°C) in year {min_year}")
+print(f"Maximum MHW Events (for thresh=2°C) in year {int(det2deg_potential_mhw.mhw_events2.idxmax().values)}")
+print(f"Minimum MHW Events (for thresh=2°C) in year {int(det2deg_potential_mhw.mhw_events2.idxmin().values)}")
 del det2deg_south_of_60
 
 # Absolute threshold = 3°C
@@ -294,16 +302,9 @@ det3deg_potential_mhw_spatial = (det3deg_sum_yr_spatial > 0).astype(np.float32) 
 det3deg_sum_yr = det3deg_sum_yr_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 det3deg_potential_mhw = det3deg_potential_mhw_spatial.sum(dim=['eta_rho', 'xi_rho']).astype(np.float32)    
 
-# Find the index of max and min values
-max_year = det3deg_potential_mhw.years[det3deg_potential_mhw.argmax().item()].item()
-min_year = det3deg_potential_mhw.years[det3deg_potential_mhw.argmin().item()].item()
-
 # Retrieve max and min values
-# max_value = det3deg_potential_mhw[det3deg_potential_mhw.argmax().item()].item()
-# min_value = det3deg_potential_mhw[det3deg_potential_mhw.argmin().item()].item()
-
-print(f"Maximum MHW Events (for thresh=3°C) in year {max_year}")
-print(f"Minimum MHW Events (for thresh=3°C) in year {min_year}")
+print(f"Maximum MHW Events (for thresh=3°C) in year {int(det3deg_potential_mhw.mhw_events3.idxmax().values)}")
+print(f"Minimum MHW Events (for thresh=3°C) in year {int(det3deg_potential_mhw.mhw_events3.idxmin().values)}")
 
 del det3deg_south_of_60
 
@@ -337,9 +338,9 @@ del det3deg_south_of_60
 # %% -------------------- TIME SERIES
 years = np.arange(1980, 2020)  
 fig, ax = plt.subplots(figsize=(10, 5))
-ax.plot(years, det1deg_potential_mhw, marker='o', linestyle='-', color='#5A7854', linewidth=2, label="1°C threshold")
-ax.plot(years, det2deg_potential_mhw, marker='o', linestyle='-', color='#8780C6', linewidth=2, label="2°C threshold")
-ax.plot(years, det3deg_potential_mhw, marker='o', linestyle='-', color='#9B2808', linewidth=2, label="3°C threshold")
+ax.plot(years, det1deg_potential_mhw.mhw_events1, marker='o', linestyle='-', color='#5A7854', linewidth=2, label="1°C threshold")
+ax.plot(years, det2deg_potential_mhw.mhw_events2, marker='o', linestyle='-', color='#8780C6', linewidth=2, label="2°C threshold")
+ax.plot(years, det3deg_potential_mhw.mhw_events3, marker='o', linestyle='-', color='#9B2808', linewidth=2, label="3°C threshold")
 
 # Labels and title
 ax.set_xlabel("Year")
@@ -359,18 +360,16 @@ plt.show()
 # Define variable to plot
 keys = ["det1deg_yearly", "det2deg_yearly", "det3deg_yearly"]
 titles = ["1°C threshold", "2°C threshold", "3°C threshold"]
-colors = ['#5A7854', '#8780C6', '#9B2808']
+threshold_colors = ['#5A7854', '#8780C6', '#9B2808']
 time_label="years" # season
 time_idx = 3
-years = 2015
-
-# dataset_toplot= 'det_yearly'
+years = 1986
 
 datasets = {
 #             # "intensity_yearly": intensity_avg_yr_spatial, 
-            "det1deg_yearly": det1deg_potential_mhw_spatial,
-            "det2deg_yearly": det2deg_potential_mhw_spatial,
-            "det3deg_yearly": det3deg_potential_mhw_spatial,
+            "det1deg_yearly": det1deg_potential_mhw_spatial.mhw_events1,
+            "det2deg_yearly": det2deg_potential_mhw_spatial.mhw_events2,
+            "det3deg_yearly": det3deg_potential_mhw_spatial.mhw_events3,
 #             # "det2deg_yearly": det2deg_sum_yr_spatial,
 #             # "det3deg_yearly": det3deg_sum_yr_spatial,
 #             # "intensity_season": intensity_avg_sn_spatial, 
@@ -381,7 +380,7 @@ fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(20, 15),
                          subplot_kw={'projection': ccrs.Orthographic(central_latitude=-90, central_longitude=0)})
 
 
-for ax, key, title, col in zip(axes, keys, titles, colors):
+for ax, key, title, col in zip(axes, keys, titles, threshold_colors):
     mhw_data_toplot = datasets[key].sel(years=years)
     print(np.max(mhw_data_toplot.lon_rho.values)-np.min(mhw_data_toplot.lon_rho.values))
 
@@ -398,16 +397,16 @@ for ax, key, title, col in zip(axes, keys, titles, colors):
             ax=ax, transform=ccrs.PlateCarree(),
             x="lon_rho", y="lat_rho",
             add_colorbar=False, vmin=0, vmax=1,
-            cmap=plt.matplotlib.colors.ListedColormap(['grey', col])
+            cmap=plt.matplotlib.colors.ListedColormap(['lightgray', col])
         )
         
     
     # Add features
     ax.coastlines(color='black', linewidth=1.5, zorder=1)
-    ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
+    ax.add_feature(cfeature.LAND, zorder=2,  facecolor='#F6F6F3')
     ax.set_facecolor('lightgrey')
  
- 
+
     # Legend
     threshold = title.split(" ")[0]
     
@@ -421,6 +420,18 @@ for ax, key, title, col in zip(axes, keys, titles, colors):
     ax.legend(handles=legend_elements, loc='center', fontsize=14,
               borderpad=0.8, frameon=True, bbox_to_anchor=(0.5, -0.15))
     
+for ax in axes:
+    # Atlantic-Pacific boundary (near Drake Passage)
+    ax.plot([-70, -70], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1) #Atlantic sector
+
+    # Pacific-Indian boundary
+    ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1) #Pacific sector
+
+    # Indian-Atlantic boundary
+    ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1) #Indian sector
+
+
+
 plt.suptitle('Potential Presence of MHW - Absolute Thresholds', fontsize=20, y=0.8)
 plt.tight_layout()
 plt.show()
@@ -452,7 +463,7 @@ plt.show()
 
 # %% Area 
 area_SO = xr.open_dataset(os.path.join(joel_path, "area.nc")) # Area per cell (eta, xi), (Nans values??)
-area_SO_surf = area_SO.area_xi.isel(z_t=0) #select only surface
+area_SO_surf = area_SO.area.isel(z_t=0)[:, 1:-1] #select only surface, area (view from top), kick out part overlapping
 area_SO_surf_60S = area_SO_surf.where(mask_da, drop=True) # south of 60°S - shape: (eta_rho: 231, xi_rho: 1442)
 area_SO_surf_60S.values[np.isnan(area_SO_surf_60S.values)] = 0 # Set to 0 so that det = False at nans
 
@@ -460,21 +471,27 @@ total_ocean_area_60S = area_SO_surf_60S.sum(dim=['eta_rho', 'xi_rho']) #total oc
 
 # Assign area of cell to dataset
 array_area = area_SO_surf_60S #shape: (231, 1442)
-array_det_mhw = detected_south_of_60.mhw_events #shape: (40, 365, 231, 1442)
+array_det1deg_mhw = det1deg_potential_mhw_spatial.mhw_events1 #shape: (40, 231, 1442)
+array_det2deg_mhw = det2deg_potential_mhw_spatial.mhw_events2 #shape: (40, 231, 1442)
+array_det3deg_mhw = det3deg_potential_mhw_spatial.mhw_events3 #shape: (40, 231, 1442)
 
-array_det_mhw_sn = np.zeros((40, 4, 231, 1442))
-for i in range(4):
-    seasonal_slice = detected_south_of_60.mhw_events.isel(days=slice(season_bins[i], season_bins[i+1])).values  # Shape: (40, 92, 231, 1442)
-    array_det_mhw_sn[:, i, :, :] = np.mean(seasonal_slice, axis=1)      # Take the mean over the days in each season
+# array_det_mhw_sn = np.zeros((40, 4, 231, 1442))
+# for i in range(4):
+#     seasonal_slice = detected_south_of_60.mhw_events.isel(days=slice(season_bins[i], season_bins[i+1])).values  # Shape: (40, 92, 231, 1442)
+#     array_det_mhw_sn[:, i, :, :] = np.mean(seasonal_slice, axis=1)      # Take the mean over the days in each season
 
 
 # Multiply
-# combine_yr = np.einsum('ijkw,kw', array_det_mhw.values, array_area.values) #shape: (40, 365)
-combine_sn = np.einsum('ijkw,kw', array_det_mhw_sn, array_area.values) #shape: (40, 365)
-# combine_div_yr = np.divide(combine_yr, total_ocean_area_60S.values)
-combine_div_sn = np.divide(combine_sn, total_ocean_area_60S.values)
+combine_yr_1deg = np.einsum('ijk,jk -> i', array_det1deg_mhw, array_area) #shape: (40)
+combine_yr_2deg = np.einsum('ijk,jk -> i', array_det2deg_mhw.values, array_area.values) #shape: (40)
+combine_yr_3deg = np.einsum('ijk,jk -> i', array_det3deg_mhw.values, array_area.values) #shape: (40)
+# combine_sn = np.einsum('ijkw,kw', array_det_mhw_sn, array_area.values) #shape: (40)
+det1deg_area_frac_yr = np.divide(combine_yr_1deg, total_ocean_area_60S.values)
+det2deg_area_frac_yr = np.divide(combine_yr_2deg, total_ocean_area_60S.values)
+det3deg_area_frac_yr = np.divide(combine_yr_3deg, total_ocean_area_60S.values)
+# combine_div_sn = np.divide(combine_sn, total_ocean_area_60S.values)
 
-det_area_frac_yr = np.mean(combine_div_sn, axis=1)   
+# det_area_frac_yr = np.mean(combine_div_sn, axis=1)   
 
 # Spatially averaged MHW cumulative intensity
 # mhw_normalized_by_area_sn = np.divide(intensity_avg_sn, total_ocean_area_60S.values) *100 #in %
@@ -490,40 +507,53 @@ det_area_frac_yr = np.mean(combine_div_sn, axis=1)
 # %% --- PLOT
 years = np.arange(1980, 1980 + 40)  # 1980 to 2019
 season_colors = ['#F39C12', '#E74C3C', '#4A90E2', '#2ECC71']  # summer, fall, winter, spring
+threshold_colors = ['#5A7854', '#8780C6', '#9B2808']  # 1, 2, 3°C
 season_names = ['Summer', 'Fall', 'Winter', 'Spring']
 
 # Linear trend line (1st-degree pol)
-slope, intercept = np.polyfit(years, det_area_frac_yr, 1)
-trend_line = slope * years + intercept
+slope1, intercept1 = np.polyfit(years, det1deg_area_frac_yr, 1)
+trend_line1 = slope1 * years + intercept1
+
+slope2, intercept2 = np.polyfit(years, det2deg_area_frac_yr, 1)
+trend_line2 = slope2 * years + intercept2
+
+slope3, intercept3 = np.polyfit(years, det3deg_area_frac_yr, 1)
+trend_line3 = slope3 * years + intercept3
 
 # Plot
-plt.figure(figsize=(10, 5))
+fig, ax = plt.subplots(figsize=(10, 5))
 # plt.fill_between(years, det_area_frac_yr, alpha=0.2, color='#47455F', label="Annual Mean Area Fraction")
-plt.plot(years, det_area_frac_yr, marker='o', linestyle='-', color='black', linewidth=2, label="Annual Mean")
-plt.plot(years, trend_line, linestyle="--", color='r', linewidth=2, label="Trend Line")
+ax.plot(years, det1deg_area_frac_yr, marker='o', linestyle='-', color=threshold_colors[0], linewidth=2, label="1°C threshold")
+ax.plot(years, trend_line1, linestyle="--", color=threshold_colors[0], linewidth=2)
 
-for season in range(4):  # Loop over all seasons to plot each one
-    mhw_data_toplot = combine_div_sn[:, season]
-    plt.plot(years, mhw_data_toplot, color=season_colors[season], linewidth=1.5, label=season_names[season])
-    # plt.fill_between(years, mhw_data_toplot, alpha=0.3, color=season_colors[season])
+ax.plot(years, det2deg_area_frac_yr, marker='o', linestyle='-', color=threshold_colors[1], linewidth=2, label="2°C threshold")
+ax.plot(years, trend_line2, linestyle="--", color=threshold_colors[1], linewidth=2)
+
+ax.plot(years, det3deg_area_frac_yr, marker='o', linestyle='-', color=threshold_colors[2], linewidth=2, label="3°C threshold")
+ax.plot(years, trend_line3, linestyle="--", color=threshold_colors[2], linewidth=2)
+
+# for season in range(4):  # Loop over all seasons to plot each one
+#     mhw_data_toplot = combine_div_sn[:, season]
+#     plt.plot(years, mhw_data_toplot, color=season_colors[season], linewidth=1.5, label=season_names[season])
+#     # plt.fill_between(years, mhw_data_toplot, alpha=0.3, color=season_colors[season])
 
 # Custom legend
-handles = [
-    plt.Line2D([0], [0], color=season_colors[i], lw=3) for i in range(4)
-] + [
-    plt.Line2D([0], [0], color='black', lw=3),  # Annual Mean
-    plt.Line2D([0], [0], linestyle="--", color='r', lw=3)  # Trend Line
-]
-labels = season_names + ["Annual Mean", "Trend Line"]
-plt.legend(handles=handles, labels=labels, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3, frameon=False)
+# handles = [
+#     plt.Line2D([0], [0], color=season_colors[i], lw=3) for i in range(4)
+# ] + [
+#     plt.Line2D([0], [0], color='black', lw=3),  # Annual Mean
+#     plt.Line2D([0], [0], linestyle="--", color='r', lw=3)  # Trend Line
+# ]
+# labels = season_names + ["Annual Mean", "Trend Line"]
+# plt.legend(handles=handles, labels=labels, loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3, frameon=False)
 
 # Labels and title
-plt.xlabel("Year")
-plt.ylabel('Area fraction')
-plt.title("Areal Fraction of Detected MHWs (South of 60°S - 1980 baseline)")
+ax.set_xlabel("Year")
+ax.set_ylabel('Area fraction')
+ax.set_title("Areal Fraction of Potential MHWs \n South of 60°S - 30yrs baseline (1980-2010)")
 # plt.grid(True)
 
-plt.legend()
+plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=3, frameon=False)
 plt.show()
 
 
@@ -543,7 +573,7 @@ circle = mpath.Path(verts * radius + center)
 ax.set_boundary(circle, transform=ax.transAxes)
 
 # Plot area 
-pcolormesh = area_SO_surf_60S.plot.pcolormesh(
+pcolormesh = area_SO_surf_60S[:, 1:-1].plot.pcolormesh(
     ax=ax, transform=ccrs.PlateCarree(),
     x="lon_rho", y="lat_rho",
     add_colorbar=False, 
@@ -552,11 +582,11 @@ pcolormesh = area_SO_surf_60S.plot.pcolormesh(
     
 
 
-# Colorbar
-if cbar_label:
-    cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
-    cbar.set_label('km2', fontsize=13)
-    cbar.ax.tick_params(labelsize=12)  
+# # Colorbar
+# if cbar_label:
+#     cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
+#     cbar.set_label('km2', fontsize=13)
+#     cbar.ax.tick_params(labelsize=12)  
 
 # Add features
 ax.coastlines(color='black', linewidth=1.5, zorder=1)
