@@ -49,6 +49,7 @@ z_rho = np.load('/home/jwongmeng/work/ROMS/scripts/coords/z_rho.npy')
 
 path_mhw = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/' # drift and bias corrected temperature files
 joel_path ='/home/jwongmeng/work/ROMS/scripts/mhw_krill/' #codes joel
+output_path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 
 # Sizes and dimensions
 years = range(1980, 2020)
@@ -87,27 +88,212 @@ month_names = np.array(['Jan','Feb','Mar', 'Apr', 'May', 'June', 'Jul', 'Aug', '
 
 season_bins = np.array([0, 90, 181, 273, 365]) #defining seasons with days within a year
 season_names = np.array(['DJF (Summer)', 'MAM (Fall)', 'JJA (Winter)', 'SON (Spring)']) #southern ocean!
-# %% SST plot
-file_path = os.path.join(path_mhw, f"temp_DC_BC_surface.nc") # all years - only surf layer (not chunked per latitude)
-ds = xr.open_dataset(file_path)[var][1:, 0:365, :, :]  # only 1980 for test
-ds_sst = ds.mean(dim=['eta_rho', 'xi_rho'])
+# %% --- SST plot
+file_path = os.path.join(path_mhw, f"temp_DC_BC_surface.nc") # all years, only surf layer (full spatial domain)
+ds = xr.open_dataset(file_path)[var][1:, 0:365, :, :]  # 30yrs - 365days per year
+ds_sst = ds.mean(dim=['eta_rho', 'xi_rho']) #Doesn't make any sense to average -> bias +++ 
 
-
+# Plot
 fig, ax = plt.subplots(figsize=(10, 5))
 cmap = cm.get_cmap("YlOrBr", len(years)) 
 for i, year in enumerate(ds_sst.year.values):
-    ds_sst.sel(year=year).plot(color=cmap(i / len(years)), label=str(year))
+    ds.sel(year=year).pcolormesh(color=cmap(i / len(years)), label=str(year))
 
 # Colorbar
 sm = cm.ScalarMappable(cmap=cmap, norm=mcolors.Normalize(vmin=min(years), vmax=max(years)))
 sm.set_array([])
 cbar = fig.colorbar(sm, ax=ax, label="Year")
 
-# Set ticks 
+# Ticks
 ticks = [year for year in range(min(years), max(years)+1) if (year % 5 == 0) or (year == 2019)]
-cbar.set_ticks(ticks)  
-cbar.set_ticklabels([str(year) for year in ticks]) 
-# Final touches
+cbar.set_ticks(ticks)
+cbar.set_ticklabels([str(year) for year in ticks])
+
+ax.set_xlabel('Day of the Year')
+ax.set_ylabel('SST (°C)')
+ax.set_title('Sea Surface Temperature in the Southern Ocean')
+plt.tight_layout()
+plt.show()
+
+
+# %% ---- Climatology
+def calculate_climSST(ieta, baseline):
+
+    print(f"Processing eta {ieta}...")
+
+    # Read data
+    fn = path_mhw + file_var + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
+    ds_original = xr.open_dataset(fn)[var][1:31,0:365,:,:] #Extracts daily data : only 30yr + consider 365 days per year. shape:(30, 365, 35, 1442)
+    print(np.unique(ds_original.lat_rho.values))
+    # ds_original.values[np.isnan(ds_original.values)] = 0 # Set to 0 so that det = False at nans
+    
+    # Calculate SST climatology and threshold
+    ds_avg30yrs = ds_original.mean(dim='year') # 30-year mean 
+
+    # Initialization arrays - shape: (365, 35, 1442)
+    nyears, ndays, nz, nxi = ds_original.shape
+    relative_threshold = np.full((ndays, nz, nxi),np.nan,dtype=np.float32)
+    climatology30yrs = np.full((ndays, nz, nxi),np.nan,dtype=np.float32)
+
+    # Deal with NANs values
+    mask_nanvalues = np.where(np.isnan(ds_avg30yrs.values), False, True)  # Mask: True where valid, False where NaN
+
+    if baseline == 'fixed1980':
+        climatology_sst = ds_original[0, :, :, :]  # Only 1980
+    elif baseline == 'fixed30yrs':
+        # Moving window of 11days - method from Hobday et al. (2016)
+        for dy in range(0,ndays-1): #days index going from 0 to 364
+            if dy<=4:
+                window11d_sst = ds_avg30yrs.isel(day=np.concatenate([np.arange(360+dy,365,1), np.arange(0, dy+6,1)]))
+            elif dy>=360:
+                window11d_sst = ds_avg30yrs.isel(day=np.concatenate([np.arange(dy-5, 365,1), np.arange(0,dy-359,1)]))
+            else:
+                window11d_sst = ds_avg30yrs.isel(day=np.arange(dy-5, dy+6, 1))
+
+            relative_threshold[dy,:, :] = np.percentile(window11d_sst, 90, axis=(0,1)) #90th percentile
+            climatology30yrs[dy,:, :]  = np.nanmedian(window11d_sst, axis=(0,1)) #median -- compute the median along the specified axis, while ignoring NaNs)
+    
+    # Apply mask
+    relative_threshold = np.where(mask_nanvalues, relative_threshold, np.nan) 
+    climatology30yrs = np.where(mask_nanvalues, climatology30yrs, np.nan)
+
+    # Write to dataset
+    dict_vars = {}
+    dict_vars['relative_threshold'] = (["day","nz", "xi_rho"], relative_threshold)
+    dict_vars['climatology'] = (["day","nz", "xi_rho"], climatology30yrs)
+
+    ds_vars = xr.Dataset(
+        data_vars= dict(dict_vars),
+        coords=dict(
+            lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+            lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+            ),
+        attrs = {
+            'relative_threshold': 'Daily climatological relative threshold (90th percentile) - computed using a seasonally varying 11‐day moving window ',
+            'climatology': 'Daily climatology SST - median value obtained from a seasonally varying 11‐day moving window - baseline 1980-2009 (30yrs)'
+            }
+        ) 
+
+    # Save output
+    output_file_clim = os.path.join(output_path_clim, f"clim_thresh_{ieta}.nc")
+    if not os.path.exists(output_file_clim):
+        ds_vars.to_netcdf(output_file_clim, mode='w')  
+    
+    return ds_vars
+
+# Calling function
+results = Parallel(n_jobs=30)(delayed(calculate_climSST)(ieta, baseline) for ieta in range(0, neta)) # calculate climatology for each latitude in parallel - results (list) - ~12min computing
+# %%
+# Initialization 
+clim_sst = np.full((ndays, nz, neta, nxi), False, dtype=np.float32) #dim (365, 35, 434, 1442)
+relative_threshold =  np.full((ndays, nz, neta, nxi), False, dtype=np.float32) #dim (365, 35, 434, 1442)
+
+# Loop over neta and write all eta in same Dataset - aggregation 
+for ieta in range(0, neta):
+    clim_sst[:, :, ieta, :] = results[ieta].climatology  
+    relative_threshold[:, :, ieta, :] = results[ieta].relative_threshold  
+
+
+ds_clim_sst = xr.Dataset(
+    data_vars=dict(clim_sst = (["days", "z_rho", "eta_rho", "xi_rho"], clim_sst)),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+        ),
+    attrs=dict(description='Daily climatology SST - median value obtained from a seasonally varying 11‐day moving window - baseline 1980-2009 (30yrs)'),
+        ) 
+
+
+ds_rel_threshold = xr.Dataset(
+    data_vars=dict(relative_threshold = (["days", "z_rho", "eta_rho", "xi_rho"], relative_threshold)),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+        ),
+    attrs=dict(description='Daily climatological relative threshold (90th percentile) - computed using a seasonally varying 11‐day moving window '),
+        ) 
+
+ds_clim_sst.to_netcdf(f'{output_path_clim}/climSST_all_eta.nc', mode='w') 
+ds_rel_threshold.to_netcdf(f'{output_path_clim}/rel_threshold_all_eta.nc', mode='w') 
+
+# %% ------- PLOT -------
+temp_DC_BC_surface = xr.open_dataset( os.path.join(path_mhw, f"temp_DC_BC_surface.nc"))[var][1:, 0:365, :, :]  # 30yrs - 365days per year
+temp_DC_BC_surface_2019 = temp_DC_BC_surface.sel(year=2019)
+
+ds_clim_sst =xr.open_dataset(f'{output_path_clim}/climSST_all_eta.nc') 
+ds_rel_threshold= xr.open_dataset(f'{output_path_clim}/rel_threshold_all_eta.nc') 
+
+# diff = temp_DC_BC_surface_2019.sel(day=2) - ds_clim_sst.sel(days=2, z_rho=0).clim_sst
+
+plt.figure(figsize=(10, 10))
+ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+# Circular map boundary
+theta = np.linspace(0, 2 * np.pi, 100)
+center, radius = [0.5, 0.5], 0.5
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * radius + center)
+ax.set_boundary(circle, transform=ax.transAxes)
+
+# Plot area 
+# pcolormesh = diff.plot.pcolormesh(
+#     ax=ax, transform=ccrs.PlateCarree(),
+#     x="lon_rho", y="lat_rho",
+#     add_colorbar=False, 
+#     vmin=-5, vmax=5,
+#     cmap='coolwarm'
+# )
+pcolormesh = ds_clim_sst.sel(days=230, z_rho=0).clim_sst.plot.pcolormesh(
+    ax=ax, transform=ccrs.PlateCarree(),
+    x="lon_rho", y="lat_rho",
+    add_colorbar=False, 
+    vmin=-5, vmax=5,
+    cmap='coolwarm')
+
+# Colorbar
+cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
+cbar.set_label('°C', fontsize=13)
+cbar.ax.tick_params(labelsize=12)  
+
+# Add features
+ax.coastlines(color='black', linewidth=1.5, zorder=1)
+ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
+ax.set_facecolor('lightgrey')
+
+# # Legend
+# legend_elements = [
+#     Line2D([0], [0], color='#BBC6A9', lw=6, label=f'Temp < {temp_threshold}°C'),
+#     Line2D([0], [0], color='#BE2323', lw=6, label=f'Temp > {temp_threshold}°C')
+# ]
+# ax.legend(handles=legend_elements, loc='lower left', fontsize=14, borderpad=0.8, frameon=True, bbox_to_anchor=(-0.05, -0.05))
+
+# Title
+ax.set_title(f"Climatology (30yrs) ", fontsize=20, pad=30)
+plt.tight_layout()
+plt.show()
+# ---------------------
+
+
+#%% Plot climatology 
+fn = output_path_clim +  'climSST_all_eta.nc' #dim: (days: 365, z_rho: 35, eta_rho: 434, xi_rho: 1442)
+clim_sst_mean = xr.open_dataset(fn)['clim_sst'][:,0,:,:].mean(dim=['eta_rho', 'xi_rho'])
+
+fig, ax = plt.subplots(figsize=(10, 5))
+cmap = cm.get_cmap("YlOrBr", nz) 
+for depth in range(nz):
+    clim_sst_mean.sel(z_rho=depth).plot(color=cmap(depth / nz), label=str(nz))
+
+# Colorbar
+sm = cm.ScalarMappable(cmap=cmap, norm=mcolors.Normalize(vmin=0, vmax=nz))
+sm.set_array([])
+cbar = fig.colorbar(sm, ax=ax, label="Year")
+
+# Ticks
+# ticks = [year for year in range(0, nz)]
+# cbar.set_ticks(ticks)
+# cbar.set_ticklabels([str(year) for year in ticks])
+
 ax.set_xlabel('Day of the Year')
 ax.set_ylabel('SST (°C)')
 ax.set_title('Sea Surface Temperature in the Southern Ocean')
@@ -116,71 +302,12 @@ plt.show()
 
 
 
-# %% test 90th percentile
-fn = path_mhw + file_var + 'eta200.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-ds_original = xr.open_dataset(fn)[var][1:,0:365,0:1,:].squeeze(axis=2) #dim: (year: 40, day: 365, xi_rho: 1442)
-
-climatology_sst = ds_original.sel(year=slice(1980, 2009)).mean(dim="year") # 30-year mean
-mask = np.where(np.isnan(ds_original[0,0,:]), False, True) #mask representing non-Nan values (True) nan, shape: xi_rho: 1442
-
-# window_size = 11
-# ds_original.rolling(day=window_size, min_periods=1, center=True).construct('window')
-threshold=np.full((ndays, nxi),np.nan,dtype=np.float32)
-
-for dy in range(0,ndays-1): #days index going from 0 to 364
-    if dy<=4:
-        window_sst = climatology_sst.isel(day=np.concatenate([np.arange(360+dy,365,1), np.arange(0, dy+6,1)]))
-    elif dy>=360:
-        window_sst = climatology_sst.isel(day=np.concatenate([np.arange(dy-5, 365,1), np.arange(0,dy-359,1)]))
-    else:
-        window_sst = climatology_sst.isel(day=np.arange(dy-5, dy+6, 1))
-
-    threshold[dy,:] = np.percentile(window_sst, 90, axis=(0,1))
-
-threshold = np.where(mask[None,:]==True, threshold, np.nan)
-
-# Climatology
-output_path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
-def calculate_climSST(ieta, baseline):
-
-    print(f"Processing eta {ieta}...")
-
-    # Read data
-    fn = path_mhw + file_var + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-    ds_original = xr.open_dataset(fn)[var][1:31,0:365,:,:] #Extracts daily data : only 40yr + consider 365 days per year
-    print(np.unique(ds_original.lat_rho.values))
-
-    # Deal with NANs values
-    ds_original.values[np.isnan(ds_original.values)] = 0 # Set to 0 so that det = False at nans
-
-    if baseline == 'fixed1980':
-        climatology_sst = ds_original[0, :, :, :]  # Only 1980
-    elif baseline == 'fixed30yrs':
-        climatology_sst = ds_original.sel(year=slice(1980, 2009)).mean(dim="year") # 30-year mean
-
-    # Save output
-    output_file_clim = os.path.join(output_path_clim, f"climatology_sst{ieta}.nc")
-    if not os.path.exists(output_file_clim):
-        climatology_sst = xr.Dataset(
-            data_vars= dict(clim_sst =(["days", "z_rho", "xi_rho"], climatology_sst.values)),
-            coords=dict(
-                lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-                lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-                ),
-            attrs=dict(description='Climatology SST - baseline 1980-2009 (30yrs)'),
-                ) 
-
-    climatology_sst.to_netcdf(output_file_clim, mode='w')  
-
-# Calling function
-results = Parallel(n_jobs=30)(delayed(calculate_climSST)(ieta, baseline) for ieta in range(0, neta)) # calculate climatology for each latitude in parallel - results (list) - ~12min computing
-
 # %% -------------------------------- LOAD DATA --------------------------------
 # ds = xr.open_dataset(file_path, chunks={"year": 1})[var][1:, 0:365, :, :] # Load one year at a time 
 # ds = xr.open_dataset(file_path)[var][1:2, 0:365, :, :]  # only 1980 for test
 
 # ------ PER LATITUDE
-def detect_absolute_mhw(ieta, baseline):
+def detect_absolute_mhw(ieta, baseline, climatology):
 
     print(f"Processing eta {ieta}...")
 
