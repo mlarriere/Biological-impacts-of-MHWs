@@ -88,236 +88,92 @@ month_names = np.array(['Jan','Feb','Mar', 'Apr', 'May', 'June', 'Jul', 'Aug', '
 
 season_bins = np.array([0, 90, 181, 273, 365]) #defining seasons with days within a year
 season_names = np.array(['DJF (Summer)', 'MAM (Fall)', 'JJA (Winter)', 'SON (Spring)']) #southern ocean!
-# %% --- SST plot
-file_path = os.path.join(path_mhw, f"temp_DC_BC_surface.nc") # all years, only surf layer (full spatial domain)
-ds = xr.open_dataset(file_path)[var][1:, 0:365, :, :]  # 30yrs - 365days per year
-ds_sst = ds.mean(dim=['eta_rho', 'xi_rho']) #Doesn't make any sense to average -> bias +++ 
-
-# Plot
-fig, ax = plt.subplots(figsize=(10, 5))
-cmap = cm.get_cmap("YlOrBr", len(years)) 
-for i, year in enumerate(ds_sst.year.values):
-    ds.sel(year=year).pcolormesh(color=cmap(i / len(years)), label=str(year))
-
-# Colorbar
-sm = cm.ScalarMappable(cmap=cmap, norm=mcolors.Normalize(vmin=min(years), vmax=max(years)))
-sm.set_array([])
-cbar = fig.colorbar(sm, ax=ax, label="Year")
-
-# Ticks
-ticks = [year for year in range(min(years), max(years)+1) if (year % 5 == 0) or (year == 2019)]
-cbar.set_ticks(ticks)
-cbar.set_ticklabels([str(year) for year in ticks])
-
-ax.set_xlabel('Day of the Year')
-ax.set_ylabel('SST (°C)')
-ax.set_title('Sea Surface Temperature in the Southern Ocean')
-plt.tight_layout()
-plt.show()
 
 
-# %% ---- Climatology
-def calculate_climSST(ieta, baseline):
+# # %% ------- PLOT difference (year i - clim) -------
+# temp_DC_BC_surface = xr.open_dataset( os.path.join(path_mhw, f"temp_DC_BC_surface.nc"))[var][1:, 0:365, :, :]  # 30yrs - 365days per year
+# temp_DC_BC_surface_2019 = temp_DC_BC_surface.sel(year=2019)
 
-    print(f"Processing eta {ieta}...")
+# ds_clim_sst =xr.open_dataset(f'{output_path_clim}/climSST_all_eta.nc') 
+# ds_rel_threshold= xr.open_dataset(f'{output_path_clim}/rel_threshold_all_eta.nc') 
 
-    # Read data
-    fn = path_mhw + file_var + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-    ds_original = xr.open_dataset(fn)[var][1:31,0:365,:,:] #Extracts daily data : only 30yr + consider 365 days per year. shape:(30, 365, 35, 1442)
-    print(np.unique(ds_original.lat_rho.values))
-    # ds_original.values[np.isnan(ds_original.values)] = 0 # Set to 0 so that det = False at nans
-    
-    # Calculate SST climatology and threshold
-    ds_avg30yrs = ds_original.mean(dim='year') # 30-year mean 
+# # diff = temp_DC_BC_surface_2019.sel(day=2) - ds_clim_sst.sel(days=2, z_rho=0).clim_sst
 
-    # Initialization arrays - shape: (365, 35, 1442)
-    nyears, ndays, nz, nxi = ds_original.shape
-    relative_threshold = np.full((ndays, nz, nxi),np.nan,dtype=np.float32)
-    climatology30yrs = np.full((ndays, nz, nxi),np.nan,dtype=np.float32)
+# plt.figure(figsize=(10, 10))
+# ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+# ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
-    # Deal with NANs values
-    mask_nanvalues = np.where(np.isnan(ds_avg30yrs.values), False, True)  # Mask: True where valid, False where NaN
+# # Circular map boundary
+# theta = np.linspace(0, 2 * np.pi, 100)
+# center, radius = [0.5, 0.5], 0.5
+# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+# circle = mpath.Path(verts * radius + center)
+# ax.set_boundary(circle, transform=ax.transAxes)
 
-    if baseline == 'fixed1980':
-        climatology_sst = ds_original[0, :, :, :]  # Only 1980
-    elif baseline == 'fixed30yrs':
-        # Moving window of 11days - method from Hobday et al. (2016)
-        for dy in range(0,ndays-1): #days index going from 0 to 364
-            if dy<=4:
-                window11d_sst = ds_avg30yrs.isel(day=np.concatenate([np.arange(360+dy,365,1), np.arange(0, dy+6,1)]))
-            elif dy>=360:
-                window11d_sst = ds_avg30yrs.isel(day=np.concatenate([np.arange(dy-5, 365,1), np.arange(0,dy-359,1)]))
-            else:
-                window11d_sst = ds_avg30yrs.isel(day=np.arange(dy-5, dy+6, 1))
-
-            relative_threshold[dy,:, :] = np.percentile(window11d_sst, 90, axis=(0,1)) #90th percentile
-            climatology30yrs[dy,:, :]  = np.nanmedian(window11d_sst, axis=(0,1)) #median -- compute the median along the specified axis, while ignoring NaNs)
-    
-    # Apply mask
-    relative_threshold = np.where(mask_nanvalues, relative_threshold, np.nan) 
-    climatology30yrs = np.where(mask_nanvalues, climatology30yrs, np.nan)
-
-    # Write to dataset
-    dict_vars = {}
-    dict_vars['relative_threshold'] = (["day","nz", "xi_rho"], relative_threshold)
-    dict_vars['climatology'] = (["day","nz", "xi_rho"], climatology30yrs)
-
-    ds_vars = xr.Dataset(
-        data_vars= dict(dict_vars),
-        coords=dict(
-            lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-            lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-            ),
-        attrs = {
-            'relative_threshold': 'Daily climatological relative threshold (90th percentile) - computed using a seasonally varying 11‐day moving window ',
-            'climatology': 'Daily climatology SST - median value obtained from a seasonally varying 11‐day moving window - baseline 1980-2009 (30yrs)'
-            }
-        ) 
-
-    # Save output
-    output_file_clim = os.path.join(output_path_clim, f"clim_thresh_{ieta}.nc")
-    if not os.path.exists(output_file_clim):
-        ds_vars.to_netcdf(output_file_clim, mode='w')  
-    
-    return ds_vars
-
-# Calling function
-results = Parallel(n_jobs=30)(delayed(calculate_climSST)(ieta, baseline) for ieta in range(0, neta)) # calculate climatology for each latitude in parallel - results (list) - ~12min computing
-# %%
-# Initialization 
-clim_sst = np.full((ndays, nz, neta, nxi), False, dtype=np.float32) #dim (365, 35, 434, 1442)
-relative_threshold =  np.full((ndays, nz, neta, nxi), False, dtype=np.float32) #dim (365, 35, 434, 1442)
-
-# Loop over neta and write all eta in same Dataset - aggregation 
-for ieta in range(0, neta):
-    clim_sst[:, :, ieta, :] = results[ieta].climatology  
-    relative_threshold[:, :, ieta, :] = results[ieta].relative_threshold  
-
-
-ds_clim_sst = xr.Dataset(
-    data_vars=dict(clim_sst = (["days", "z_rho", "eta_rho", "xi_rho"], clim_sst)),
-    coords=dict(
-        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-        ),
-    attrs=dict(description='Daily climatology SST - median value obtained from a seasonally varying 11‐day moving window - baseline 1980-2009 (30yrs)'),
-        ) 
-
-
-ds_rel_threshold = xr.Dataset(
-    data_vars=dict(relative_threshold = (["days", "z_rho", "eta_rho", "xi_rho"], relative_threshold)),
-    coords=dict(
-        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-        ),
-    attrs=dict(description='Daily climatological relative threshold (90th percentile) - computed using a seasonally varying 11‐day moving window '),
-        ) 
-
-ds_clim_sst.to_netcdf(f'{output_path_clim}/climSST_all_eta.nc', mode='w') 
-ds_rel_threshold.to_netcdf(f'{output_path_clim}/rel_threshold_all_eta.nc', mode='w') 
-
-# %% ------- PLOT -------
-temp_DC_BC_surface = xr.open_dataset( os.path.join(path_mhw, f"temp_DC_BC_surface.nc"))[var][1:, 0:365, :, :]  # 30yrs - 365days per year
-temp_DC_BC_surface_2019 = temp_DC_BC_surface.sel(year=2019)
-
-ds_clim_sst =xr.open_dataset(f'{output_path_clim}/climSST_all_eta.nc') 
-ds_rel_threshold= xr.open_dataset(f'{output_path_clim}/rel_threshold_all_eta.nc') 
-
-# diff = temp_DC_BC_surface_2019.sel(day=2) - ds_clim_sst.sel(days=2, z_rho=0).clim_sst
-
-plt.figure(figsize=(10, 10))
-ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
-ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
-# Circular map boundary
-theta = np.linspace(0, 2 * np.pi, 100)
-center, radius = [0.5, 0.5], 0.5
-verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-circle = mpath.Path(verts * radius + center)
-ax.set_boundary(circle, transform=ax.transAxes)
-
-# Plot area 
-# pcolormesh = diff.plot.pcolormesh(
+# # Plot area 
+# # pcolormesh = diff.plot.pcolormesh(
+# #     ax=ax, transform=ccrs.PlateCarree(),
+# #     x="lon_rho", y="lat_rho",
+# #     add_colorbar=False, 
+# #     vmin=-5, vmax=5,
+# #     cmap='coolwarm'
+# # )
+# pcolormesh = ds_clim_sst.sel(days=230, z_rho=0).clim_sst.plot.pcolormesh(
 #     ax=ax, transform=ccrs.PlateCarree(),
 #     x="lon_rho", y="lat_rho",
 #     add_colorbar=False, 
 #     vmin=-5, vmax=5,
-#     cmap='coolwarm'
-# )
-pcolormesh = ds_clim_sst.sel(days=230, z_rho=0).clim_sst.plot.pcolormesh(
-    ax=ax, transform=ccrs.PlateCarree(),
-    x="lon_rho", y="lat_rho",
-    add_colorbar=False, 
-    vmin=-5, vmax=5,
-    cmap='coolwarm')
+#     cmap='coolwarm')
 
-# Colorbar
-cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
-cbar.set_label('°C', fontsize=13)
-cbar.ax.tick_params(labelsize=12)  
+# # Colorbar
+# cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
+# cbar.set_label('°C', fontsize=13)
+# cbar.ax.tick_params(labelsize=12)  
 
-# Add features
-ax.coastlines(color='black', linewidth=1.5, zorder=1)
-ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
-ax.set_facecolor('lightgrey')
+# # Add features
+# ax.coastlines(color='black', linewidth=1.5, zorder=1)
+# ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
+# ax.set_facecolor('lightgrey')
 
-# # Legend
-# legend_elements = [
-#     Line2D([0], [0], color='#BBC6A9', lw=6, label=f'Temp < {temp_threshold}°C'),
-#     Line2D([0], [0], color='#BE2323', lw=6, label=f'Temp > {temp_threshold}°C')
-# ]
-# ax.legend(handles=legend_elements, loc='lower left', fontsize=14, borderpad=0.8, frameon=True, bbox_to_anchor=(-0.05, -0.05))
+# # # Legend
+# # legend_elements = [
+# #     Line2D([0], [0], color='#BBC6A9', lw=6, label=f'Temp < {temp_threshold}°C'),
+# #     Line2D([0], [0], color='#BE2323', lw=6, label=f'Temp > {temp_threshold}°C')
+# # ]
+# # ax.legend(handles=legend_elements, loc='lower left', fontsize=14, borderpad=0.8, frameon=True, bbox_to_anchor=(-0.05, -0.05))
 
-# Title
-ax.set_title(f"Climatology (30yrs) ", fontsize=20, pad=30)
-plt.tight_layout()
-plt.show()
-# ---------------------
+# # Title
+# ax.set_title(f"Climatology (30yrs) ", fontsize=20, pad=30)
+# plt.tight_layout()
+# plt.show()
+# # ---------------------
 
-
-#%% Plot climatology 
-fn = output_path_clim +  'climSST_all_eta.nc' #dim: (days: 365, z_rho: 35, eta_rho: 434, xi_rho: 1442)
-clim_sst_mean = xr.open_dataset(fn)['clim_sst'][:,0,:,:].mean(dim=['eta_rho', 'xi_rho'])
-
-fig, ax = plt.subplots(figsize=(10, 5))
-cmap = cm.get_cmap("YlOrBr", nz) 
-for depth in range(nz):
-    clim_sst_mean.sel(z_rho=depth).plot(color=cmap(depth / nz), label=str(nz))
-
-# Colorbar
-sm = cm.ScalarMappable(cmap=cmap, norm=mcolors.Normalize(vmin=0, vmax=nz))
-sm.set_array([])
-cbar = fig.colorbar(sm, ax=ax, label="Year")
-
-# Ticks
-# ticks = [year for year in range(0, nz)]
-# cbar.set_ticks(ticks)
-# cbar.set_ticklabels([str(year) for year in ticks])
-
-ax.set_xlabel('Day of the Year')
-ax.set_ylabel('SST (°C)')
-ax.set_title('Sea Surface Temperature in the Southern Ocean')
-plt.tight_layout()
-plt.show()
 
 
 
 # %% -------------------------------- LOAD DATA --------------------------------
-# ds = xr.open_dataset(file_path, chunks={"year": 1})[var][1:, 0:365, :, :] # Load one year at a time 
-# ds = xr.open_dataset(file_path)[var][1:2, 0:365, :, :]  # only 1980 for test
-
 # ------ PER LATITUDE
-def detect_absolute_mhw(ieta, baseline, climatology):
+def detect_absolute_mhw(ieta):
+    # ieta =200 #for testing
 
     print(f"Processing eta {ieta}...")
 
     # Read data
     fn = path_mhw + file_var + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-    ds_original = xr.open_dataset(fn)[var][1:,0:365,0:1,:].squeeze(axis=2) #Extracts daily data : only 40yr + consider 365 days per year + only surface
-    print(np.unique(ds_original.lat_rho.values))
+    ds_original = xr.open_dataset(fn)[var][1:,0:365, : ,:]#.squeeze(axis=2) #Extracts daily data : only 40yr + consider 365 days per year
+    ds_original_surf = ds_original.isel(z_rho=0) 
+    print(np.unique(ds_original_surf.lat_rho.values))
+
+    # Dataset initialization
+    nyears, ndays, nxi = ds_original_surf.shape
+    mhw_rel_threshold = np.full((nyears, ndays, nxi), np.nan, dtype=bool)
+    # mhw_abs_threshold = np.full((nyears, ndays, nz, nxi),np.nan,dtype=np.float32)
+    
+    # mhw_rel_threshold = np.memmap('mhw_rel_threshold.dat', dtype='bool', mode='w+', shape=(nyears, ndays, nxi)) #type: numpy.memmap
+    # mhw_rel_threshold[:] = np.nan  # fill with NaN
 
     # Deal with NANs values
-    ds_original.values[np.isnan(ds_original.values)] = 0 # Set to 0 so that det = False at nans
+    ds_original_surf.values[np.isnan(ds_original_surf.values)] = 0 # Set to 0 so that det = False at nans
 
     # # -- TEST --
     # mean_temp = ds_original.mean(dim=['xi_rho'])
@@ -329,80 +185,95 @@ def detect_absolute_mhw(ieta, baseline, climatology):
     # plt.close()  # Close the figure to free memory
     # -----------
 
-    # -- Define Climatology
-    if baseline == 'fixed1980':
-        climatology_sst = ds_original[0, :, :]  # Only 1980
-    elif baseline == 'fixed30yrs':
-        climatology_sst = ds_original.sel(year=slice(1980, 2009)).mean(dim="year") # 30-year mean
+    # -- Climatology
+    output_file_clim = os.path.join(output_path_clim, f"clim_thresh_{ieta}.nc")
+    climatology = xr.open_dataset(output_file_clim)['climatology']
+    climatology_surf = climatology.isel(nz=0) 
 
-    # -- Define Thresholds
+    # if baseline == 'fixed1980':
+    #     climatology_sst = ds_original[0, :, :]  # Only 1980
+    # elif baseline == 'fixed30yrs':
+    #     climatology_sst = ds_original.sel(year=slice(1980, 2009)).mean(dim="year") # 30-year mean
+
+    # -- Thresholds
     absolute_thresholds = [1, 2, 3, 4] # Fixed absolute threshold
+    relative_threshold = xr.open_dataset(output_file_clim)['relative_threshold']# shape:(day: 365, nz: 35, xi_rho: 1442)
+    relative_threshold_surf = relative_threshold.isel(nz=0) 
 
     # -- MHW events detection
     mhw_events = {}
     for thresh in absolute_thresholds:
-        mhw_events[thresh] = np.greater(ds_original.values, thresh)  #Boolean
+        mhw_events[thresh] = np.greater(ds_original_surf.values, thresh)  #Boolean
+    
+    mhw_rel_threshold[:,:,:] = np.greater(ds_original_surf.values, relative_threshold_surf.values) #Boolean
 
     # -- MHW intensity 
-    mhw_intensity = ds_original.values - climatology_sst.values # Anomaly relative to climatology
+    mhw_intensity = ds_original_surf.values - climatology_surf.values # Anomaly relative to climatology
     # mhw_intensity[~mhw_events] = np.nan  # Mask non-MHW values
 
 
+    # Reformating
+    mhw_events_ds = xr.Dataset(
+        data_vars=dict(
+            **{
+                f"mhw_abs_threshold_{thresh}_deg": (["years", "days", "xi_rho"], mhw_events[thresh]) for thresh in absolute_thresholds},
+            mhw_rel_threshold=(["years", "days", "xi_rho"], mhw_rel_threshold), 
+            mhw_intensity=(["years", "days", "xi_rho"], mhw_intensity), 
+            ),
+        coords=dict(
+            lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+            lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+            ),
+        attrs = {
+                'mhw_abs_threshold_i': "Detected events where T°C > absolute threshold  (i°C), boolean array",
+                'mhw_rel_threshold': "Detected events where T°C > relative threshold  (90th percentile), boolean array",
+                'mhw_intensity': 'Intensity of events defined as SST - climatology SST (median value obtained from a seasonally varying 11‐day moving window with 30yrs baseline (1980-2009))'
+                }                
+            ) 
+    
     # Save output
     output_file_eta = os.path.join(output_path, f"det_{ieta}.nc")
     if not os.path.exists(output_file_eta):
-        mhw_events_ds = xr.Dataset(
-            data_vars=dict(
-                **{
-                    f"mhw_events{thresh}": (["years", "days", "xi_rho"], mhw_events[thresh]) for thresh in absolute_thresholds},
-                # mhw_events=(["years", "days", "xi_rho"], mhw_events), 
-                mhw_intensity=(["years", "days", "xi_rho"], mhw_intensity), 
-                ),
-            coords=dict(
-                lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-                lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-                ),
-            attrs=dict(description=description),
-                ) 
-    
         mhw_events_ds.to_netcdf(output_file_eta, mode='w')  
 
 
-    return mhw_events, mhw_intensity #at the end - list of "shape": eta, years, days, xi
+    return mhw_events_ds 
     
 # Calling function
-results = Parallel(n_jobs=30)(delayed(detect_absolute_mhw)(ieta, baseline) for ieta in range(0, neta)) # detects extremes for each latitude in parallel - results (list) - ~12min computing
+results = Parallel(n_jobs=30)(delayed(detect_absolute_mhw)(ieta) for ieta in range(0, neta)) # detects extremes for each latitude in parallel - results (list) - ~5min computing
 
 # %% Aggregating the different eta values
-# Extract detection and intensity of mhw
-mhw_events, mhw_intensity = zip(*results) 
-
 # Initialization 
-absolute_thresholds = [1, 2, 3, 4] # Fixed absolute threshold
-
-# det = np.full((nyears, ndays, neta, nxi), False, dtype=np.bool_) #dim (40, 365, 1, 434, 1442)
-det = {thresh: np.full((nyears, ndays, neta, nxi), False, dtype=np.bool_) for thresh in absolute_thresholds}  # Shape: (40, 365, neta, nxi)
-det_intensity = np.full((nyears, ndays, neta, nxi), False, dtype=np.float32) #dim (40, 365, 1, 434, 1442)
+det_abs = {thresh: np.full((nyears, ndays, neta, nxi), False, dtype=np.bool_) for thresh in absolute_thresholds}  # Shape: (40, 365, neta, nxi)
+det_rel = np.full((nyears, ndays, neta, nxi), False, dtype=np.bool_)  # Shape: (40, 365, neta, nxi)
+det_intensity = np.full((nyears, ndays, neta, nxi), False, dtype=np.float32) #Shape: (40, 365, neta, nxi)
 
 # Loop over neta and write all eta in same Datatset - aggregation 
 for ieta in range(0,neta):
     for thresh in absolute_thresholds:
-        det[thresh][:, :, ieta, :] = mhw_events[ieta][thresh]  # Store detection for each threshold
-    # det[:,:,ieta,:] = mhw_events[ieta]
-    det_intensity[:,:,ieta,:] = mhw_intensity[ieta]
+        det_abs[thresh][:, :, ieta, :] = results[ieta][f"mhw_abs_threshold_{thresh}_deg"]  # Store detection for each threshold
+    
+    det_rel[:,:,ieta,:] = results[ieta]["mhw_rel_threshold"]
+    det_intensity[:,:,ieta,:] = results[ieta]["mhw_intensity"]
 
 det_ds = xr.Dataset(
-    data_vars = dict(
-         **{f"mhw_events{thresh}": (["years", "days", "eta_rho", "xi_rho"], det[thresh]) for thresh in absolute_thresholds},
-        # mhw_events = (["years","days","eta_rho", "xi_rho"], det),
-        mhw_intensity=(["years", "days", "eta_rho", "xi_rho"], det_intensity)
+    data_vars=dict(
+        **{
+            f"mhw_abs_threshold_{thresh}_deg": (["years", "days", "eta_rho", "xi_rho"], det_abs[thresh]) for thresh in absolute_thresholds},
+        mhw_rel_threshold=(["years", "days", "eta_rho", "xi_rho"], det_rel), 
+        mhw_intensity=(["years", "days", "eta_rho", "xi_rho"], det_intensity), 
         ),
-    coords = dict(
-            lon_rho = (["eta_rho","xi_rho"],ds_roms.lon_rho.values), 
-            lat_rho = (["eta_rho","xi_rho"],ds_roms.lat_rho.values)
-            ),
-    attrs = dict(description = description)
-)
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+        ),
+    attrs = {
+            'mhw_abs_threshold_i': "Detected events where T°C > absolute threshold  (i°C), boolean array",
+            'mhw_rel_threshold': "Detected events where T°C > relative threshold  (90th percentile), boolean array",
+            'mhw_intensity': 'Intensity of events defined as SST - climatology SST (median value obtained from a seasonally varying 11‐day moving window with 30yrs baseline (1980-2009))'
+            }                
+        ) 
+
 
 # Save output
 output_file = os.path.join(output_path, f"det_all_eta.nc")
@@ -410,6 +281,186 @@ if not os.path.exists(output_file):
     det_ds.to_netcdf(output_file, mode='w') 
 
 # del det, results
+
+# %% ------------------ Duration
+# According to Hobday et al. (2016) - MHW needs to persist for at least five days (5days of TRUE)
+det_ds = xr.open_dataset(os.path.join(output_path, "det_all_eta.nc"))
+det_rel_threshold = det_ds.mhw_rel_threshold # shape: (years: 40, days: 365, eta_rho: 434, xi_rho: 1442). Boolean
+
+# ----- MANUAL
+# Initialisation arrays for the counting  
+# det_rel_threshold_manual = det_rel_threshold.isel(years=30, eta_rho=200, xi_rho=1000) # for testing
+# nyears, ndays, neta, nxi = det_rel_threshold.shape
+# mhw_duration_manual = np.zeros_like(det_rel_threshold_manual, dtype=int) #to track consecutives days of MHW (True)
+# non_mhw_duration_manual = np.zeros_like(det_rel_threshold_manual, dtype=int)  #to track consecutives days of non-MHW (False)
+
+# dsi = det_rel_threshold_manual[:].values  # Boolean array for the current (yr, ieta, jxi)
+
+# # Find the transitions (True to False or False to True) using numpy
+# transitions = np.diff(dsi.astype(int))  # -1= True to False, 1, False to True
+# mhw_start_idx = np.where(transitions == 1)[0]+1  # MHW start (transition: False to True)
+# mhw_end_idx = np.where(transitions == -1)[0] +1 # MHW end (transition: True to False)
+
+# if dsi[0]: # If 1st value = True (MHW)
+#     mhw_start_idx = np.insert(mhw_start_idx, 0, 0)
+
+# if dsi[-1]: # If last value = True (MHW)
+#     mhw_end_idx = np.append(mhw_end_idx, len(dsi))
+
+# # Duration
+# for idx_start, idx_end in zip(mhw_start_idx, mhw_end_idx):
+#     mhw_duration_manual[idx_start:idx_end] = idx_end - idx_start 
+
+# non_mhw_start_idx = mhw_end_idx
+# non_mhw_end_idx = mhw_start_idx[1:]
+
+# for idx_start, idx_end in zip(non_mhw_start_idx, non_mhw_end_idx):
+#     non_mhw_duration_manual[idx_start:idx_end] = idx_end - idx_start 
+
+
+# ------- Parallelizing - dask
+det_rel_threshold = det_rel_threshold.chunk({'years': 1, 'eta_rho': 100, 'xi_rho': 100, 'days': -1}) #chunk for fast computing
+def compute_mhw_durations(arr):
+    """
+    Compute duration of consecutive Trues (MHW) and Falses (non-MHW) in a 1D boolean array.
+    Return two arrays of same shape: mhw_durations, non_mhw_durations.
+    """
+    n = arr.shape[0]
+    durations = np.zeros(n, dtype=np.int32)
+    
+    if n == 0:  # Empty case
+        return durations, durations
+
+    # Find run starts and lengths
+    is_diff = np.diff(arr.astype(int), prepend=~arr[0]) != 0  # Detect transitions
+    run_ids = np.cumsum(is_diff)  # Label runs
+    run_lengths = np.bincount(run_ids, minlength=run_ids[-1] + 1)  # Length of each run
+
+    # Map lengths back
+    durations = run_lengths[run_ids]
+
+    mhw_durations = np.where(arr, durations, 0)
+    non_mhw_durations = np.where(~arr, durations, 0)
+
+    return mhw_durations, non_mhw_durations
+
+import dask.array as da
+mhw_durations, non_mhw_durations = xr.apply_ufunc(compute_mhw_durations, det_rel_threshold,
+                                                  input_core_dims=[['days']], output_core_dims=[['days'], ['days']],
+                                                  vectorize=True,  # Apply along all other dimensions (years, eta, xi)
+                                                  dask='parallelized', output_dtypes=[int, int])          
+
+            
+#%% Combination when allowed 
+
+# --- Manually 
+
+# dask_mhw_duration_to_plot = mhw_durations.isel(eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)
+# dask_non_mhw_duration_to_plot = non_mhw_durations.isel(eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)
+
+# # Dask to numpy arrays + flatten  to handle last days of year i with beginning of year i+1
+# mhw_duration_values = dask_mhw_duration_to_plot.compute() #.values.flatten() 
+# non_mhw_duration_values = dask_non_mhw_duration_to_plot.compute() #.values.flatten() 
+
+
+# df = pd.DataFrame({
+#     'mhw': mhw_duration_values,
+#     'non_mhw': non_mhw_duration_values
+# })
+
+
+# # Mark where MHW events occur (mhw > 0)
+# df['mhw_event'] = df['mhw'] >= 5
+
+# # Iterate through the 'mhw' column to extend events based on the condition
+# for i in range(1, len(df)-1):  # Start from 1 and end at len(df)-1 to avoid boundary issues
+#     # Gap of 1 day
+#     if df['non_mhw'][i] == 1:
+#         if df['mhw'][i-1]>=5 and df['mhw'][i+1]>=5:
+#             df.loc[i, 'mhw_event'] = True  # Extend the MHW event forward
+
+#     # Gap of 2days
+#     if df['non_mhw'][i] == 2:
+#         if df['mhw'][i-2]>=5 and df['mhw'][i+2]>=5:
+#             df.loc[i, 'mhw_event'] = True  # Extend the MHW event forward
+
+
+mhw_event_dask = mhw_durations >= 5
+
+# Gap of 1 day
+gap_1_day = (non_mhw_durations == 1) & (mhw_event_dask.shift({'days': 1}).astype(bool)) & (mhw_event_dask.shift({'days': -1}).astype(bool))
+gap_1_day = gap_1_day.astype(bool)
+
+# Gap of 2 days
+gap_2_day = (non_mhw_durations == 2) & (mhw_event_dask.shift({'days': 2}).astype(bool)) & (mhw_event_dask.shift({'days': -2}).astype(bool))
+gap_2_day = gap_2_day.astype(bool)
+
+# Combine events
+mhw_event_extended_dask = mhw_event_dask | gap_1_day | gap_2_day
+mhw_event_extended_dask = mhw_event_extended_dask.astype(bool)
+
+# Recalcualte duration
+mhw_durations_extended, _ = xr.apply_ufunc(compute_mhw_durations, mhw_event_extended_dask,
+                                           input_core_dims=[['days']], output_core_dims=[['days'], ['days']],  # Return two arrays of same shape
+                                           vectorize=True,  # Apply function along all other dimensions (years, eta_rho, xi_rho)
+                                           dask='parallelized',  # Enable Dask parallelization
+                                           output_dtypes=[int, int]  # Specify output types
+                                        )
+
+
+# %% Visualisation 
+year_to_plot = 18
+eta_rho_to_plot = 200 
+xi_rho_to_plot = 1000  
+
+# Before combining events 
+dask_mhw_duration_to_plot = mhw_durations.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+dask_non_mhw_duration_to_plot = non_mhw_durations.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+
+# After
+mhw_event_extended_dask_to_plot = mhw_durations_extended.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+
+# load data
+mhw_durations_selected = dask_mhw_duration_to_plot.compute()
+non_mhw_durations_selected = dask_non_mhw_duration_to_plot.compute()
+mhw_event_extended_selected = mhw_event_extended_dask_to_plot.compute()
+
+lon = mhw_event_extended_selected.lon_rho.item()
+lat = mhw_event_extended_selected.lat_rho.item()
+yr = mhw_event_extended_selected.lat_rho.item()
+
+fig, ax = plt.subplots(figsize=(15, 5))  # One axis for both plots
+ax.plot(dask_non_mhw_duration_to_plot, label="Non-MHW", color='#A2B36B',linestyle=":")
+ax.plot(dask_mhw_duration_to_plot, label="MHW", color='#DC6D04', linestyle="--")
+ax.plot(mhw_event_extended_dask_to_plot, label="Extended MHW", color='#780000', linestyle="-")
+ax.set_title(f'Detection of events \nLocation: ({round(lat)}°S, {round(lon)}°E) in {1980+year_to_plot} ')
+ax.set_xlabel('Days')
+ax.set_ylabel('Duration (days)')
+ax.legend()
+plt.tight_layout()
+plt.show()
+
+   
+# %%
+# To dataset
+ds_mhw_duration = xr.Dataset(
+    data_vars=dict(mhw_duration=(["years", "days", "eta_rho", "xi_rho"], mhw_duration)),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+        ),
+    attrs = {'mhw_duration': "Number of consecutives days where there is a MHW"}                
+    ) 
+
+ds_non_mhw_duration = xr.Dataset(
+    data_vars=dict(non_mhw_duration=(["years", "days", "eta_rho", "xi_rho"], non_mhw_duration)),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+        ),
+    attrs = {'non_mhw_duration': "Number of consecutives days where there isn't a MHW"}                
+    ) 
+
 
 # %% ------------------ Spatial Average
 det_ds = xr.open_dataset(os.path.join(output_path, "det_all_eta.nc"))
