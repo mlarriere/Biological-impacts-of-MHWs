@@ -30,10 +30,10 @@ import matplotlib.path as mpath
 import matplotlib.colors as mcolors
 from matplotlib.lines import Line2D
 
-import datetime
-import cftime
+import time
 
 import dask
+import dask.array as da
 from dask.distributed import Client
 from joblib import Parallel, delayed
 
@@ -287,37 +287,6 @@ if not os.path.exists(output_file):
 det_ds = xr.open_dataset(os.path.join(output_path, "det_all_eta.nc"))
 det_rel_threshold = det_ds.mhw_rel_threshold # shape: (years: 40, days: 365, eta_rho: 434, xi_rho: 1442). Boolean
 
-# ----- MANUAL
-# Initialisation arrays for the counting  
-det_rel_threshold_manual = det_rel_threshold.isel(years=30, eta_rho=200, xi_rho=1000) # for testing
-# nyears, ndays, neta, nxi = det_rel_threshold.shape
-# mhw_duration_manual = np.zeros_like(det_rel_threshold_manual, dtype=int) #to track consecutives days of MHW (True)
-# non_mhw_duration_manual = np.zeros_like(det_rel_threshold_manual, dtype=int)  #to track consecutives days of non-MHW (False)
-
-# dsi = det_rel_threshold_manual[:].values  # Boolean array for the current (yr, ieta, jxi)
-
-# # Find the transitions (True to False or False to True) using numpy
-# transitions = np.diff(dsi.astype(int))  # -1= True to False, 1, False to True
-# mhw_start_idx = np.where(transitions == 1)[0]+1  # MHW start (transition: False to True)
-# mhw_end_idx = np.where(transitions == -1)[0] +1 # MHW end (transition: True to False)
-
-# if dsi[0]: # If 1st value = True (MHW)
-#     mhw_start_idx = np.insert(mhw_start_idx, 0, 0)
-
-# if dsi[-1]: # If last value = True (MHW)
-#     mhw_end_idx = np.append(mhw_end_idx, len(dsi))
-
-# # Duration
-# for idx_start, idx_end in zip(mhw_start_idx, mhw_end_idx):
-#     mhw_duration_manual[idx_start:idx_end] = idx_end - idx_start 
-
-# non_mhw_start_idx = mhw_end_idx
-# non_mhw_end_idx = mhw_start_idx[1:]
-
-# for idx_start, idx_end in zip(non_mhw_start_idx, non_mhw_end_idx):
-#     non_mhw_duration_manual[idx_start:idx_end] = idx_end - idx_start 
-
-
 # ------- Parallelizing - dask
 det_rel_threshold = det_rel_threshold.chunk({'years': 1, 'eta_rho': 100, 'xi_rho': 100, 'days': -1}) #chunk for fast computing
 det_rel_threshold_stacked = det_rel_threshold.stack(time=('years', 'days')) #consider time as continuous
@@ -347,53 +316,16 @@ def compute_mhw_durations(arr):
 
     return mhw_durations, non_mhw_durations
 
-import dask.array as da
 mhw_durations_stacked, non_mhw_durations_stacked = xr.apply_ufunc(compute_mhw_durations, det_rel_threshold_stacked,
                                                   input_core_dims=[['time']], output_core_dims=[['time'], ['time']],
                                                   vectorize=True,  # Apply along all other dimensions (years, eta, xi)
                                                   dask='parallelized', output_dtypes=[int, int])     
-
-
-#%% Combination when allowed 
-
-# --- Manually 
-
-# dask_mhw_duration_to_plot = mhw_durations.isel(eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)
-# dask_non_mhw_duration_to_plot = non_mhw_durations.isel(eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)
-
-# # Dask to numpy arrays + flatten  to handle last days of year i with beginning of year i+1
-# mhw_duration_values = dask_mhw_duration_to_plot.compute() #.values.flatten() 
-# non_mhw_duration_values = dask_non_mhw_duration_to_plot.compute() #.values.flatten() 
-
-
-# df = pd.DataFrame({
-#     'mhw': mhw_duration_values,
-#     'non_mhw': non_mhw_duration_values
-# })
-
-
-# # Mark where MHW events occur (mhw > 0)
-# df['mhw_event'] = df['mhw'] >= 5
-
-# # Iterate through the 'mhw' column to extend events based on the condition
-# for i in range(1, len(df)-1):  # Start from 1 and end at len(df)-1 to avoid boundary issues
-#     # Gap of 1 day
-#     if df['non_mhw'][i] == 1:
-#         if df['mhw'][i-1]>=5 and df['mhw'][i+1]>=5:
-#             df.loc[i, 'mhw_event'] = True  # Extend the MHW event forward
-
-#     # Gap of 2days
-#     if df['non_mhw'][i] == 2:
-#         if df['mhw'][i-2]>=5 and df['mhw'][i+2]>=5:
-#             df.loc[i, 'mhw_event'] = True  # Extend the MHW event forward
-
-
-mhw_event_dask = mhw_durations_stacked >= 5 # xarray.DataArray'mhw_rel_threshold' (years: 40, eta_rho: 434, xi_rho: 1442, days: 365)
+# MHW last at least 5 days
+mhw_event_dask = mhw_durations_stacked >= 5 
 
 # Gap of 1 day
 gap_1_day = (non_mhw_durations_stacked == 1) & (mhw_event_dask.shift(time=1).astype(bool)) & (mhw_event_dask.shift(time=-1).astype(bool))
 gap_1_day = gap_1_day.astype(bool)
-
 
 # Gap of 2 days
 gap_2_day = (non_mhw_durations_stacked == 2) & (mhw_event_dask.shift(time=2).astype(bool)) & (mhw_event_dask.shift(time=-2).astype(bool))
@@ -402,95 +334,6 @@ gap_2_day = gap_2_day.astype(bool)
 # Combine events
 mhw_event_extended_dask = mhw_event_dask | gap_1_day | gap_2_day
 mhw_event_extended_dask = mhw_event_extended_dask.astype(bool)
-
-# Need to consider last days - 1st days of the year 10 days window
-# ----
-# test= mhw_durations.isel(years=slice(37,39), eta_rho=200, xi_rho=1000)#.compute().values.flatten() xarray.DataArray 'mhw_rel_threshold' (years: 2, days: 365)
-# # test[359:371]
-# test_end=test[:, -6:].shift(years=1).compute() #values: array([[nan, nan, nan, nan, nan, nan], [29., 29., 29., 29., 29.,  0.]])
-# test_end.isel(years=slice(1,2)) #[29., 29., 29., 29., 29.,  0.]]
-# test_begin= test[:, :6].shift(years=-1).compute() #values: array([[ 6.,  6.,  6.,  6.,  6.,  6.], [nan, nan, nan, nan, nan, nan]])
-# test_begin.isel(years=slice(0, -1)) # array([[6., 6., 6., 6., 6., 6.]])
-# # ----
-
-# # Last 6 days of each year
-# end_of_year_mhw = mhw_durations[:, :, :, -6:] #xarray.DataArray'mhw_rel_threshold' (years: 40, eta_rho: 434, xi_rho: 1442, days: 6)
-# end_of_year_non_mhw = non_mhw_durations[:, :, :, -6:]
-
-# # First 6 days of next year (shifted)
-# begin_of_year_mhw = mhw_durations.shift(years=-1)[:, :, :, :6]
-# begin_of_year_non_mhw = non_mhw_durations.shift(years=-1)[:, :, :, :6]
-
-
-# # -----
-# test_mhw_end= end_of_year_mhw.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([29, 29, 29, 29, 29,  0, 30, 30, 30, 30, 30,  0])
-# test_non_mhw_end= end_of_year_non_mhw.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1])
-# test_mhw_begin= begin_of_year_mhw.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([ 6.,  6.,  6.,  6.,  6.,  6., 34., 34., 34., 34., 34., 34.])
-# test_non_mhw_begin= begin_of_year_non_mhw.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.])
-# # -----
-
-# # At least 5 days duration to be a valid MHW
-# end_of_year_mhw_valid = end_of_year_mhw >= 5 # (years: 40, eta_rho: 434, xi_rho: 1442, days: 6)
-# begin_of_year_mhw_valid = begin_of_year_mhw >= 5
-
-# # ----
-# test_end_valid = end_of_year_mhw_valid.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([ True,  True,  True,  True,  True, False,  True,  True,  True, True,  True, False])
-# test_begin_valid = begin_of_year_mhw_valid.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([ True,  True,  True,  True,  True,  True,  True,  True,  True, True,  True,  True])
-# # ----
-
-# # Gap allowed
-# gap_1_day_end_year = (end_of_year_non_mhw == 1) & end_of_year_mhw_valid.shift(days=1) & end_of_year_mhw_valid.shift(days=-1) #xarray.DataArray'mhw_rel_threshold' (years: 40, eta_rho: 434, xi_rho: 1442, days: 6)
-# gap_1_day_end_year = gap_1_day_end_year.astype(bool)
-
-# gap_1_day_begin_year = (begin_of_year_non_mhw == 1) & begin_of_year_mhw_valid.shift(days=1) & begin_of_year_mhw_valid.shift(days=-1)
-# gap_1_day_begin_year = gap_1_day_begin_year.astype(bool)
-
-# gap_2_day_end_year = (end_of_year_non_mhw == 2) & end_of_year_mhw_valid.shift(days=2) & end_of_year_mhw_valid.shift(days=-2)
-# gap_2_day_end_year = gap_2_day_end_year.astype(bool)
-
-# gap_2_day_begin_year = (begin_of_year_non_mhw == 2) & begin_of_year_mhw_valid.shift(days=2) & begin_of_year_mhw_valid.shift(days=-2)
-# gap_2_day_begin_year = gap_2_day_begin_year.astype(bool)
-
-# # ----gap_1_day = (non_mhw_durations == 1) & (mhw_event_dask.shift({'days': 1}).astype(bool)) & (mhw_event_dask.shift({'days': -1}).astype(bool))
-
-# test_gap1d_end = (test_non_mhw_end==1) & (test_end_valid.shift(1).astype(bool)) & (test_end_valid.shift({'days': -1}).astype(bool))
-
-# test_begin_valid = begin_of_year_mhw_valid.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten() #array([ True,  True,  True,  True,  True,  True,  True,  True,  True, True,  True,  True])
-# # ----
-
-# # Combine 
-# gap_end_year = mhw_event_dask | gap_1_day_end_year | gap_2_day_end_year #xarray.DataArray'mhw_rel_threshold' (years: 40, eta_rho: 434, xi_rho: 1442, days: 6)
-# gap_end_year = gap_end_year.astype(bool)
-
-# gap_begin_year =  mhw_event_dask | gap_1_day_begin_year | gap_2_day_begin_year
-# gap_begin_year = gap_begin_year.astype(bool)
-
-
-# # Recalcualte duration
-# test, _ = xr.apply_ufunc(compute_mhw_durations, gap_end_year,
-#                                            input_core_dims=[['days']], output_core_dims=[['days'], ['days']],  # Return two arrays of same shape
-#                                            vectorize=True,  # Apply function along all other dimensions (years, eta_rho, xi_rho)
-#                                            dask='parallelized',  # Enable Dask parallelization
-#                                            output_dtypes=[int, int]  # Specify output types
-#                                         )
-# # ----
-# test2 = test.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten()
-# # ----
-# # gap_between_years = gap_1_day_end_year | gap_1_day_begin_year
-# # test_gap_between_years = gap_between_years.isel(years=slice(37,39), eta_rho=200, xi_rho=1000).compute().values.flatten()
-
-# # Add to dataset
-# mhw_event_extended_dask[:, :, :, :6] = xr.where(
-#     gap_begin_year,  # If the gap condition is met, combine the events
-#     True,  # Mark the first days of Year i+1 as part of the same event
-#     mhw_event_extended_dask[:, :, :, :6]  # Otherwise, keep the original values
-# )
-
-# mhw_event_extended_dask[:, :, :, -6:] = xr.where(
-#     gap_end_year,  # If the gap condition is met, combine the events
-#     True,  # Mark the last days of Year i as part of the same event
-#     mhw_event_extended_dask[:, :, :, -6:]  # Otherwise, keep the original values
-# )
 
 # Recalcualte duration
 mhw_durations_extended_stacked, _ = xr.apply_ufunc(compute_mhw_durations, mhw_event_extended_dask,
@@ -505,32 +348,269 @@ mhw_durations_extended = mhw_durations_extended_stacked.unstack('time')
 mhw_durations = mhw_durations_stacked.unstack('time')
 non_mhw_durations = non_mhw_durations_stacked.unstack('time')
             
-# Save output
-output_file = os.path.join(output_path, f"mhw_durations_extended.nc")
+# Rename
+mhw_durations_extended_renamed = mhw_durations_extended.rename("durations_extended")
+
+# %% ---- NO DASK
+
+def compute_mhw_durations(arr):
+    """
+    Compute duration of consecutive Trues (MHW) and Falses (non-MHW) in a 1D boolean array.
+    Return two arrays of same shape: mhw_durations, non_mhw_durations.
+    """
+    n = arr.shape[0]
+    durations = np.zeros(n, dtype=np.int32)
+    
+    if n == 0:  # Empty case
+        return durations, durations
+
+    # Find run starts and lengths
+    is_diff = np.diff(arr.astype(int), prepend=~arr[0]) != 0  # Detect transitions
+    run_ids = np.cumsum(is_diff)  # Label runs
+    run_lengths = np.bincount(run_ids, minlength=run_ids[-1] + 1)  # Length of each run
+
+    # Map lengths back
+    durations = run_lengths[run_ids]
+
+    mhw_durations = np.where(arr, durations, 0)
+    non_mhw_durations = np.where(~arr, durations, 0)
+
+    return mhw_durations, non_mhw_durations
+
+def compute_mhw_durations_eta(ieta):
+
+    print(f'Processing {ieta}')
+    start_time = time.time()
+    # ieta=200
+    
+    # Read data
+    det_ds = xr.open_dataset(os.path.join(output_path, "det_all_eta.nc")).isel(eta_rho=ieta)
+    det_rel_threshold = det_ds.mhw_rel_threshold # shape: (years: 40, days: 365, eta_rho: 434, xi_rho: 1442). Boolean
+    det_rel_threshold_stacked = det_rel_threshold.stack(time=('years', 'days')) #consider time as continuous
+    det_rel_threshold_stacked = det_rel_threshold_stacked.transpose('time', 'xi_rho')
+
+
+    # Initialization
+    n_time, n_xi = det_rel_threshold_stacked.shape
+    mhw_durations_stacked = np.zeros((n_time, n_xi), dtype=np.int32)
+    non_mhw_durations_stacked = np.zeros((n_time, n_xi), dtype=np.int32)
+
+
+    # Calcualting duration
+    for j in range(n_xi):
+        bool_series = det_rel_threshold_stacked[:, j].values  # 1D time series 
+        mhw_dur, non_mhw_dur = compute_mhw_durations(bool_series)
+        mhw_durations_stacked[:, j] = mhw_dur
+        non_mhw_durations_stacked[:, j] = non_mhw_dur
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Processing time for eta {ieta}: {elapsed_time:.2f} seconds")
+
+    # Into DataArrays
+    mhw_durations_da = xr.DataArray(
+        mhw_durations_stacked,
+        coords=det_rel_threshold_stacked.coords,
+        dims=det_rel_threshold_stacked.dims,
+        name="mhw_durations"
+    )
+
+    non_mhw_durations_da = xr.DataArray(
+        non_mhw_durations_stacked,
+        coords=det_rel_threshold_stacked.coords,
+        dims=det_rel_threshold_stacked.dims,
+        name="non_mhw_durations"
+    )
+    return mhw_durations_da, non_mhw_durations_da
+
+results = Parallel(n_jobs=30)(delayed(compute_mhw_durations_eta)(ieta) for ieta in range(0, neta)) #computing time per eta ~ 2-5s,  in total ~4-5min
+
+mhw_durations_stacked, non_mhw_durations_stacked =zip(*results)
+
+# Initialisation 
+mhw_duration_all_eta_stacked_before= np.full((nyears* ndays, neta, nxi), False, dtype=np.int32)  # Shape: (40* 365, neta, nxi)
+non_mhw_duration_all_eta_stacked_before= np.full((nyears* ndays, neta, nxi), False, dtype=np.int32)  # Shape: (40* 365, neta, nxi)
+
+# Aggregation 
+for ieta in range(0,neta):
+    mhw_duration_all_eta_stacked_before[:,ieta,:] = mhw_durations_stacked[ieta]
+    non_mhw_duration_all_eta_stacked_before[:,ieta,:] = non_mhw_durations_stacked[ieta]
+
+# Reformat with years and days in dim
+mhw_duration_all_eta_stacked_before_reshaped = mhw_duration_all_eta_stacked_before.reshape(nyears, ndays, neta, nxi)
+non_mhw_duration_all_eta_stacked_before_reshaped = non_mhw_duration_all_eta_stacked_before.reshape(nyears, ndays, neta, nxi)
+
+# Into Datasets
+ds_mhw_duration_stacked_before = xr.Dataset(
+    data_vars=dict(
+        mhw_duration=(["years", "days",  "eta_rho", "xi_rho"], mhw_duration_all_eta_stacked_before_reshaped)
+    ),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
+    ),
+    attrs={
+        'mhw_duration': "Duration of event > 90th perc (not finished), int32 array"
+    }
+)
+
+ds_non_mhw_duration_stacked_before = xr.Dataset(
+    data_vars=dict(
+        non_mhw_duration=(["years", "days", "eta_rho", "xi_rho"], non_mhw_duration_all_eta_stacked_before_reshaped)
+    ),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
+    ),
+    attrs={
+        'non_mhw_duration': "Duration of event < 90th perc (not finished), int32 array"
+    }
+)
+
+
+# %% Combining MHW events when allowed
+def gap_between_events(ieta, mhw, non_mhw):
+
+# mhw = mhw_durations_stacked
+# non_mhw = non_mhw_durations_stacked
+# for ieta in range(0, neta):
+
+    print(f'Processing {ieta}')
+    start_time = time.time()
+
+    # MHW last at least 5 days
+    mhw_event = mhw[ieta] >= 5 
+    
+    # Gap of 1 day
+    gap_1_day = (non_mhw[ieta] == 1) & (mhw_event.shift(time=1).astype(bool)) & (mhw_event.shift(time=-1).astype(bool)) #computation time ~4min
+    gap_1_day = gap_1_day.astype(bool)
+
+    # Gap of 2 days
+    gap_2_day = (non_mhw[ieta] == 2) & (mhw_event.shift(time=2).astype(bool)) & (mhw_event.shift(time=-2).astype(bool)) #computation time ~4min
+    gap_2_day = gap_2_day.astype(bool)
+
+    # Combine events
+    mhw_event_combined_stacked = mhw_event | gap_1_day | gap_2_day
+    mhw_event_combined_stacked = mhw_event_combined_stacked.astype(bool)
+
+    # Initialization
+    n_time, n_xi = mhw_event_combined_stacked.shape
+    a = np.zeros((n_time, n_xi), dtype=np.int32)
+    non_a = np.zeros((n_time, n_xi), dtype=np.int32)
+
+    # Recalculating duration    
+    for j in range(n_xi):
+        bool_series = mhw_event_combined_stacked[:, j].values  # 1D time series
+        mhw_dur_ext, non_mhw_dur_ext = compute_mhw_durations(bool_series)
+        a[:, j] = mhw_dur_ext
+        non_a[:, j] = non_mhw_dur_ext
+
+   # Into DataArrays
+    mhw_durations_stacked_da = xr.DataArray(
+        a,
+        coords=mhw_event_combined_stacked.coords,
+        dims=mhw_event_combined_stacked.dims,
+        name="mhw_durations"
+    )
+
+    non_mhw_durations_stacked_da = xr.DataArray(
+        non_a,
+        coords=mhw_event_combined_stacked.coords,
+        dims=mhw_event_combined_stacked.dims,
+        name="non_mhw_durations"
+    )
+
+    end_time = time.time()
+    diff_time = end_time - start_time
+    print(f"Processing time for eta {ieta}: {diff_time:.2f} seconds")
+
+    return mhw_durations_stacked_da, non_mhw_durations_stacked_da
+
+duration_recalc = Parallel(n_jobs=30)(delayed(gap_between_events)(ieta, mhw_durations_stacked, non_mhw_durations_stacked) for ieta in range(0, neta)) #computing time per eta ~ 5-10s,  in total ~12min
+
+# %% Combining all eta
+mhw_durations_extended_stacked, non_mhw_durations_extended_stacked =zip(*duration_recalc)
+
+# Initialisation 
+mhw_duration_all_eta_stacked= np.full((nyears* ndays, neta, nxi), False, dtype=np.int32)  # Shape: (40* 365, neta, nxi)
+non_mhw_duration_all_eta_stacked= np.full((nyears* ndays, neta, nxi), False, dtype=np.int32)  # Shape: (40* 365, neta, nxi)
+
+# Aggregation 
+for ieta in range(0,neta):
+    mhw_duration_all_eta_stacked[:,ieta,:] = mhw_durations_extended_stacked[ieta]
+    non_mhw_duration_all_eta_stacked[:,ieta,:] = non_mhw_durations_extended_stacked[ieta]
+
+# Reformat with years and days in dim
+mhw_duration_all_eta_stacked_reshaped = mhw_duration_all_eta_stacked.reshape(nyears, ndays, neta, nxi)
+non_mhw_duration_all_eta_stacked_reshaped = non_mhw_duration_all_eta_stacked.reshape(nyears, ndays, neta, nxi)
+
+# Into Datasets
+ds_mhw_duration_stacked = xr.Dataset(
+    data_vars=dict(
+        mhw_duration=(["years", "days",  "eta_rho", "xi_rho"], mhw_duration_all_eta_stacked_reshaped)
+    ),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
+    ),
+    attrs={
+        'mhw_duration': "Duration of event > 90th perc (at least 5days and gap of 1 and 2 days allowed), int32 array"
+    }
+)
+
+ds_non_mhw_duration_stacked = xr.Dataset(
+    data_vars=dict(
+        non_mhw_duration=(["years", "days", "eta_rho", "xi_rho"], non_mhw_duration_all_eta_stacked_reshaped)
+    ),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
+    ),
+    attrs={
+        'non_mhw_duration': "Duration of event < 90th perc, int32 array"
+    }
+)
+
+# Save output 
+output_file = os.path.join(output_path, f"mhw_durations_extended_all_eta.nc")
 if not os.path.exists(output_file):
-    mhw_durations_extended.to_netcdf(output_file, mode='w')
+    ds_mhw_duration_stacked.to_netcdf(output_file, mode='w')
 
 
 # %% Visualisation 
-year_to_plot = slice(37,40) #last idx excluded
+year_to_plot = slice(0,40) #last idx excluded
 eta_rho_to_plot = 200 
 xi_rho_to_plot = 1000  
 
 # Slicing the dataset - ~2min of computing
 # Before combining events 
-dask_mhw_duration_to_plot = mhw_durations.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
-dask_non_mhw_duration_to_plot = non_mhw_durations.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+# dask_mhw_duration_to_plot = mhw_durations.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+# dask_non_mhw_duration_to_plot = non_mhw_durations.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+mhw_duration_before_to_plot = ds_mhw_duration_stacked_before.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)#dtype('int64')
+mhw_duration_before_to_plot = mhw_duration_before_to_plot.stack(time=('years', 'days')).mhw_duration 
+non_mhw_duration_before_to_plot = ds_non_mhw_duration_stacked_before.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+non_mhw_duration_before_to_plot = non_mhw_duration_before_to_plot.stack(time=('years', 'days')).non_mhw_duration 
 
 # After 
-mhw_event_extended_dask_to_plot = mhw_durations_extended.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+# mhw_event_extended_dask_to_plot = mhw_durations_extended.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot) #dtype('int64')
+mhw_event_extended_to_plot = ds_mhw_duration_stacked.isel(years=year_to_plot, eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)#dtype('int64')
+mhw_event_extended_to_plot = mhw_event_extended_to_plot.stack(time=('years', 'days')).mhw_duration 
 
 # Load data
-mhw_durations_selected = dask_mhw_duration_to_plot.compute().values.flatten()
-non_mhw_durations_selected = dask_non_mhw_duration_to_plot.compute().values.flatten()
-mhw_event_extended_selected = mhw_event_extended_dask_to_plot.compute().values.flatten()
+# mhw_durations_selected = dask_mhw_duration_to_plot.compute().values.flatten()
+# non_mhw_durations_selected = dask_non_mhw_duration_to_plot.compute().values.flatten()
+# mhw_event_extended_selected = mhw_event_extended_dask_to_plot.compute().values.flatten()
 
-lon = dask_mhw_duration_to_plot.compute().lon_rho.item()
-lat = dask_mhw_duration_to_plot.compute().lat_rho.item()
+# Spatial average
+# mhw_duration_before_to_plot = ds_mhw_duration_stacked_before.mean(dim=['eta_rho', 'xi_rho'])#dtype('int64')
+# mhw_duration_before_to_plot = mhw_duration_before_to_plot.stack(time=('years', 'days')).mhw_duration 
+# non_mhw_duration_before_to_plot = ds_non_mhw_duration_stacked_before.mean(dim=['eta_rho', 'xi_rho'])
+# non_mhw_duration_before_to_plot = non_mhw_duration_before_to_plot.stack(time=('years', 'days')).non_mhw_duration 
+# mhw_event_extended_to_plot = ds_mhw_duration_stacked.mean(dim=['eta_rho', 'xi_rho'])
+# mhw_event_extended_to_plot = mhw_event_extended_to_plot.stack(time=('years', 'days')).mhw_duration 
+
+lon = mhw_event_extended_to_plot.lon_rho.values.item()
+lat = mhw_event_extended_to_plot.lat_rho.values.item()
 
 fig, ax = plt.subplots(figsize=(15, 5))
 ax.set_clip_on(False)
@@ -538,27 +618,102 @@ ax.set_clip_on(False)
 # ax.axvspan(0, days_per_year, color='grey', alpha=0.1, label=f'{1980+year_to_plot.start}')
 # ax.axvspan(days_per_year, len(mhw_durations_selected), color='grey', alpha=0.2, label=f'{1980+year_to_plot.stop}')
 
-ax.plot(non_mhw_durations_selected, label="Non-MHW", color='#A2B36B',linestyle=":")
-ax.plot(mhw_durations_selected, label="MHW", color='#DC6D04', linestyle="--")
-ax.plot(mhw_event_extended_selected, label="Extended MHW", color='#780000', linestyle="-")
+# ax.plot(non_mhw_duration_before_to_plot, label="Non-MHW", color='#A2B36B',linestyle=":")
+# ax.plot(mhw_duration_before_to_plot, label="MHW", color='#DC6D04', linestyle="--")
+ax.plot(mhw_event_extended_to_plot, label="Extended MHW", color='#780000', linestyle="-")
 
 ax.set_title(f'Detection of events (surface) \nLocation: ({round(lat)}°S, {round(lon)}°E)')
 ax.set_xlabel('Days')
 ax.set_ylabel('Duration (days)')
 
 # Add the year labels below the x-axis
-ax.annotate('', xy=(365, -65), xytext=(0, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
-ax.annotate('', xy=(365*2, -65), xytext=(365, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
-ax.annotate('', xy=(365*3, -65), xytext=(365*2, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
+# ax.annotate('', xy=(365, -65), xytext=(0, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
+# ax.annotate('', xy=(365*2, -65), xytext=(365, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
+# ax.annotate('', xy=(365*3, -65), xytext=(365*2, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
 
-ax.text(182, -85, f'{1980 + year_to_plot.start}', ha='center', va='center')
-ax.text(365 + 182, -85, f'{1980 + year_to_plot.stop-2}', ha='center', va='center')
-ax.text(365*2 + 182, -85, f'{1980 + year_to_plot.stop-1}', ha='center', va='center')
+# ax.text(182, -85, f'{1980 + year_to_plot.start}', ha='center', va='center')
+# ax.text(365*i + 182, -85, f'{1980 + year_to_plot.stop-i}', ha='center', va='center')
+# ax.text(365*2 + 182, -85, f'{1980 + year_to_plot.stop-1}', ha='center', va='center')
 
 ax.legend()
 plt.tight_layout()
 plt.show()
 
+
+
+# %% Visualisation map - Annual average
+eta_rho_to_plot = 200 
+xi_rho_to_plot = 1000  
+day_to_plot= 98
+
+# Rechunk for better extraction
+# print(mhw_durations_extended.chunks)
+# mhw_durations_extended = mhw_durations_extended.chunk({
+#     'eta_rho': 100, #as before
+#     'xi_rho': 100,  #as before
+#     'years': 1,     #change: one year per chunk
+#     'days': 10      #change
+# })
+
+
+# Select the slice and load in memory
+mhw_plot_data = ds_mhw_duration_stacked.isel(years=3)
+mhw_plot_data = ds_mhw_duration_stacked.mean(dim=['days', 'years'])
+np.max(mhw_plot_data.mhw_duration)
+
+# Select point once and extract values
+point_data = mhw_plot_data.isel(eta_rho=eta_rho_to_plot, xi_rho=xi_rho_to_plot)
+lon = point_data.lon_rho.compute().item()
+lat = point_data.lat_rho.compute().item()
+# value = point_data.compute().item()
+
+# ---------- Plot ----------
+plt.figure(figsize=(10, 10))
+ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+# Circular map boundary
+theta = np.linspace(0, 2 * np.pi, 100)
+center, radius = [0.5, 0.5], 0.5
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * radius + center)
+ax.set_boundary(circle, transform=ax.transAxes)
+
+# -------- Plot the map --------
+pcolormesh = mhw_plot_data.mhw_duration.plot.pcolormesh(
+    ax=ax, transform=ccrs.PlateCarree(),
+    x="lon_rho", y="lat_rho",
+    add_colorbar=False, 
+    # vmin=0, vmax=30,
+    cmap='viridis')
+
+# -------- Plot point --------
+# sc = ax.scatter(lon, lat, c=[value], cmap='coolwarm', vmin=-5, vmax=5,
+#                 transform=ccrs.PlateCarree(), s=100, edgecolor='black', zorder=3, label='Selected Cell')
+
+# -------- Colorbar --------
+cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
+cbar.set_label('Duration (days)', fontsize=13)
+cbar.ax.tick_params(labelsize=12)
+
+# -------- Map features --------
+ax.coastlines(color='black', linewidth=1.5, zorder=1)
+ax.add_feature(cfeature.LAND, zorder=2, facecolor='lightgray')
+ax.set_facecolor('lightgrey')
+
+# -------- Title --------
+ax.set_title(f"SST median climatology (day={day_to_plot}) \nLocation: ({round(lat)}°S, {round(lon)}°E)", fontsize=16, pad=30)
+
+plt.tight_layout()
+plt.show()
+
+# %% visualisation map
+eta_rho_to_plot = 200 
+xi_rho_to_plot = 1000  
+day_to_plot= 98
+
+import hvplot.xarray  # This enables hvplot on xarray.DataArray
+import hvplot.dask    # This enables hvplot with Dask for efficient plotting
 
 
 # %% ------------------ Spatial Average
