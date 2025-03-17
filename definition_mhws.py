@@ -9,32 +9,18 @@ Detect MHW in ROMS-SO using absolute threshold
 """
 
 # %% --------------------------------PACKAGES------------------------------------
-import sys
 import os
-import warnings
-import copy as cp
-import gsw
 import xarray as xr
 import numpy as np
-import seaborn as sns
-
-import pandas as pd
-import geopandas as gpd
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.path as mpath
-import matplotlib.colors as mcolors
-from matplotlib.lines import Line2D
 
 import time
 
-import dask
-import dask.array as da
-from dask.distributed import Client
 from joblib import Parallel, delayed
 
 # %% -------------------------------- SETTINGS --------------------------------
@@ -64,18 +50,6 @@ nxi = 1442  # lon
 var = 'temp' #variable of interest
 file_var = 'temp_DC_BC_'
 
-
-# -- Define Climatology - baseline type
-# baseline = 'fixed1980' 
-baseline = 'fixed30yrs' 
-
-if baseline=='fixed1980':
-    description = "Detected events" + f'T°C > T°C 1980' + " (boolean array)" #description for the xarray
-    output_path = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline1980/'
-if baseline=='fixed30yrs':
-    description = "Detected events" + f'T°C > climatology (1980-2010)' + " (boolean array)" #description for the xarray
-    output_path = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
-
 # -- Define Thresholds
 absolute_thresholds = [1, 2, 3, 4] # Fixed absolute threshold
 percentile = 90 
@@ -88,66 +62,6 @@ month_names = np.array(['Jan','Feb','Mar', 'Apr', 'May', 'June', 'Jul', 'Aug', '
 
 season_bins = np.array([0, 90, 181, 273, 365]) #defining seasons with days within a year
 season_names = np.array(['DJF (Summer)', 'MAM (Fall)', 'JJA (Winter)', 'SON (Spring)']) #southern ocean!
-
-
-# # %% ------- PLOT difference (year i - clim) -------
-# temp_DC_BC_surface = xr.open_dataset( os.path.join(path_mhw, f"temp_DC_BC_surface.nc"))[var][1:, 0:365, :, :]  # 30yrs - 365days per year
-# temp_DC_BC_surface_2019 = temp_DC_BC_surface.sel(year=2019)
-
-# ds_clim_sst =xr.open_dataset(f'{output_path_clim}/climSST_all_eta.nc') 
-# ds_rel_threshold= xr.open_dataset(f'{output_path_clim}/rel_threshold_all_eta.nc') 
-
-# # diff = temp_DC_BC_surface_2019.sel(day=2) - ds_clim_sst.sel(days=2, z_rho=0).clim_sst
-
-# plt.figure(figsize=(10, 10))
-# ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
-# ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
-# # Circular map boundary
-# theta = np.linspace(0, 2 * np.pi, 100)
-# center, radius = [0.5, 0.5], 0.5
-# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-# circle = mpath.Path(verts * radius + center)
-# ax.set_boundary(circle, transform=ax.transAxes)
-
-# # Plot area 
-# # pcolormesh = diff.plot.pcolormesh(
-# #     ax=ax, transform=ccrs.PlateCarree(),
-# #     x="lon_rho", y="lat_rho",
-# #     add_colorbar=False, 
-# #     vmin=-5, vmax=5,
-# #     cmap='coolwarm'
-# # )
-# pcolormesh = ds_clim_sst.sel(days=230, z_rho=0).clim_sst.plot.pcolormesh(
-#     ax=ax, transform=ccrs.PlateCarree(),
-#     x="lon_rho", y="lat_rho",
-#     add_colorbar=False, 
-#     vmin=-5, vmax=5,
-#     cmap='coolwarm')
-
-# # Colorbar
-# cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
-# cbar.set_label('°C', fontsize=13)
-# cbar.ax.tick_params(labelsize=12)  
-
-# # Add features
-# ax.coastlines(color='black', linewidth=1.5, zorder=1)
-# ax.add_feature(cfeature.LAND, zorder=2,  facecolor='lightgray')
-# ax.set_facecolor('lightgrey')
-
-# # # Legend
-# # legend_elements = [
-# #     Line2D([0], [0], color='#BBC6A9', lw=6, label=f'Temp < {temp_threshold}°C'),
-# #     Line2D([0], [0], color='#BE2323', lw=6, label=f'Temp > {temp_threshold}°C')
-# # ]
-# # ax.legend(handles=legend_elements, loc='lower left', fontsize=14, borderpad=0.8, frameon=True, bbox_to_anchor=(-0.05, -0.05))
-
-# # Title
-# ax.set_title(f"Climatology (30yrs) ", fontsize=20, pad=30)
-# plt.tight_layout()
-# plt.show()
-# # ---------------------
-
 
 
 
@@ -186,11 +100,6 @@ def detect_absolute_mhw(ieta):
     # -- Climatology
     file_clim = os.path.join(output_path_clim, f"clim_{ieta}.nc")
     climatology_surf = xr.open_dataset(file_clim)['climSST']
-
-    # if baseline == 'fixed1980':
-    #     climatology_sst = ds_original[0, :, :]  # Only 1980
-    # elif baseline == 'fixed30yrs':
-    #     climatology_sst = ds_original.sel(year=slice(1980, 2009)).mean(dim="year") # 30-year mean
 
     # -- Thresholds
     absolute_thresholds = [1, 2, 3, 4] # Absolute threshold
