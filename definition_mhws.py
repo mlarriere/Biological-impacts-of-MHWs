@@ -522,7 +522,15 @@ if not os.path.exists(output_file3):
     spatial_mask_ind_all.to_netcdf(output_file3, mode='w')
 
 
-# ---------- Plot ----------
+# %%  Vizualisation sectors 
+# Read data
+spatial_mask_atl_all = xr.open_dataset(os.path.join(output_path, f"mhw_durations_atlantic.nc"))
+spatial_mask_pac_all = xr.open_dataset(os.path.join(output_path, f"mhw_durations_pacific.nc"))
+spatial_mask_ind_all = xr.open_dataset(os.path.join(output_path, f"mhw_durations_indian.nc"))
+
+# --- PLOT
+from matplotlib.colors import ListedColormap
+
 plt.figure(figsize=(10, 10))
 ax = plt.axes(projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
 ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
@@ -534,37 +542,32 @@ verts = np.vstack([np.sin(theta), np.cos(theta)]).T
 circle = mpath.Path(verts * radius + center)
 ax.set_boundary(circle, transform=ax.transAxes)
 
-# Plot Atlantic sector
-spatial_mask_atl_all.isel(years=0, days=98).duration_sector.plot.pcolormesh(
-    ax=ax, transform=ccrs.PlateCarree(),
-    x="lon_rho", y="lat_rho",
-    add_colorbar=False, cmap='Reds')
+# Create the mask arrays for each sector with unique values
+sector_mask = np.full_like(spatial_mask_atl_all.duration_sector.isel(years=0, days=98), np.nan)
 
-# Plot Pacific sector
-spatial_mask_pac_all.isel(years=0, days=98).duration_sector.plot.pcolormesh(
-    ax=ax, transform=ccrs.PlateCarree(),
-    x="lon_rho", y="lat_rho",
-    add_colorbar=False, cmap='Blues')
+# Assign sector values (1 for Atlantic, 2 for Pacific, 3 for Indian)
+sector_mask = np.where(~np.isnan(spatial_mask_atl_all.duration_sector.isel(years=0, days=98)), 1, sector_mask)
+sector_mask = np.where(~np.isnan(spatial_mask_pac_all.duration_sector.isel(years=0, days=98)), 2, sector_mask)
+sector_mask = np.where(~np.isnan(spatial_mask_ind_all.duration_sector.isel(years=0, days=98)), 3, sector_mask)
 
-# Plot Indian sector
-spatial_mask_ind_all.isel(years=0, days=98).duration_sector.plot.pcolormesh(
-    ax=ax, transform=ccrs.PlateCarree(),
-    x="lon_rho", y="lat_rho",
-    add_colorbar=False, cmap='Greens')
+sector_cmap = ListedColormap(["#778B04", "#BF3100", "#E09F3E"])
 
+# Plot sectors
+c = ax.pcolormesh(spatial_mask_atl_all.lon_rho, spatial_mask_atl_all.lat_rho, sector_mask, transform=ccrs.PlateCarree(), cmap=sector_cmap, vmin=1, vmax=3)
 
+# Features
 ax.coastlines(color='black', linewidth=1.5, zorder=1)
 ax.add_feature(cfeature.LAND, zorder=2,  facecolor='#F6F6F3')
 ax.set_facecolor('lightgrey')
 
 # Atlantic-Pacific boundary (near Drake Passage)
-ax.plot([-70, -70], [-90, -60], transform=ccrs.PlateCarree(), color='darkred', linestyle='--', linewidth=3) #Atlantic sector
+ax.plot([-70, -70], [-90, -60], transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=2) #Atlantic sector
 
 # Pacific-Indian boundary
-ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='darkred', linestyle='--', linewidth=3) #Pacific sector
+ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=2) #Pacific sector
 
 # Indian-Atlantic boundary
-ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='darkred', linestyle='--', linewidth=3) #Indian sector
+ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=2) #Indian sector
 ax.gridlines(draw_labels=True)
 
 plt.show()
@@ -621,7 +624,7 @@ ds_avg_duration_ind = spatial_mask_ind_all.duration_sector.mean(dim=['eta_rho', 
 # Adding trend lines
 m, b = np.polyfit(ds_avg_duration_SO.years,ds_avg_duration_SO.values,  1)
 
-fig, ax = plt.subplots(figsize=(15, 5))
+fig, ax = plt.subplots(figsize=(8, 5))
 ax.set_clip_on(False)
 ax.plot(ds_avg_duration_SO, label="Southern Ocean", color='black', linewidth = 1.5, linestyle="-")
 ax.plot(ds_avg_duration_SO.years, m*ds_avg_duration_SO.years + b, color='black',linestyle="--" )
