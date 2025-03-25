@@ -82,7 +82,7 @@ def calculate_climSST(ieta, baseline):
     print(f"Processing eta {ieta}...")
     start_time = time.time()
 
-    # ieta =200
+    # ieta =220
     # Read data
     fn = path_mhw + file_var + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
     ds_original = xr.open_dataset(fn)[var][1:31,0:365,:,:] #Extracts daily data : only 30yr + consider 365 days per year. shape:(30, 365, 35, 1442)
@@ -102,7 +102,7 @@ def calculate_climSST(ieta, baseline):
         climatology_sst = ds_original[0, :, :, :]  # Only 1980
     elif baseline == 'fixed30yrs': # ~4min
         # Moving window of 11days - method from Hobday et al. (2016)
-        for dy in range(0,ndays-1): #days index going from 0 to 364
+        for dy in range(0,ndays): #days index going from 0 to 364
             if dy<=4:
                 window11d_sst = ds_original_surf.isel(day=np.concatenate([np.arange(360+dy,365,1), np.arange(0, dy+6,1)]))
             elif dy>=360:
