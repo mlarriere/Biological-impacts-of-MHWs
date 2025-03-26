@@ -24,31 +24,22 @@ from joblib import Parallel, delayed
 
 
 # %% -------------------------------- SETTINGS --------------------------------
+# -- Directories
 # Set working directory
 working_dir = "/home/mlarriere/Projects/biological_impacts_MHWs/Biological-impacts-of-MHWs/"
 os.chdir(working_dir)
 print("Working directory set to:", os.getcwd())
-
-# Directories
-ds_roms = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/SO_d025_avg_daily_1979.nc')
-z_rho = np.load('/home/jwongmeng/work/ROMS/scripts/coords/z_rho.npy')
-
-path_temp = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/' # drift and bias corrected temperature files
-path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
 
-# Sizes and dimensions
+# -- Sizes and dimensions
 years = range(1980, 2020)
 nyears = np.size(years)
-months = range(1, 13)
-days = range(0, 365)
-ndays = np.size(days)
 nz = 35  # depths levels
 neta = 434 # lat
 nxi = 1442  # lon
 
 # -- Define Thresholds
-absolute_thresholds = [1, 2, 3, 4] # Fixed absolute threshold
+absolute_thresholds = [1, 2, 3, 4] # Fixed absolute thresholds
 
 # %% Load data 
 det_combined_ds = xr.open_dataset(os.path.join(path_det, f"det_rel_abs_combined.nc"))
@@ -142,7 +133,6 @@ def areal_fraction(ds, area_cells, total_area, time_dim):
         area_frac_det_daily = area_frac_det.reshape(-1)*100
         return area_frac_det_daily
 
-
 # Spatial regions
 regions = {
     "SO": (det_combined_ds, total_area_SO),
@@ -150,7 +140,6 @@ regions = {
     "Pacific": (spatial_mask_pac_all, total_area_pac),
     "Indian": (spatial_mask_ind_all, total_area_ind)
 }
-
 
 # Compute areal fractions dynamically
 area_fractions = {}
@@ -168,23 +157,20 @@ threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808'] # 90th percentil
 fig, axes = plt.subplots(2, 2, figsize=(12, 8), sharex=True)
 axes = axes.flatten() 
 
-regions = ['SO', 'Atlantic', 'Pacific', 'Indian']
+regions_names = ['SO', 'Atlantic', 'Pacific', 'Indian']
 region_titles = ["Southern Ocean", "Atlantic Sector", "Pacific Sector", "Indian Sector"]
 
-for ax, region, title in zip(axes, regions, region_titles):
+for ax, region, title in zip(axes, regions_names, region_titles):
     for threshold, color in zip(absolute_thresholds, threshold_colors):
-        years = np.arange(1980, 2020)
-        # m, b = np.polyfit(years, area_fractions[region][threshold],  1)
-
         ax.plot(
             area_fractions[region][threshold], linestyle="-", color=color, linewidth=1.5,
             label=f"> 90th percentile & {threshold}\u00b0C"
         )
-        # ax.plot(years, m*years + b, color='black',linestyle="--" )
 
     ax.set_title(title, fontsize=12)
     ax.legend(fontsize=8, loc="upper left")
-
+    years= np.arange(1980,2019)
+    
     ticks_years = np.arange(0, len(years))
     selected_years = years[::5].tolist() + [2019]  # Every 5 years + 2019
     selected_ticks = ticks_years[::5].tolist() + [ticks_years[-1]]  # Match positions
@@ -210,11 +196,17 @@ axes = axes.flatten()
 threshold_titles = [f"> 90th percentile & {t}\u00b0C" for t in absolute_thresholds]
 
 for ax, threshold, title in zip(axes, absolute_thresholds, threshold_titles):
-    for region, color in zip(regions, sector_colors):  # Assign correct color to each region
-        ax.plot(
-            area_fractions[region][threshold], linestyle="-", linewidth=1.5, color=color, label=region
-        )
-    
+
+    for region, color in zip(regions_names, sector_colors):  # Assign correct color to each region
+
+        ax.plot(area_fractions[region][threshold], linestyle="-", linewidth=1.5, color=color, label=region)
+
+        if region == "SO":
+            m, b = np.polyfit(np.arange(0,40), area_fractions['SO'][threshold],  1) #m=0.547, b=20
+            trend_line = m * np.arange(0,40) + b  
+            ax.plot(trend_line, color='black', linestyle="--", linewidth=1)
+
+
     ax.set_title(title, fontsize=12)
     ax.legend(fontsize=8, loc="upper left")
 
@@ -233,8 +225,5 @@ fig.text(0.04, 0.5, "Areal Fraction [%]", va="center", rotation="vertical", font
 plt.suptitle("Areal Fraction of Marine Heatwaves by Threshold Condition", fontsize=14)
 plt.tight_layout(rect=[0.05, 0.05, 1, 1])
 plt.show()
-
-
-
 
 # %%
