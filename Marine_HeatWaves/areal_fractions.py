@@ -163,7 +163,6 @@ for region_name, (region_ds, region_total_area) in regions.items():
         key = f"area_frac_{threshold}deg_{region_name.lower()}_yr"
         area_fractions[region_name][threshold] = areal_fraction(getattr(region_ds, f"det_{threshold}deg"), area_SO_surf, region_total_area, 'yearly')
 
-
 # %% Time series
 # ---- 1. One graph for each extent with the 4 threshold conditions
 threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808'] # 90th percentile + [1°C, 2°C, 3°C, 4°C]
@@ -240,4 +239,31 @@ plt.suptitle("Areal Fraction of Marine Heatwaves by Threshold Condition", fontsi
 plt.tight_layout(rect=[0.05, 0.05, 1, 1])
 plt.show()
 
-# %%
+# %% Detect year with peak values
+from scipy.signal import find_peaks
+
+for threshold in absolute_thresholds:
+    # For each region, find local peaks
+    print(f"Detecting local peaks for {threshold}°C:")
+
+    # Pacific Sector
+    pacific_peaks, _ = find_peaks(area_fractions['Pacific'][threshold])
+    pacific_years = [1980 + idx for idx in pacific_peaks]  # Collect peak years
+    print(f'Pacific Sector, {threshold}°C: {pacific_years}')
+
+    # Indian Sector
+    indian_peaks, _ = find_peaks(area_fractions['Indian'][threshold])
+    indian_years = [1980 + idx for idx in indian_peaks]  # Collect peak years
+    print(f'Indian Sector, {threshold}°C: {indian_years}')
+
+    # Atlantic Sector
+    atlantic_peaks, _ = find_peaks(area_fractions['Atlantic'][threshold])
+    atlantic_years = [1980 + idx for idx in atlantic_peaks]  # Collect peak years
+    print(f'Atlantic Sector, {threshold}°C: {atlantic_years}')
+
+    # Southern Ocean (SO)
+    so_peaks, _ = find_peaks(area_fractions['SO'][threshold])
+    so_years = [1980 + idx for idx in so_peaks]  # Collect peak years
+    print(f'Southern Ocean, {threshold}°C: {so_years}')
+    
+    print(" ")
