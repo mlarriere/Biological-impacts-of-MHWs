@@ -89,9 +89,8 @@ spatial_mask_ind_all = xr.concat(spatial_mask_ind, dim='years')
 # %% COMPUTE AREAL FRACTION 
 # Area dataset -- variables: 'area'= view from top, 'area_xi', 'area_eta'=view from side
 area_SO = xr.open_dataset("/home/jwongmeng/work/ROMS/scripts/mhw_krill/area.nc") 
-area_SO_surf = area_SO.area[0, :,:] # Area only surface - contains Nans values 
-area_SO_surf = np.nan_to_num(area_SO_surf.values, nan=0)
-total_area_SO = np.sum(area_SO_surf)
+area_SO_surf = area_SO.isel(z_t=0).area # Area only surface - contains Nans values 
+total_area_SO = np.nansum(area_SO_surf)
 
 # --- PLOT area SO
 plt.figure(figsize=(10, 10))
@@ -124,14 +123,29 @@ total_area_ind = np.nansum(area_SO_da.where(mask_indian, np.nan))
 
 # --- For each cell, if mhw detected (boolean) associate area and sum over spatial dim
 def areal_fraction(ds, area_cells, total_area, time_dim):
-    combine_area = np.einsum('ijkl,kl -> ij', ds.values, area_cells) #shape: (40, 365)
-    area_frac_det = np.divide(combine_area, total_area)
+    # Testing
+    # yr=37
+    # ds = det_combined_ds.det_1deg
+    # area_cells = area_SO_surf
+    # # total_area= total_area_SO
+
+    # # Method1 - computing time ~ 1min
+    # # Area in a MHW
+    # detected_area = np.multiply(ds, area_cells)
+    # area_det = detected_area.sum(axis=(2, 3)) 
+    # area_frac_det1 = np.divide(area_det, total_area) #shape: (40, 365)
+
+    # Method2 - computing time ~2s
+    combine_area = np.einsum('ijkl,kl -> ij', ds.values, np.nan_to_num(area_cells)) #shape: (40, 365) --- NO 
+    area_frac_det2 = np.divide(combine_area, total_area)
+
+    # print(np.allclose(area_frac_det1, area_frac_det2))  # Should return True if results are the same
+
     if time_dim == 'yearly': 
-        area_frac_det_yr = area_frac_det.sum(axis=1)
+        area_frac_det_yr = np.mean(area_frac_det2, axis=(1)) * 100
         return area_frac_det_yr
     else: 
-        area_frac_det_daily = area_frac_det.reshape(-1)*100
-        return area_frac_det_daily
+        return area_frac_det2
 
 # Spatial regions
 regions = {
