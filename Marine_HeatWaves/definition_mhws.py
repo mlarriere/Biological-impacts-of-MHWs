@@ -418,6 +418,24 @@ output_file = os.path.join(output_path, f"mhw_durations_extended_all_eta.nc")
 if not os.path.exists(output_file):
     ds_mhw_duration_stacked.to_netcdf(output_file, mode='w')
 
+# %% Redefine event detection 
+ds_mhw_duration_stacked = xr.open_dataset(os.path.join(output_path, f"mhw_durations_extended_all_eta.nc"))
+print('ds_mhw_duration_stacked:', ds_mhw_duration_stacked.isel(years=37, days=slice(130,152), xi_rho=1000, eta_rho=200).mhw_duration.values)
+print("")
+
+det_all_eta =  xr.open_dataset(os.path.join('/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/', "det_all_eta.nc"))
+print('det_all_eta:', det_all_eta.isel(years=37, days=slice(130,152), xi_rho=1000, eta_rho=200).mhw_rel_threshold.values)
+print("")
+
+# If MHW duration > 0, detection=TRUE, else FALSE
+mhw_rel_threshold_updated = det_all_eta.mhw_rel_threshold.where(ds_mhw_duration_stacked.mhw_duration > 0, False)
+det_all_eta['mhw_rel_threshold'] = mhw_rel_threshold_updated# --- Test
+print('det_all_eta after:', det_all_eta.isel(years=37, days=slice(130,152), xi_rho=1000, eta_rho=200).mhw_rel_threshold.values)
+print("")
+
+
+# Write 
+det_all_eta.to_netcdf(os.path.join(output_path, "det_all_eta_corrected.nc"), mode='w')
 
 # %% Visualisation of combination of events 
 # Read data
