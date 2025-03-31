@@ -68,7 +68,7 @@ season_bins = np.array([0, 90, 181, 273, 365]) #defining seasons with days withi
 season_names = np.array(['DJF (Summer)', 'MAM (Fall)', 'JJA (Winter)', 'SON (Spring)']) #southern ocean!
 
 # %% Combined relative and absolute thresholds
-det_ds = xr.open_dataset(os.path.join('/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/', "det_all_eta.nc"))
+det_ds = xr.open_dataset(os.path.join('/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/', "det_all_eta_corrected.nc"))
 
 # Dealing with Nans values -- No NaNs value in the dataset
 # nans_rel = np.isnan(det_ds.mhw_rel_threshold).sum().item()#0
@@ -129,9 +129,9 @@ if not os.path.exists(output_file):
 # test5 = det_combined_ds.isel(eta_rho=100, xi_rho=800, years=37, days=98).det_4deg.values #not in condition FALSE
 
 # %% Visualization - load data
-choice_eta = 200 #200, 220, 190
-choice_xi =  1000 #1000, 950, 600
-day_to_plot = 300 # 300, 98, 67
+choice_eta = 190 #200, 220, 190
+choice_xi =  600 #1000, 950, 600
+day_to_plot = 67 # 300, 98, 67
 year_to_plot = 37
 choice_year = slice(35,40)
 
@@ -342,3 +342,5 @@ plt.suptitle(f"SST above absolute thresholds ($y_{{{1980 + year_to_plot}}}, d_{{
 plt.tight_layout()
 plt.show()
 
+
+# %%
