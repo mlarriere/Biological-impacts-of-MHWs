@@ -83,55 +83,19 @@ for var in variables:
 mhw_frequency_ds = xr.merge(frequency_list)
 mhw_frequency_ds.attrs = dict(description='MHW frequency, number of days under MHW in each cell')
 
-# Write into file
-# det_combined_ds.to_netcdf(path_det + "frequency.nc",'w')
-
-
 # Yearly average
-# mhw_frequency_baseline = mhw_frequency_ds.isel(years=slice(0,30))
+mhw_frequency_baseline = mhw_frequency_ds.isel(years=slice(0,30)).mean(dim=['years'])
 mhw_frequency_yr_avg = mhw_frequency_ds.mean(dim=['years']) 
 
 
-
-# Calling in parallel - computing time ~6min 
-# results = Parallel(n_jobs=30)(delayed(calculate_freq)(det_combined_ds, var) for var in variables)
-
-# Reformatting - frequency into xarray Dataset
-# for var, freq in zip(variables, results):
-#     # frequency_da = xr.DataArray(freq, dims=['eta_rho', 'xi_rho'], coords={'eta_rho': det_combined_ds['eta_rho'], 'xi_rho': det_combined_ds['xi_rho']})
-    
-#     # Add the frequency DataArray to the dataset
-#     # det_combined_ds[f'{var}_frequency'] = frequency_da
-#     det_combined_ds[f'{var}_frequency'] = (['eta_rho', 'xi_rho'], freq)
-
-
-# events_frequency = xr.concat(results, dim='years')
-# events_frequency_mean = events_frequency.mean(dim='years')
-
-
-# %%
-# --- PLOT area SO
-# %%
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-import matplotlib.path as mpath
-import cartopy.feature as cfeature
-import numpy as np
-
-# Define the variables for the different plots
+# %% --- PLOT area SO
 variables = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
 
-# Create a figure with 2x2 subplots (2 rows, 2 columns)
 fig, axs = plt.subplots(2, 2, figsize=(15, 15), subplot_kw={'projection': ccrs.Orthographic(central_latitude=-90, central_longitude=0)})
-
-# Flatten the axes array to make it easier to loop over
 axs = axs.flatten()
 
-# Loop over the variables and plot each one in its respective subplot
 for i, var in enumerate(variables):
     ax = axs[i]
-
-    # Set the extent and boundary for each plot
     ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
     theta = np.linspace(0, 2 * np.pi, 100)
     center, radius = [0.5, 0.5], 0.5
@@ -139,30 +103,29 @@ for i, var in enumerate(variables):
     circle = mpath.Path(verts * radius + center)
     ax.set_boundary(circle, transform=ax.transAxes)
 
-    # Plot the data on the map for each variable
-    pcolormesh = mhw_frequency_yr_avg[f'freq_{var[4]}deg'].plot.pcolormesh(
+    # Plot
+    pcolormesh = mhw_frequency_baseline[f'freq_{var[4]}deg'].plot.pcolormesh(
         ax=ax, transform=ccrs.PlateCarree(),
         x="lon_rho", y="lat_rho",
         add_colorbar=False,
         cmap='magma'
     )
 
-    # Add the colorbar for each subplot
+    # Colorbar
     cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
     cbar.set_label('Days', fontsize=13)
     cbar.ax.tick_params(labelsize=12)
 
-    # Add coastlines and land features for each subplot
+    # Add features
     ax.coastlines(color='black', linewidth=1.5, zorder=1)
     ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
     ax.set_facecolor('lightgrey')
 
-    # Set the title for each subplot
-    ax.set_title(f"Thresholds: 90th perc and {var[4]}°C", fontsize=16)
+    # Title
+    ax.set_title(f"Thresholds: 90th perc and {var[4]}°C \n 1980-2009 period", fontsize=16)
 
-# Adjust layout and add a main title
-plt.tight_layout()
 fig.suptitle("MHW Frequency Yearly Average", fontsize=20, y=1.02)
+plt.tight_layout()
 plt.show()
 
 
