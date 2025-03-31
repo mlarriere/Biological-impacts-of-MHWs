@@ -420,19 +420,18 @@ if not os.path.exists(output_file):
 
 # %% Redefine event detection 
 ds_mhw_duration_stacked = xr.open_dataset(os.path.join(output_path, f"mhw_durations_extended_all_eta.nc"))
-print('ds_mhw_duration_stacked:', ds_mhw_duration_stacked.isel(years=37, days=slice(130,152), xi_rho=1000, eta_rho=200).mhw_duration.values)
+print('ds_mhw_duration_stacked:', ds_mhw_duration_stacked.isel(years=37, days=slice(190,220), xi_rho=1000, eta_rho=200).mhw_duration.values)
 print("")
 
 det_all_eta =  xr.open_dataset(os.path.join('/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/', "det_all_eta.nc"))
-print('det_all_eta:', det_all_eta.isel(years=37, days=slice(130,152), xi_rho=1000, eta_rho=200).mhw_rel_threshold.values)
+print('det_all_eta:', det_all_eta.isel(years=37, days=slice(190,220), xi_rho=1000, eta_rho=200).mhw_rel_threshold.values)
 print("")
 
 # If MHW duration > 0, detection=TRUE, else FALSE
 mhw_rel_threshold_updated = det_all_eta.mhw_rel_threshold.where(ds_mhw_duration_stacked.mhw_duration > 0, False)
 det_all_eta['mhw_rel_threshold'] = mhw_rel_threshold_updated# --- Test
-print('det_all_eta after:', det_all_eta.isel(years=37, days=slice(130,152), xi_rho=1000, eta_rho=200).mhw_rel_threshold.values)
+print('det_all_eta after:', det_all_eta.isel(years=37, days=slice(190,220), xi_rho=1000, eta_rho=200).mhw_rel_threshold.values)
 print("")
-
 
 # Write 
 det_all_eta.to_netcdf(os.path.join(output_path, "det_all_eta_corrected.nc"), mode='w')
@@ -597,7 +596,56 @@ plt.show()
 ds_avg_duration = xr.open_dataset(os.path.join(output_path, f"mhw_avg_duration_yearly.nc"))
 ds_avg_duration_SO = ds_avg_duration.avg_dur.mean(dim=['eta_rho', 'xi_rho'])
 
-# --- Sectors 
+# Understanding averages
+ds_avg_duration_values = [ds_avg_duration.avg_dur.sel(years=year).values.flatten() for year in range(0,40)]
+print(f'In 2019, maximum duration in SO: {np.max(ds_avg_duration_values[39])} days')
+print(f'In 2017, maximum duration in SO: {np.max(ds_avg_duration_values[37])} days')
+print(f'Over the period 1980-2019, event maximum duration in SO: {np.max(ds_avg_duration_values)} days')
+
+# -- PLOT
+fig = plt.figure(figsize=(20, 8))
+gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[25, 1], hspace=0)
+ax1 = fig.add_subplot(gs[0])
+ax2 = fig.add_subplot(gs[1])
+
+boxplot_style = {'flierprops': {'marker': ',', 'markerfacecolor': 'black', 'markersize': 5}} #chosing marker style
+
+# plot the same data on both Axes
+ax1.boxplot(ds_avg_duration_values, positions=range(1980, 2020),  **boxplot_style,)
+ax2.boxplot(ds_avg_duration_values, positions=range(1980, 2020))
+ax1.plot(years, ds_avg_duration_SO) #mean line
+
+ax1.set_ylim(1, 1200)  # ax1 ---- outliers only
+ax2.set_ylim(-1, 1)  # ax2 ---- most of the data
+ax1.set_yscale('log') 
+
+# -- Labels
+ax1.spines.bottom.set_visible(False)
+ax2.spines.top.set_visible(False)
+
+# xlabel and xticks in ax2
+ax2.set_xticks(years)
+ax2.set_xticklabels(years, rotation=45)
+ax2.set_xlabel('Years')
+ax2.xaxis.tick_bottom()
+
+# No ylabel in ax2
+ax2.set_yticks([])
+ax2.tick_params(left=False)
+
+# ylabel and title in ax1
+ax1.set_ylabel('Days (log)')
+ax1.set_title("Distribution of MHW Duration Per Year", y=1.05)
+
+# Adding maximum for each year as text
+for i in range(0,40):
+    ax1.text(1980+i, np.max(ds_avg_duration_values[i]) + 10, f'{int(np.max(ds_avg_duration_values[i]))}', fontsize=8, ha='left', va='bottom')
+
+plt.show()
+
+
+
+#%% --- Sectors 
 spatial_domain_atl = (ds_avg_duration.lon_rho >= 290) | (ds_mhw_duration_stacked.lon_rho < 20) #Atlantic sector: From 290°E to 20°E -OK
 mask_atl = xr.DataArray(spatial_domain_atl, dims=["eta_rho", "xi_rho"]) #shape: (434, 1442)
 spatial_domain_pac = (ds_avg_duration.lon_rho >= 150) & (ds_mhw_duration_stacked.lon_rho < 290) #Pacific sector: From 150°E to 290°E -OK
