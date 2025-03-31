@@ -155,7 +155,7 @@ regions = {
     "Indian": (spatial_mask_ind_all, total_area_ind)
 }
 
-# Compute areal fractions dynamically
+# Compute areal fractions dynamically ~20min
 area_fractions = {}
 for region_name, (region_ds, region_total_area) in regions.items():
     area_fractions[region_name] = {}
@@ -267,3 +267,5 @@ for threshold in absolute_thresholds:
     print(f'Southern Ocean, {threshold}°C: {so_years}')
     
     print(" ")
+
+# %%
