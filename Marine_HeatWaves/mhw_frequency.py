@@ -86,7 +86,7 @@ mhw_frequency_ds.attrs = dict(description='MHW frequency, number of days under M
 # Yearly average
 mhw_frequency_baseline = mhw_frequency_ds.isel(years=slice(0,30)).mean(dim=['years'])
 mhw_frequency_yr_avg = mhw_frequency_ds.mean(dim=['years']) 
-
+np.max(mhw_frequency_yr_avg.freq_4deg)
 
 # %% --- PLOT area SO
 variables = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
@@ -104,16 +104,17 @@ for i, var in enumerate(variables):
     ax.set_boundary(circle, transform=ax.transAxes)
 
     # Plot
-    pcolormesh = mhw_frequency_baseline[f'freq_{var[4]}deg'].plot.pcolormesh(
+    pcolormesh = mhw_frequency_yr_avg[f'freq_{var[4]}deg'].plot.pcolormesh(
         ax=ax, transform=ccrs.PlateCarree(),
         x="lon_rho", y="lat_rho",
         add_colorbar=False,
         cmap='magma'
+        # vmin=0, vmax=36
     )
 
     # Colorbar
     cbar = plt.colorbar(pcolormesh, ax=ax, orientation='vertical', shrink=0.7, pad=0.05)
-    cbar.set_label('Days', fontsize=13)
+    cbar.set_label('Days per year', fontsize=13)
     cbar.ax.tick_params(labelsize=12)
 
     # Add features
@@ -122,7 +123,7 @@ for i, var in enumerate(variables):
     ax.set_facecolor('lightgrey')
 
     # Title
-    ax.set_title(f"Thresholds: 90th perc and {var[4]}°C \n 1980-2009 period", fontsize=16)
+    ax.set_title(f"Thresholds: 90th perc and {var[4]}°C \n 1980-2019 period", fontsize=16)
 
 fig.suptitle("MHW Frequency Yearly Average", fontsize=20, y=1.02)
 plt.tight_layout()
