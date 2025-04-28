@@ -58,10 +58,18 @@ det_combined_ds = xr.open_dataset(os.path.join(path_det, f"det_rel_abs_combined.
 def mean_chla(yr):
 
     start_time = time.time()
+
+    # Read data
     # yr=0
     ds_chla = xr.open_dataset(os.path.join(path_chla, f"z_SO_d025_avg_daily_{1980+yr}.nc"))
     ds_chla_100m = ds_chla.isel(time= slice(0,365), depth=slice(0, 14)) #depth from 0 to 100m depth
-    da_chla_mean = ds_chla_100m.TOT_CHL.mean(dim='depth') #Negative values -- Can't be!!
+
+    # Check if there is at least 14 layers to compute the mean
+    valid_depth = ~ds_chla_100m.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
+    ds_chla_100m_valid = ds_chla_100m.where(valid_depth)
+
+    # Compute the mean - if not enough vertical layers, mean = Nan
+    da_chla_mean = ds_chla_100m_valid.TOT_CHL.mean(dim='depth') #Negative values -- Can't be!!
     da_chla_mean = xr.where(da_chla_mean < 0, 0, da_chla_mean) # Set negative values to 0
 
     # Reformating
@@ -90,17 +98,27 @@ chla_mean_all = xr.concat(chla_mean_yearly, dim='year')
 south_mask = chla_mean_all['lat_rho'] <= -60
 chla_100m_mean_south = chla_mean_all.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
 
+
 # Write to file
 chla_100m_mean_south.to_netcdf(path=os.path.join(path_growth_inputs, "chla_avg100m_yearly_60S.nc"), mode='w')
 
 # %% Temperature from ROMS [°C]
 def mean_temp(ieta):
+    # Read data
+    # ieta=200
     fn = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/temp_DC_BC_' + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-    temp_100m = xr.open_dataset(fn)['temp'].isel(year=slice(1,41), z_rho=slice(0,14)) #Extracts daily data : 40yr, consider 365 days per year and until 100m depth
-    temp_100m_mean_eta = temp_100m.mean(dim='z_rho', skipna=True)
+    ds_temp_100m = xr.open_dataset(fn)['temp'].isel(year=slice(1,41), z_rho=slice(0,14)) #Extracts daily data : 40yr, consider 365 days per year and until 100m depth
     
+    # Check if there is at least 14 layers to compute the mean
+    valid_depth = ~ds_temp_100m.isnull().any(dim='z_rho') # True where all 14 layers are valid, i.e. Non Nan values
+    ds_temp_100m_valid = ds_temp_100m.where(valid_depth)
+
+    # Compute the mean
+    ds_temp_100m_mean = ds_temp_100m_valid.mean(dim='z_rho', skipna=True)
+    # ds_temp_100m_mean.isnull().sum()
+
     print(f'Processing temperature for eta {ieta}')
-    return temp_100m_mean_eta 
+    return ds_temp_100m_mean 
 
 results = Parallel(n_jobs=30)(delayed(mean_temp)(ieta) for ieta in range(0, neta)) 
 
@@ -130,14 +148,15 @@ temp_100m_mean_south = ds_temp_100m_mean.where(south_mask, drop=True) #shape (40
 # Write to file
 temp_100m_mean_south.to_netcdf(path=os.path.join(path_growth_inputs, "temp_avg100m_yearly_60S.nc"), mode='w')
 
+# Need to add a condition on bathymetry if only 3 value instead of 14 - not representative!!
 
 #%% Visualization
 # === Parameters ===
 # Chosen to be min or max krill growth according to 1st_attempt.py
-yr = 2011
-eta = 200
-xi = 357
-day = 52
+yr = 2010  #2018
+eta = 230 #6 
+xi = 1060 #670 
+day = 35 #11
 
 # === Temperature Profile ===
 fn_temp = f'/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/temp_DC_BC_eta{eta}.nc'
@@ -193,16 +212,16 @@ ax2.set_ylabel('Depth [m]')
 ax2.set_title('Temperature Profile')
 ax2.set_ylim(-110, 0)
 ax2.grid(True)
-ax2.text(0.78, 0.95, f'Mean: {mean_temp:.2f} °C', ha='left', va='top', transform=ax2.transAxes, fontsize=10, bbox=dict(facecolor='white'))
+# ax2.text(0.78, 0.95, f'Mean: {mean_temp:.5f} °C', ha='left', va='top', transform=ax2.transAxes, fontsize=10, bbox=dict(facecolor='white'))
 
 # --- Chlorophyll-a profile subplot ---
 ax3 = fig.add_subplot(1, 3, 3)
 ax3.plot(chla_profile, depth_chla, marker='o', color='green')
 ax3.set_xlabel('Chl-a [mg m$^{-3}$]')
 ax3.set_title('Chl-a Profile')
-ax3.set_ylim(-110, 0)
+ax3.set_ylim(-210, 0)
 ax3.grid(True)
-ax3.text(0.72, 0.95, f'Mean: {mean_chla:.2f} mg/m³', ha='left', va='top', transform=ax3.transAxes, fontsize=10, bbox=dict(facecolor='white'))
+# ax3.text(0.72, 0.95, f'Mean: {mean_chla:.2f} mg/m³', ha='left', va='top', transform=ax3.transAxes, fontsize=10, bbox=dict(facecolor='white'))
 
 # === Final Layout ===
 fig.suptitle(f'Vertical Profile of Chla and Temperature', fontsize=16)
