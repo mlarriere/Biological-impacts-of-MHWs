@@ -78,7 +78,11 @@ os.makedirs(os.path.join(output_path, "det_depth/austral_summer"), exist_ok=True
 det_files = glob.glob(os.path.join(output_path, "det_depth/det_*.nc"))
 
 def austral_sumer(file):
+
     start_time = time.time()
+
+    # For testing
+    # file =  '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth/det_11m.nc'
 
     # Retrieve depth of file as string
     basename = os.path.basename(file)
@@ -86,7 +90,6 @@ def austral_sumer(file):
     print(f'Depth being processed: {depth_str}\n')
 
     # Read data
-    # file =  '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth/det_11m.nc'
     det_ds = xr.open_dataset(file)
 
     # Select only summer and early spring
@@ -96,7 +99,7 @@ def austral_sumer(file):
     ], dim='days') #shape: (40, 181, 434, 1442)
     
     # Save file
-    output_file = os.path.join(output_path, "det_depth/austral_summer", f"det_depth{depth_str}m_summer.nc")
+    output_file = os.path.join(output_path, "det_depth/austral_summer", f"det_depth{depth_str}m.nc")
     if not os.path.exists(output_file):
         try:
             det_austral.to_netcdf(output_file, engine="netcdf4")
@@ -111,9 +114,7 @@ def austral_sumer(file):
     del det_austral, det_ds
     gc.collect()
     
-process_map(austral_sumer, det_files, max_workers=30, desc="Processing file")  # in parallel - computing time ~5min per file
-
-
-
+# Calling function in parallel
+process_map(austral_sumer, det_files, max_workers=30, desc="Processing file")  #computing time ~1min per file
 
 # %%
