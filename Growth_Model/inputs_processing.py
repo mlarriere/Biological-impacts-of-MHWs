@@ -23,10 +23,11 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 
 import time
+from tqdm.contrib.concurrent import process_map
 
 from joblib import Parallel, delayed
 
-# -------------------------------- SETTINGS --------------------------------
+# %% -------------------------------- SETTINGS --------------------------------
 # Set working directory
 working_dir = "/home/mlarriere/Projects/biological_impacts_MHWs/Biological-impacts-of-MHWs/"
 os.chdir(working_dir)
@@ -41,6 +42,8 @@ path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
 path_chla = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/z_TOT_CHL/'
 path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
+os.makedirs(os.path.join(path_growth_inputs, "austral_summer"), exist_ok=True)
+path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
 
 # Sizes and dimensions
 years = range(1980, 2020)
@@ -52,7 +55,7 @@ nz = 35  # depths levels
 neta = 434
 nxi = 1442
 
-det_combined_ds = xr.open_dataset(os.path.join(path_det, f"det_rel_abs_combined.nc")) #detected event (SST>abs and rel threshold) - boolean
+# det_combined_ds = xr.open_dataset(os.path.join(path_det, f"det_rel_abs_combined.nc")) #detected event (SST>abs and rel threshold) - boolean
 
 #%% ROMS chlorophyll in [mg Chla/m3]
 def mean_chla(yr):
@@ -60,7 +63,7 @@ def mean_chla(yr):
     start_time = time.time()
 
     # Read data
-    # yr=0
+    yr=0
     ds_chla = xr.open_dataset(os.path.join(path_chla, f"z_SO_d025_avg_daily_{1980+yr}.nc"))
     ds_chla_100m = ds_chla.isel(time= slice(0,365), depth=slice(0, 14)) #depth from 0 to 100m depth
 
@@ -94,14 +97,28 @@ chla_mean_yearly = Parallel(n_jobs=30)(delayed(mean_chla)(yr) for yr in range(0,
 # Combine year
 chla_mean_all = xr.concat(chla_mean_yearly, dim='year')
 
-# Select extent - south of 60°S
+# === Select extent - south of 60°S
 south_mask = chla_mean_all['lat_rho'] <= -60
 chla_100m_mean_south = chla_mean_all.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
-
 
 # Write to file
 chla_100m_mean_south.to_netcdf(path=os.path.join(path_growth_inputs, "chla_avg100m_yearly_60S.nc"), mode='w')
 
+# === Select only austral summer and early spring
+file = path_growth_inputs + '/chla_avg100m_yearly_60S.nc'
+# Read data
+ds_chla = xr.open_dataset(file) #days ranging from idx0 to idx364 -for chla contain already coord days
+
+# Select only austral summer and early spring
+jan_april = ds_chla.sel(days=slice(1, 120)) # 1 Jan to 30 April (Day 1-120) 
+nov_dec = ds_chla.sel(days=slice(305, 365)) # 1 Nov to 31 Dec (Day 305–365)
+ds_austral = xr.concat([nov_dec, jan_april], dim="days") #181days
+
+# Save to file
+output_file = os.path.join(path_growth_inputs_summer, f"chla_austral_avg100m.nc")
+if not os.path.exists(output_file):
+    ds_austral.to_netcdf(output_file, engine="netcdf4")
+    
 # %% Temperature from ROMS [°C]
 def mean_temp(ieta):
     # Read data
@@ -128,7 +145,6 @@ temp_100m_mean = np.zeros((nyears, ndays, neta, nxi))  # Shape: (40, 365, neta, 
 for ieta in range(0, neta):
     temp_100m_mean[:, :, ieta, :] = results[ieta]
 
-
 # To dataset
 ds_temp_100m_mean = xr.Dataset(
     {"avg_temp": (["years", "days", "eta_rho", "xi_rho"], temp_100m_mean)},
@@ -141,14 +157,28 @@ ds_temp_100m_mean = xr.Dataset(
     attrs={"description": "Averaged temperature of the first 100m [°C]"}
 )
 
-# Select extent - south of 60°S
+# === Select extent - south of 60°S
 south_mask = ds_temp_100m_mean['lat_rho'] <= -60
 temp_100m_mean_south = ds_temp_100m_mean.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
 
 # Write to file
 temp_100m_mean_south.to_netcdf(path=os.path.join(path_growth_inputs, "temp_avg100m_yearly_60S.nc"), mode='w')
 
-# Need to add a condition on bathymetry if only 3 value instead of 14 - not representative!!
+# === Select only austral summer and early spring
+file = path_growth_inputs + '/temp_avg100m_yearly_60S.nc'
+# Read data
+ds_temp = xr.open_dataset(file) #days ranging from idx0 to idx364 -for chla contain already coord days
+
+# Select only austral summer and early spring
+jan_april = ds_temp.sel(days=slice(1, 120)) # 1 Jan to 30 April (Day 1-120) 
+nov_dec = ds_temp.sel(days=slice(305, 365)) # 1 Nov to 31 Dec (Day 305–365)
+ds_austral = xr.concat([nov_dec, jan_april], dim="days") #181days
+
+# Save to file
+output_file = os.path.join(path_growth_inputs_summer, f"temp_austral_avg100m.nc")
+if not os.path.exists(output_file):
+    ds_austral.to_netcdf(output_file, engine="netcdf4")
+
 
 #%% Visualization
 # === Parameters ===
