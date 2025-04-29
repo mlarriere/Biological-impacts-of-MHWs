@@ -388,7 +388,14 @@ fig.suptitle('Detection of Marine Heatwaves at Different Depths and Thresholds (
 plt.tight_layout()
 plt.subplots_adjust(bottom=0.2)
 # plt.show()
-plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/defining_mhw_100m/example_event_detection_3depths.pdf'), format='pdf', dpi=150, bbox_inches='tight') #image vectorielle
+# Converts all plot elements to raster inside the PDF --> reducing size while keeping the vector type
+for ax in plt.gcf().get_axes():
+    for artist in ax.get_children():
+        if hasattr(artist, 'set_rasterized'):
+            artist.set_rasterized(True)
+
+plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/defining_mhw_100m/example_event_detection_3depths.pdf'),
+            format='pdf', dpi=150, bbox_inches='tight')
 
 
 # %% -------------------------------- Durations Events --------------------------------
