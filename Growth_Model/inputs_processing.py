@@ -15,6 +15,7 @@ import xarray as xr
 import numpy as np
 import gc
 import psutil #retracing memory
+import glob
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -134,6 +135,15 @@ def mean_chla(yr):
 
 process_map(mean_chla, range(0, nyears), max_workers=30, desc="Processing year")  #computing time ~3min per year
 
+# ==== Combining years
+files_chla_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "chla_avg100m_daily_*.nc")))
+datasets = [xr.open_dataset(f) for f in files_chla_yearly]
+chla_mean_all = xr.concat(datasets, dim='year')
+# Write dataset to file
+output_file = os.path.join(path_growth_inputs, f"chla_avg100m_allyears.nc")
+if not os.path.exists(output_file):
+    chla_mean_all.to_netcdf(output_file, mode='w')  
+
 # %% -------------------------------- Chla at each depth --------------------------------
 def chla_process(yr):
 
@@ -209,7 +219,7 @@ all_depths= ds['z_rho'].values
 
 def mean_temp(ieta, yr):
     # ieta=200
-    # yr=1
+    # yr=40
     start_time = time.time()
 
     # Read data
@@ -245,8 +255,8 @@ def mean_temp(ieta, yr):
     return da_temp_weighted_mean
 
 from functools import partial
-for yr in range(1, 40):
-    # yr=0
+for yr in range(1, 41):
+    yr=40
     print(f'------------ YEAR {1979+yr} ------------')
     extract_year_eta_for_yr = partial(mean_temp, yr=yr)
     da_temp_list = process_map(extract_year_eta_for_yr, range(0, neta), max_workers=30, desc="Processing ieta for 1yr")  #computing time ~5min per yr
@@ -262,9 +272,18 @@ for yr in range(1, 40):
     temp_60S_south = da_temp_combined_transposed.where(south_mask, drop=True) #shape (181, 231, 1442)
 
     # Write dataset to file
-    output_file = os.path.join(path_growth_inputs, f"temp_avg100m_daily_{1980+yr}.nc")
+    output_file = os.path.join(path_growth_inputs, f"temp_avg100m_daily_{1979+yr}.nc")
     if not os.path.exists(output_file):
         temp_60S_south.to_netcdf(output_file, mode='w')  
+
+# ==== Combining years
+files_temp_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "temp_avg100m_daily_*.nc")))
+datasets = [xr.open_dataset(f) for f in files_temp_yearly]
+temp_mean_all = xr.concat(datasets, dim='year')
+# Write dataset to file
+output_file = os.path.join(path_growth_inputs, f"temp_avg100m_allyears.nc")
+if not os.path.exists(output_file):
+    temp_mean_all.to_netcdf(output_file, mode='w')  
 
 
 
