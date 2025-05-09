@@ -69,6 +69,7 @@ file_var = 'temp_DC_BC_'
 path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
 path_chla = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/z_TOT_CHL/'
+path_chla_corrected = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/' #files: TOT_CHL_BC_*nc
 path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
 os.makedirs(os.path.join(path_growth_inputs, "austral_summer"), exist_ok=True)
 path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
@@ -92,42 +93,44 @@ def mean_chla(yr):
     start_time = time.time()
 
     # Read data
-    ds_chla = xr.open_dataset(os.path.join(path_chla, f"z_SO_d025_avg_daily_{1980+yr}.nc"))
-    ds_chla_100m = ds_chla.isel(time= slice(0,365), depth=slice(0, 14)) #depth from 0 to 100m depth
+    # ds_chla = xr.open_dataset(os.path.join(path_chla, f"z_SO_d025_avg_daily_{1980+yr}.nc"))
+    # ds_chla_100m = ds_chla.isel(time= slice(0,365), depth=slice(0, 14)) #depth from 0 to 100m depth
+    ds_chla = xr.open_dataset(os.path.join(path_chla_corrected, f"TOT_CHL_BC_{1980+yr}.nc"))
+    ds_chla_surf_correct = ds_chla.isel(time= slice(0,365)) #corrected using SeaWIFS at surf
 
     # Reformating
-    ds_chla_mean_yr = ds_chla_100m.rename({'TOT_CHL':'raw_chla'}) # Rename variable
+    ds_chla_mean_yr = ds_chla_surf_correct.rename({'TOT_CHL':'raw_chla'}) # Rename variable
     ds_chla_mean_yr = ds_chla_mean_yr.rename({'time': 'days'})# Rename dimension
     ds_chla_mean_yr = ds_chla_mean_yr.assign_coords(lon_rho = ds_roms.lon_rho , lat_rho=ds_roms.lat_rho, days=np.arange(0,365)) # Replace cftime with integer day-of-year: 1 to 365, (lat, lon) coordinates from temperature dataset
-    ds_chla_mean_yr = xr.Dataset({'raw_chla': ds_chla_mean_yr.raw_chla}).expand_dims(year=[1980 + yr]) # To dataset and adding year dimension - shape (year:1, depth:14, eta_rho:434, xi_rho:1442, days:365)
+    ds_chla_mean_yr = xr.Dataset({'raw_chla': ds_chla_mean_yr.raw_chla}).expand_dims(year=[1980 + yr]) # To dataset and adding year dimension - shape (year:1, eta_rho:434, xi_rho:1442, days:365), max: 2091.5225mg/m3, min: 0mg/m3
 
     # === Select extent - south of 60°S
     south_mask = ds_chla_mean_yr['lat_rho'] <= -60
     chla_60S_south = ds_chla_mean_yr.where(south_mask, drop=True) #shape (1, 365, 14, 231, 1442)
 
     # === Select only austral summer and early spring
-    print('--- Austral Summer ---')
-    jan_april = chla_60S_south.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
-    nov_dec = chla_60S_south.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
-    chla_austral_60S_south = xr.concat([nov_dec, jan_april], dim="days") #181days
+    # print('--- Austral Summer ---')
+    # jan_april = chla_60S_south.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
+    # nov_dec = chla_60S_south.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
+    # chla_austral_60S_south = xr.concat([nov_dec, jan_april], dim="days") #181days
 
     # Check if there is at least 14 layers to compute the mean
-    valid_depth = ~chla_austral_60S_south.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
-    ds_chla_mean_valid = chla_austral_60S_south.where(valid_depth)
+    # valid_depth = ~chla_austral_60S_south.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
+    # ds_chla_mean_valid = chla_austral_60S_south.where(valid_depth)
 
     # Compute the mean - if not enough vertical layers, mean = Nan
-    print('--- Computing mean ---')
-    depth_values = np.abs(ds_chla_mean_valid.depth.values)
-    depth_thickness = np.diff(depth_values, prepend=0) # Compute the thickness of each depth layer
-    depth_thickness = depth_thickness[:, np.newaxis, np.newaxis]  # Shape (14, 1, 1)
-    da_chla_weighted_mean = (ds_chla_mean_valid.raw_chla * depth_thickness).sum(dim='depth') / depth_thickness.sum() # Need to consider that the cell don't have the same height -- WEIGHTING
-    da_chla_weighted_mean = xr.where(da_chla_weighted_mean < 0, 0, da_chla_weighted_mean) # Set negative values to 0
+    # print('--- Computing mean ---')
+    # depth_values = np.abs(ds_chla_mean_valid.depth.values)
+    # depth_thickness = np.diff(depth_values, prepend=0) # Compute the thickness of each depth layer
+    # depth_thickness = depth_thickness[:, np.newaxis, np.newaxis]  # Shape (14, 1, 1)
+    # da_chla_weighted_mean = (ds_chla_mean_valid.raw_chla * depth_thickness).sum(dim='depth') / depth_thickness.sum() # Need to consider that the cell don't have the same height -- WEIGHTING
+    # da_chla_weighted_mean = xr.where(da_chla_weighted_mean < 0, 0, da_chla_weighted_mean) # Set negative values to 0
     # da_chla_weighted_mean.isel(days=100).plot()
 
     # Write dataset to file
-    output_file = os.path.join(path_growth_inputs, f"chla_avg100m_daily_{1980+yr}.nc")
+    output_file = os.path.join(path_growth_inputs, f"chla_surf_corr_daily_{1980+yr}.nc") #chla_avg100m_daily_{1980+yr}.nc
     if not os.path.exists(output_file):
-        da_chla_weighted_mean.to_netcdf(output_file, mode='w')  
+        chla_60S_south.to_netcdf(output_file, mode='w')  
 
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -136,11 +139,11 @@ def mean_chla(yr):
 process_map(mean_chla, range(0, nyears), max_workers=30, desc="Processing year")  #computing time ~3min per year
 
 # ==== Combining years
-files_chla_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "chla_avg100m_daily_*.nc")))
+files_chla_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "chla_surf_corr_daily_*.nc"))) #chla_avg100m_daily_*.nc
 datasets = [xr.open_dataset(f) for f in files_chla_yearly]
 chla_mean_all = xr.concat(datasets, dim='year')
 # Write dataset to file
-output_file = os.path.join(path_growth_inputs, f"chla_avg100m_allyears.nc")
+output_file = os.path.join(path_growth_inputs, f"chla_surf_corr_allyears.nc") #chla_avg100m_allyears.nc
 if not os.path.exists(output_file):
     chla_mean_all.to_netcdf(output_file, mode='w')  
 
@@ -231,13 +234,13 @@ def mean_temp(ieta, yr):
     ds_temp_mean_yr = ds_temp_mean_yr.rename({'z_rho': 'depth'})
     
     # === Select only austral summer and early spring
-    jan_april = ds_temp_mean_yr.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
-    nov_dec = ds_temp_mean_yr.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
-    temp_austral_mean_yr = xr.concat([nov_dec, jan_april], dim="days") #181days
+    # jan_april = ds_temp_mean_yr.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
+    # nov_dec = ds_temp_mean_yr.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
+    # temp_austral_mean_yr = xr.concat([nov_dec, jan_april], dim="days") #181days
 
     # Check if there is at least 14 layers to compute the mean
-    valid_depth = ~temp_austral_mean_yr.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
-    ds_temp_mean_valid = temp_austral_mean_yr.where(valid_depth)
+    valid_depth = ~ds_temp_mean_yr.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
+    ds_temp_mean_valid = ds_temp_mean_yr.where(valid_depth)
 
     # Compute the mean - if not enough vertical layers, mean = Nan
     depth_values = np.abs(ds_temp_mean_valid.depth.values)
@@ -256,7 +259,7 @@ def mean_temp(ieta, yr):
 
 from functools import partial
 for yr in range(1, 41):
-    yr=40
+    # yr=40
     print(f'------------ YEAR {1979+yr} ------------')
     extract_year_eta_for_yr = partial(mean_temp, yr=yr)
     da_temp_list = process_map(extract_year_eta_for_yr, range(0, neta), max_workers=30, desc="Processing ieta for 1yr")  #computing time ~5min per yr
@@ -280,6 +283,7 @@ for yr in range(1, 41):
 files_temp_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "temp_avg100m_daily_*.nc")))
 datasets = [xr.open_dataset(f) for f in files_temp_yearly]
 temp_mean_all = xr.concat(datasets, dim='year')
+temp_mean_all = temp_mean_all.rename({'__xarray_dataarray_variable__':'avg_temp'})
 # Write dataset to file
 output_file = os.path.join(path_growth_inputs, f"temp_avg100m_allyears.nc")
 if not os.path.exists(output_file):
