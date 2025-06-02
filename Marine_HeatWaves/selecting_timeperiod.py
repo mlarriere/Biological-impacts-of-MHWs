@@ -56,10 +56,10 @@ print("Working directory set to:", os.getcwd())
 ds_roms = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/SO_d025_avg_daily_1979.nc')
 z_rho = np.load('/home/jwongmeng/work/ROMS/scripts/coords/z_rho.npy')
 
-path_mhw = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/' # drift and bias corrected temperature files
+path_temp = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/' # drift and bias corrected temperature files
 joel_path ='/home/jwongmeng/work/ROMS/scripts/mhw_krill/' #codes joel
-output_path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
-output_path = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
+path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
+path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth'
 
 # Sizes and dimensions
 years = range(1980, 2020)
@@ -73,9 +73,9 @@ nxi = 1442  # lon
 
 # %% Select time period according to Bahlburg et al. (2023)
 # We only are interested by the summer and early spring in the austral summer, i.e. 1stNov (day=305) until 1st May (day=121)
-os.makedirs(os.path.join(output_path, "det_depth/austral_summer"), exist_ok=True)
+os.makedirs(os.path.join(path_det, "austral_summer"), exist_ok=True)
 
-det_files = glob.glob(os.path.join(output_path, "det_depth/det_*.nc"))
+det_files = glob.glob(os.path.join(path_det, "det_*.nc"))
 
 def austral_sumer(file):
 
@@ -86,20 +86,23 @@ def austral_sumer(file):
 
     # Retrieve depth of file as string
     basename = os.path.basename(file)
-    depth_str = basename.split('_')[1].replace('m.nc', '')  # gets '5', '11', etc.
+    depth_str = basename.split('_')[1].replace('m.nc', '')
     print(f'Depth being processed: {depth_str}\n')
 
     # Read data
-    det_ds = xr.open_dataset(file)
+    det_ds = xr.open_dataset(file) #days ranging from idx0 to idx364
 
-    # Select only summer and early spring
-    det_austral = xr.concat([
-        det_ds.isel(days=slice(0, 121)),     # 1 Jan to 1 May (Day 0–120)
-        det_ds.isel(days=slice(305, 365))    # 1 Nov to 31 Dec (Day 305–364)
-    ], dim='days') #shape: (40, 181, 434, 1442)
+    # Select only austral summer and early spring
+    jan_april = det_ds.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
+    jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
     
-    # Save file
-    output_file = os.path.join(output_path, "det_depth/austral_summer", f"det_depth{depth_str}m.nc")
+    nov_dec = det_ds.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
+    nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
+    
+    det_austral = xr.concat([nov_dec, jan_april], dim="days") #181days
+
+    # Save to file
+    output_file = os.path.join(path_det, "austral_summer", f"det_depth{depth_str}m.nc")
     if not os.path.exists(output_file):
         try:
             det_austral.to_netcdf(output_file, engine="netcdf4")
@@ -115,6 +118,6 @@ def austral_sumer(file):
     gc.collect()
     
 # Calling function in parallel
-process_map(austral_sumer, det_files, max_workers=30, desc="Processing file")  #computing time ~1min per file
+process_map(austral_sumer, det_files, max_workers=30, desc="Processing file")  #computing time ~1-4min per file
 
 # %%
