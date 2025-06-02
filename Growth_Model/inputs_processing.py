@@ -71,7 +71,6 @@ path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
 path_chla = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/z_TOT_CHL/'
 path_chla_corrected = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/' #files: TOT_CHL_BC_*nc
 path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
-os.makedirs(os.path.join(path_growth_inputs, "austral_summer"), exist_ok=True)
 path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
 
 # Sizes and dimensions
@@ -83,8 +82,6 @@ ndays = np.size(days)
 nz = 35  # depths levels
 neta = 434
 nxi = 1442
-
-# det_combined_ds = xr.open_dataset(os.path.join(path_det, f"det_rel_abs_combined.nc")) #detected event (SST>abs and rel threshold) - boolean
 
 #%% ============================== ROMS chlorophyll in [mg Chla/m3] ==============================
 # -------------------------------- Weighted averaged Chla --------------------------------
@@ -127,10 +124,23 @@ def mean_chla(yr):
     # da_chla_weighted_mean = xr.where(da_chla_weighted_mean < 0, 0, da_chla_weighted_mean) # Set negative values to 0
     # da_chla_weighted_mean.isel(days=100).plot()
 
+    # === Cap the data - max 5mg/m3 ===
+    chla_filtered = chla_60S_south.where(chla_60S_south.raw_chla <= 5)
+
+    # Plot histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(chla_filtered.raw_chla.values.flatten(), bins=50, color='teal', alpha=0.75)
+    plt.title(f"Histogram of Surface Chlorophyll (South of 60°S) in {yr+1980}")
+    plt.xlabel("Chlorophyll-a Concentration [mg/m3]")
+    plt.ylabel("Frequency")
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
     # Write dataset to file
-    output_file = os.path.join(path_growth_inputs, f"chla_surf_corr_daily_{1980+yr}.nc") #chla_avg100m_daily_{1980+yr}.nc
+    output_file = os.path.join(path_growth_inputs, f"chla_surf_daily_{1980+yr}.nc") #chla_avg100m_daily_{1980+yr}.nc
     if not os.path.exists(output_file):
-        chla_60S_south.to_netcdf(output_file, mode='w')  
+        chla_filtered.to_netcdf(output_file, mode='w')  
 
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -139,11 +149,11 @@ def mean_chla(yr):
 process_map(mean_chla, range(0, nyears), max_workers=30, desc="Processing year")  #computing time ~3min per year
 
 # ==== Combining years
-files_chla_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "chla_surf_corr_daily_*.nc"))) #chla_avg100m_daily_*.nc
+files_chla_yearly = sorted(glob.glob(os.path.join(path_growth_inputs, "chla_surf_daily_*.nc"))) #chla_avg100m_daily_*.nc
 datasets = [xr.open_dataset(f) for f in files_chla_yearly]
 chla_mean_all = xr.concat(datasets, dim='year')
 # Write dataset to file
-output_file = os.path.join(path_growth_inputs, f"chla_surf_corr_allyears.nc") #chla_avg100m_allyears.nc
+output_file = os.path.join(path_growth_inputs, f"chla_surf_allyears.nc") #chla_avg100m_allyears.nc
 if not os.path.exists(output_file):
     chla_mean_all.to_netcdf(output_file, mode='w')  
 
@@ -439,6 +449,3 @@ plt.show()
 
 
 
-# %% Associating temperature occurring during detected events
-det_temp_surf = surf_temp.where(det_combined_ds) #extremely long computing!! 
-det_temp_surf.to_netcdf(path_det+'det_sst_combined.nc', mode='w')
