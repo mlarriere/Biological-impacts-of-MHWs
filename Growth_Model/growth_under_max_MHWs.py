@@ -100,8 +100,10 @@ date_dict = dict(date_list)
 
 
 # %% MHW durations
-mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")) #dataset - int
+mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
+print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 det_combined_ds = xr.open_dataset(os.path.join(path_combined_thesh, 'det_depth5m.nc')) #boolean shape (40, 181, 434, 1442)
+print(det_combined_ds.det_4deg.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 
 # === Select only austral summer and early spring
 jan_april = mhw_duration_5m.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
@@ -112,18 +114,9 @@ nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
 nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
 mhw_duration_austral_summer = xr.concat([nov_dec, jan_april], dim="days") #181days
 
-# === Redefining Durations of events
-# MHW durations have been defined using the rules of Hobday et al (2016) and are thus define using solely the relative threshold (90thperc)
-# We need to redefine the duration based on the condition that a mhw is when T°C > absolute AND relative thresholds 
-detection_mask = det_combined_ds['det_1deg'] #1°C smallest thresh (if >4°C than also >1°C)
-mhw_duration_5m_NEW = mhw_duration_austral_summer['mhw_durations'].where(detection_mask> 0)
-
-# Check if gaps and 5days properties are verified
-# TODO
-
 # === Select 60°S south extent
-south_mask = mhw_duration_5m_NEW['lat_rho'] <= -60
-mhw_duration_5m_NEW_60S_south = mhw_duration_5m_NEW.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
+south_mask = mhw_duration_austral_summer['lat_rho'] <= -60
+mhw_duration_5m_NEW_60S_south = mhw_duration_austral_summer.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
 det_combined_ds_60S_south = det_combined_ds.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
 
 # === Associate each mhw duration with the event threshold 
@@ -142,10 +135,11 @@ ds_mhw_duration= xr.Dataset(
         years=(['years'], mhw_duration_5m_NEW_60S_south.coords['years'].values), # Keeping information on day 
         ),
     attrs = {
-            "duration":"Duration redefined as following the rules of Hobday et al (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
+            "depth": "5m",
+            "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
             "det_ideg": "Detected events where SST > (absolute threshold (i°C) AND 90th percentile) , boolean array"
             }                
-        ) 
+        )
 
 # %% Find longest and more intense MHW
 det3deg = False #True #False
@@ -199,10 +193,9 @@ growth_seasons = xr.open_dataset(os.path.join(path_growth, "growth_1st_attempt_s
 def subset_spatial_domain(ds, lat_range=(lat-10, 60), lon_range=(lon-10, lon+30)):
     lat_min, lat_max = lat_range
     lon_min, lon_max = lon_range
-    
     return ds.where((ds['lat_rho'] >= lat_min) & (ds['lat_rho'] <= lat_max) & (ds['lon_rho'] >= lon_min) & (ds['lon_rho'] <= lon_max), drop=True)
 
-growth_study_area = subset_spatial_domain(growth_seasons)
+growth_study_area = subset_spatial_domain(growth_seasons) #shape : (39, 106, 161, 181)
 mhw_duration_study_area = subset_spatial_domain(ds_mhw_duration) #shape (40, 181, 147, 120)
 
 
@@ -229,11 +222,11 @@ ax1 = fig.add_subplot(gs[1], projection=ccrs.SouthPolarStereo())
 
 
 # === Subplot 1: Growth ===
-growth_data = growth_study_area.growth.isel(years=year_index).mean(dim='days')
+growth_data = growth_study_area.growth_seasons.isel(years=year_index).mean(dim='days')
 growth_plot = growth_data.plot.pcolormesh(
     ax=ax0, transform=ccrs.PlateCarree(),
     x='lon_rho', y='lat_rho', cmap='PuOr_r', add_colorbar=False,
-    norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth), vcenter=0, vmax=np.nanmax(growth_study_area.growth)),
+    norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth_seasons), vcenter=0, vmax=np.nanmax(growth_study_area.growth_seasons)),
     rasterized=True
 )
 ax0.set_title(f"Mean growth during the growing season 2017-2018", fontsize=14)
@@ -375,11 +368,9 @@ temp_avg_100m_study_area = subset_spatial_domain(temp_avg_100m) #select spatial 
 temp_avg_100m_1season = defining_season(temp_avg_100m_study_area, target_start_year) #select temporal extent
 
 # ==== Chla [mh Chla/m3] -- Weighted averaged chla of the first 100m - Austral summer - 60S
-chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_corr_allyears.nc')) 
-# chla_avg_100m= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_avg100m_allyears.nc')) 
+chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears.nc')) 
 chla_surf = chla_surf.rename({'year': 'years'})
-chla_filtered = chla_surf.where(chla_surf.raw_chla < 5) #kick out outliers
-chla_surf_study_area = subset_spatial_domain(chla_filtered) #select spatial extent
+chla_surf_study_area = subset_spatial_domain(chla_surf) #select spatial extent
 chla_surf_1season = defining_season(chla_surf_study_area, target_start_year) #select temporal extent
 
 #%% === TEST === 
