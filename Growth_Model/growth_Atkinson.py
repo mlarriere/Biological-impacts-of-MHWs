@@ -139,15 +139,13 @@ temp_avg_100m = temp_avg_100m.rename({'year': 'years'})
 # temp_avg_100m.avg_temp.isel(years=30, days=30).plot()
 
 # ==== Chla [mh Chla/m3] -- Weighted averaged chla of the first 100m - Austral summer - 60S
-chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_corr_allyears.nc')) 
+chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears.nc')) 
 chla_surf = chla_surf.rename({'year': 'years'})
 # chla_avg_100m.raw_chla.isel(years=30, days=30).plot()
-chla_filtered = chla_surf.where(chla_surf.raw_chla < 20) #kick out outliers
 
 # Reformating - stacking time dimension #shape (231, 1442, 7240)
 temp_100m_stack = temp_avg_100m.stack(time= ['years', 'days'])
 chla_surf_stack = chla_surf.stack(time= ['years', 'days']) 
-chla_filtered_stack = chla_filtered.stack(time= ['years', 'days']) 
 
 # %% Check extremes CHLA
 # ds= chla_surf_stack.raw_chla.sel(years=1984, days=364)
@@ -206,20 +204,20 @@ chla_filtered_stack = chla_filtered.stack(time= ['years', 'days'])
 
 # %% Hypothetical Growth 
 # max/min values
-max_obs_chla = chla_filtered_stack.raw_chla.max() # 19.999975 mg/m3 Chla
-min_obs_chla = chla_filtered_stack.raw_chla.min() #0 mg/m3
+max_obs_chla = chla_surf_stack.raw_chla.max() #5 mg/m3 Chla
+min_obs_chla = chla_surf_stack.raw_chla.min() #0 mg/m3
 max_obs_temp = temp_100m_stack.avg_temp.max() #7.3°C
 min_obs_temp = temp_100m_stack.avg_temp.min() #-5.03°C
 
 # 2D grid of all combinations
-chla_hyp= np.arange(min_obs_chla, 5, 0.05)
+chla_hyp= np.arange(min_obs_chla, 5.05, 0.05)
 temp_hyp = np.arange(min_obs_temp, max_obs_temp, 0.05)
 
 CHLA, TEMP = np.meshgrid(chla_hyp, temp_hyp)
 growth_hyp = a + b* length + c *length**2 + (d*CHLA)/(e+CHLA) + f*TEMP + g*TEMP**2 #[mm] 
 
 # %% Growth model - Eq. 4 (Atkinson et al. 2006)
-growth_da = a + b* length + c *length**2 + (d*chla_filtered_stack.raw_chla)/(e+chla_filtered_stack.raw_chla) + f*temp_100m_stack.avg_temp + g*temp_100m_stack.avg_temp**2 #[mm] - predicted daily (computing time ~40min)
+growth_da = a + b* length + c *length**2 + (d*chla_surf_stack.raw_chla)/(e+chla_surf_stack.raw_chla) + f*temp_100m_stack.avg_temp + g*temp_100m_stack.avg_temp**2 #[mm] - predicted daily (computing time ~40min)
 growth_redimensioned = growth_da.unstack('time')
 
 # Write to file
@@ -235,7 +233,7 @@ growth_ds =xr.Dataset(
     attrs={"description": "Growth of krill based on Atkinson et al (2006) equation, model4 (sex and maturity considered) -- FULL YEAR"}
 )
 
-growth_ds.to_netcdf(path=os.path.join(path_growth, "growth_1st_attempt_fullyr.nc"), mode='w')
+# growth_ds.to_netcdf(path=os.path.join(path_growth, "growth_1st_attempt_fullyr.nc"), mode='w')
 # growth_redimensioned = xr.open_dataset(os.path.join(path_growth, "growth_1st_attempt_fullyr.nc"))
 
 # %% Defining seasonal extent for growth (austral summer - early spring)
@@ -253,7 +251,7 @@ def defining_season(ds, starting_year):
 norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
 
 # Define the starting year for the growth season (Nov–Apr)
-target_start_year = 2018
+target_start_year = 1980
 year_to_plot = target_start_year - 1980
 
 fig = plt.figure(figsize=(16, 6))
@@ -267,23 +265,24 @@ TEMP_full = temp_avg_100m.avg_temp.isel(years=year_to_plot, xi_rho=1000, eta_rho
 
 pcm1 = ax1.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto', cmap='coolwarm_r', norm=norm)
 contours1 = ax1.contour(CHLA, TEMP, growth_hyp, levels=20, colors='w', linewidths=0.5)
-ax1.clabel(contours1, inline=True, fontsize=8, fmt="%.2f")
+ax1.clabel(contours1, inline=True, fontsize=12, fmt="%.2f")
 ax1.plot(CHLA_full, TEMP_full, color='#4D7C8A', linewidth=2, label='Krill Growth Path')
 ax1.scatter(CHLA_full[0], TEMP_full[0], color='white', edgecolor='black', s=100, zorder=10, label='Start (1st Jan)')
 ax1.scatter(CHLA_full[-1], TEMP_full[-1], color='black', s=100, zorder=10, label='End (31st Dec)')
-ax1.set_title(f'Full Year {year_to_plot+1980}', fontsize=16)
-ax1.set_xlabel('Chlorophyll-a [mg/m³]', fontsize=13)
-ax1.set_ylabel('Temperature [°C]', fontsize=13)
-# ax1.set_xlim(0, 5)
+ax1.set_title(f'Full Year {year_to_plot+1980}', fontsize=18)
+ax1.set_xlabel('Chlorophyll-a [mg/m³]', fontsize=16)
+ax1.set_ylabel('Temperature [°C]', fontsize=16)
+ax1.set_xlim(0, 2)
 ax1.set_ylim(-5, 5)
 ax1.set_yticks([-5, -4, -3, -2, -1, 0, 1, 2 , 3, 4, 5])
-ax1.legend()
-ax1.tick_params(labelsize=11)
+# ax1.set_xticks([0, 1, 2 , 3, 4, 5])
+ax1.legend(fontsize=13)
+ax1.tick_params(labelsize=13)
 
 # ========== GROWTH SEASON ==========
 # Calling function
 # growth_1season = defining_season(growth_redimensioned, target_start_year)
-chla_1season = defining_season(chla_filtered, target_start_year)
+chla_1season = defining_season(chla_surf, target_start_year)
 temp_1season = defining_season(temp_avg_100m, target_start_year)
 
 ax2 = fig.add_subplot(1, 2, 2)
@@ -293,26 +292,26 @@ TEMP_season = temp_1season.avg_temp.isel(xi_rho=1000, eta_rho=200)
 
 pcm2 = ax2.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto', cmap='coolwarm_r', norm=norm)
 contours2 = ax2.contour(CHLA, TEMP, growth_hyp, levels=20, colors='w', linewidths=0.5)
-ax2.clabel(contours2, inline=True, fontsize=8, fmt="%.2f")
+ax2.clabel(contours2, inline=True, fontsize=12, fmt="%.2f")
 ax2.plot(CHLA_season, TEMP_season, color='#4D7C8A', linewidth=2, label='Krill Growth Path')
 ax2.scatter(CHLA_season[0], TEMP_season[0], color='white', edgecolor='black', s=100, zorder=10, label='Start (1st Nov)')
 ax2.scatter(CHLA_season[-1], TEMP_season[-1], color='black', s=100, zorder=10, label='End (30th Apr)')
-ax2.set_title(f'Growth Season {target_start_year}-{target_start_year+1}', fontsize=16)
-ax2.set_xlabel('Chlorophyll-a [mg/m³]', fontsize=13)
-ax2.set_ylabel('Temperature [°C]', fontsize=13)
-# ax2.set_xlim(0, 5)
+ax2.set_title(f'Growth Season {target_start_year}-{target_start_year+1}', fontsize=18)
+ax2.set_xlabel('Chlorophyll-a [mg/m³]', fontsize=16)
+ax2.set_ylabel('Temperature [°C]', fontsize=16)
+ax2.set_xlim(0, 2)
 ax2.set_ylim(-5, 5)
 ax2.set_yticks([-5, -4, -3, -2, -1, 0, 1, 2 , 3, 4, 5])
-ax2.legend()
-ax2.tick_params(labelsize=11)
+# ax2.set_xticks([0, 1, 2 , 3, 4, 5])
+ax2.legend(fontsize=13)
+ax2.tick_params(labelsize=13)
 
 # Shared colorbar
 cbar_ax = fig.add_axes([1.02, 0.1, 0.013, 0.84])  # [left, bottom, width, height]
 cbar = fig.colorbar(pcm2, cax=cbar_ax)
-cbar.set_label('Growth [mm]', fontsize=14)
-cbar.ax.tick_params(labelsize=12)
-
-plt.tight_layout()
+cbar.set_label('Growth [mm]', fontsize=16)
+cbar.ax.tick_params(labelsize=13)
+plt.tight_layout(w_pad=4.0)  
 plt.show()
 # Converts all plot elements to raster inside the PDF --> reducing size while keeping the vector type
 # pcm1.set_rasterized(True)
@@ -321,48 +320,6 @@ plt.show()
 # for i in contours2.collections: c.set_rasterized(True)
 # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/temp_chla_diagrams/{year_to_plot+1980}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
-
-# # CHLA_path = chla_surf.raw_chla.isel(years=year_to_plot, xi_rho=1000, eta_rho=200)
-# # TEMP_path = temp_avg_100m.avg_temp.isel(years=year_to_plot, xi_rho=1000, eta_rho=200)
-
-# CHLA_path = chla_1season.raw_chla.isel(xi_rho=1000, eta_rho=200)#chla_surf.raw_chla.isel(years=year_to_plot, xi_rho=1000, eta_rho=200)
-# TEMP_path = temp_1season.avg_temp.isel(xi_rho=1000, eta_rho=200) #temp_avg_100m.avg_temp.isel(years=year_to_plot, xi_rho=1000, eta_rho=200)
-
-# norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
-
-# plt.figure(figsize=(10, 6))
-# # Smooth background gradient
-# pcm = plt.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto', cmap='coolwarm_r', norm=norm)
-
-# # Contour lines
-# contours = plt.contour(CHLA, TEMP, growth_hyp, levels=20, colors='w', linewidths=0.5)
-# plt.clabel(contours, inline=True, fontsize=8, fmt="%.2f")  # Contour labels
-
-# # Krill growth path (as a line on top)
-# plt.plot(CHLA_path, TEMP_path, color='#4D7C8A', linewidth=2, label='Krill Growth Path')
-# # plt.scatter(CHLA_path[0], TEMP_path[0], color='white', edgecolor='black', s=100, zorder=10, label='Start (1st Jan)')
-# # plt.scatter(CHLA_path[-1], TEMP_path[-1], color='black', s=100, zorder=10, label='End (31st Dec)')
-# plt.scatter(CHLA_path[0], TEMP_path[0], color='white', edgecolor='black', s=100, zorder=10, label='Start (1st Nov)')
-# plt.scatter(CHLA_path[-1], TEMP_path[-1], color='black', s=100, zorder=10, label='End (30th Apr)')
-
-# # Colorbar and labels
-# cbar = plt.colorbar(pcm)
-# cbar.set_label('Growth [mm]', fontsize=14)
-# cbar.ax.tick_params(labelsize=12)  # Set colorbar tick fontsize
-
-# # Axis
-# plt.xlabel('Chlorophyll-a [mg/m³]', fontsize=14)
-# plt.ylabel('Temperature [°C]', fontsize=14)
-# plt.xticks(fontsize=12)
-# plt.yticks(fontsize=12)
-# plt.xlim(0, 5)
-# plt.ylim(-4, 4)
-# plt.legend()
-# # plt.title(f'Growth vs Temperature and Chlorophyll-a \nFrom 1st January until 31st December {year_to_plot+1980}', fontsize=18)
-# plt.title(f'Growth vs Temperature and Chlorophyll-a \nGrowth season {year_to_plot+1980} -{year_to_plot+1980+1} ', fontsize=18)
-# plt.tight_layout()
-# plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/tem_chla_diagram/1season{year_to_plot+1980}-{year_to_plot+1980+1}.png'),format='png', bbox_inches='tight')
 # %% Select growth season - all years
 def define_season_all_years(ds):
     # ds = growth_redimensioned
@@ -379,9 +336,12 @@ def define_season_all_years(ds):
                 days_jan_apr = ds.sel(days=slice(0, 119), years=y + 1)
 
                 # Combine days
-                season = xr.concat([days_nov_dec, days_jan_apr],
-                                dim=xr.DataArray(np.concatenate([days_nov_dec['days'].values, days_jan_apr['days'].values]),
-                                                    dims="days", name="days"))
+                season = xr.concat(
+                    [days_nov_dec, days_jan_apr],
+                    dim=xr.DataArray(np.concatenate([days_nov_dec['days'].values, 
+                                                     days_jan_apr['days'].values]),
+                                                     dims="days", 
+                                                     name="days"))
 
                 season = season.expand_dims(season_year=[y])  # tag with season start year
                 season_list.append(season)
@@ -398,9 +358,11 @@ def define_season_all_years(ds):
 
 growth_seasons = define_season_all_years(growth_redimensioned) #~25min 
 growth_seasons = growth_seasons.rename({'season_year': 'years', 'years': 'day_years'})
-growth_seasons.to_netcdf(path=os.path.join(path_growth, "growth_1st_attempt_seasonal.nc"), mode='w')
+ds =xr.Dataset({"growth_seasons": growth_seasons})
+ds["growth_seasons"].attrs["description"] = "Seasonal growth over time and space"
+ds.to_netcdf(path=os.path.join(path_growth, "growth_1st_attempt_seasonal.nc"), mode='w')
 
-chla_filtered_seasons = define_season_all_years(chla_filtered)
+chla_filtered_seasons = define_season_all_years(chla_surf)
 chla_filtered_seasons = chla_filtered_seasons.rename({'season_year': 'years', 'years': 'day_years'})
 temp_avg_100m_seasons = define_season_all_years(temp_avg_100m)
 temp_avg_100m_seasons = temp_avg_100m_seasons.rename({'season_year': 'years', 'years': 'day_years'})
@@ -415,29 +377,45 @@ temp_avg_100m_seasons = temp_avg_100m_seasons.rename({'season_year': 'years', 'y
 print(f'For maximum chla ({chla_filtered_seasons.raw_chla.max():.2f}mg/m3), in the eq result as {a+(d*chla_filtered_seasons.raw_chla.max())/(e+chla_filtered_seasons.raw_chla.max()):.2f}mm/d')
 print(f'For minimum chla ({chla_filtered_seasons.raw_chla.min():.2f}mg/m3), in the eq result as {a+(d*chla_filtered_seasons.raw_chla.min())/(e+chla_filtered_seasons.raw_chla.min()):.2f}mm/d')
 food_term = a + (d*chla_filtered_seasons.raw_chla)/(e+chla_filtered_seasons.raw_chla)
-food_term_avg = food_term.mean(dim=('years', 'days'))
-from matplotlib.colors import TwoSlopeNorm
-norm_chla = TwoSlopeNorm(vmin=food_term_avg.min(), vcenter=0, vmax=food_term_avg.max())
 
 # Temperature term 
 print(f'For maximum T°C ({temp_avg_100m_seasons.avg_temp.max():.2f}°C), in the eq result as {f*temp_avg_100m_seasons.avg_temp.max() +g * (temp_avg_100m_seasons.avg_temp.max())**2:.2f}mm/d')
 print(f'For minimum T°C ({temp_avg_100m_seasons.avg_temp.min():.2f}°C), in the eq result as {f*temp_avg_100m_seasons.avg_temp.min() + g * (temp_avg_100m_seasons.avg_temp.min())**2:.2f}mm/d')
-print(f'For optimum T°C (0.5°C), in the eq result as {f*0.5 + g * 0.5**2:.2f}°C')
+print(f'For optimum T°C (0.5°C), in the eq result as {f*0.5 + g * 0.5**2:.2f}mm/d')
 temp_term = f*temp_avg_100m_seasons.avg_temp + g*temp_avg_100m_seasons.avg_temp**2
-temp_term_avg = temp_term.mean(dim=('years', 'days'))
-print(f'Maximum T°C term {temp_term_avg.max():.2f}mm/d')
-print(f'Minimum T°C term {temp_term_avg.min():.2f}mm/d')
-abs_max = max(abs(temp_term_avg.min()), abs(temp_term_avg.max()))
-norm_temp = mcolors.Normalize(vmin=temp_term_avg.min(), vmax=temp_term_avg.max())
 
 # Length term 
 length_term = b* length + c *length**2
 print(f'Length term: {length_term:.2f}mm for 35mm krill')
 
-growth_avg = growth_seasons.mean(dim=('years', 'days')).growth
+#%% Baseline vs warming periods
+# === Averages
+food_term_1980_2009_avg = food_term.isel(years=slice(0,30)).mean(dim=('years', 'days'))
+temp_term_1980_2009_avg = temp_term.isel(years=slice(0,30)).mean(dim=('years', 'days'))
+growth_1980_2009_avg = growth_seasons.isel(years=slice(0,30)).mean(dim=('years', 'days'))
+
+food_term_2010_2019_avg = food_term.isel(years=slice(30, 40)).mean(dim=('years', 'days'))
+temp_term_2010_2019_avg  = temp_term.isel(years=slice(30, 40)).mean(dim=('years', 'days'))
+growth_2010_2019_avg  = growth_seasons.isel(years=slice(30, 40)).mean(dim=('years', 'days'))
+
+# === Norm color
+from matplotlib.colors import TwoSlopeNorm
+food_min = min(food_term_1980_2009_avg.min().item(), food_term_2010_2019_avg.min().item()) #-0.2mm/d
+food_max = max(food_term_1980_2009_avg.max().item(), food_term_2010_2019_avg.max().item()) #0.15 mm/d
+norm_chla = TwoSlopeNorm(vmin=food_min, vcenter=0, vmax=food_max)
+ticks_food = [-0.2, -0.1, 0.0, 0.1, 0.2]
+
+temp_min = min(temp_term_1980_2009_avg.min().item(), temp_term_2010_2019_avg.min().item())
+temp_max = max(temp_term_1980_2009_avg.max().item(), temp_term_2010_2019_avg.max().item())
+norm_temp = mcolors.Normalize(vmin=temp_min, vmax=temp_max)
+ticks_temp = [-0.2, -0.15, -0.1, -0.05, 0.0]
+
+norm_growth = mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2)
+ticks_growth = [-0.2, -0.1, 0.0, 0.1, 0.2]
 
 # %% == Plotting
 import cmocean
+from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
 
 # === Circle for south polar projection ===
 theta = np.linspace(0, 2 * np.pi, 100)
@@ -447,37 +425,25 @@ circle = mpath.Path(verts * radius + center)
 
 # === Titles and data for each subplot ===
 datasets = [
-    {
-        'data': growth_avg,
-        'cmap': 'PuOr_r',
-        'norm': mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2),
-        'label': 'Growth [mm/d]',
-        'title': 'Growth (avg 1980–2019)'
-    },
-    {
-        'data': food_term_avg,
-        'cmap': 'RdYlGn',
-        'norm': norm_chla,
-        'label': 'Food term [mm/d]',
-        'title': 'Food term (avg 1980–2019)'
-    },
-    {
-        'data': temp_term_avg,
-        'cmap': cmocean.cm.thermal,
-        'norm': norm_temp,
-        'label': 'Temperature term [mm/d]',
-        'title': 'Temperature (avg 1980–2019)'
-    }
+    # 1980-2009 
+    {'data': growth_1980_2009_avg, 'cmap': 'PuOr_r', 'norm': norm_growth, 'label': '[mm/d]', 'title': 'Growth (1980–2009)'},
+    {'data': food_term_1980_2009_avg, 'cmap': 'RdYlGn', 'norm': norm_chla, 'label': '[mm/d]', 'title': 'Food term (1980–2009)'},
+    {'data': temp_term_1980_2009_avg, 'cmap': cmocean.cm.thermal, 'norm': norm_temp, 'label': '[mm/d]', 'title': 'Temperature term (1980–2009)'},
+    # 2010-2019 
+    {'data': growth_2010_2019_avg, 'cmap': 'PuOr_r', 'norm': norm_growth, 'label': '[mm/d]', 'title': 'Growth (2010–2019)'},
+    {'data': food_term_2010_2019_avg, 'cmap': 'RdYlGn', 'norm': norm_chla, 'label': '[mm/d]', 'title': 'Food term (2010–2019)'},
+    {'data': temp_term_2010_2019_avg, 'cmap': cmocean.cm.thermal, 'norm': norm_temp, 'label': '[mm/d]', 'title': 'Temperature term (2010–2019)'}
 ]
 
 # === Create figure and subplots ===
-fig, axs = plt.subplots(
-    1, 3, figsize=(18, 6),
-    subplot_kw={'projection': ccrs.SouthPolarStereo()},
-        gridspec_kw={'wspace': 0.5}
-)
+fig_width = 6.3228348611  # inches = \textwidth
+fig_height = fig_width * 2 / 3  # adjust for 2 rows
+fig, axs = plt.subplots(2, 3, figsize=(fig_width, fig_height),
+                        subplot_kw={'projection': ccrs.SouthPolarStereo()},
+                        gridspec_kw={'hspace': 0.5, 'wspace': 0.4})
 
-# === Plot each panel ===
+# Flatten axes for plotting
+axs = axs.flatten()
 pcms = []
 for ax, ds in zip(axs, datasets):
     ax.set_boundary(circle, transform=ax.transAxes)
@@ -488,42 +454,81 @@ for ax, ds in zip(axs, datasets):
         y='lat_rho',
         cmap=ds['cmap'],
         norm=ds['norm'],
-        add_colorbar=False
+        add_colorbar=False, 
+        rasterized=True
     )
-    ax.set_title(ds['title'], fontsize=16)
-    ax.coastlines(color='black', linewidth=1.5, zorder=1)
+    ax.set_title(ds['title'], fontsize=10)
+    ax.coastlines(color='black', linewidth=1.0, zorder=1)
     ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
     ax.set_facecolor('lightgrey')
-    ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-    ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-    ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+    # ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+    # ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+    # ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.2, linestyle='--', linewidth=0.7)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xlabel_style = {'size': 6}
+    gl.ylabel_style = {'size': 6}
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
     pcms.append(pcm)
 
-# === Shared colorbar for each panel ===
-for i, pcm in enumerate(pcms):
-    cbar_ax = fig.add_axes([0.35 + i*0.28, 0.15, 0.015, 0.7])  # [left, bottom, width, height]
-    cbar = fig.colorbar(pcm, cax=cbar_ax)
-    cbar.ax.tick_params(labelsize=12)
 
-    # Set the label nicely centered and rotated
+# === One shared horizontal colorbar per column ===
+tick_list = [ticks_growth, ticks_food, ticks_temp]
+# Get position of the top axes in each column to place colorbars beneath them
+for col in range(3):
+    # Position of top row subplot in this column
+    pos_top = axs[col].get_position()
+    # Position of bottom row subplot in this column
+    pos_bottom = axs[col + 3].get_position()
+
+    # Calculate the horizontal center of the column's subplots
+    x_center = (pos_top.x0 + pos_top.x1) / 2
+
+    # Define colorbar axes: centered under the two subplots, height small, width roughly the subplot width
+    cbar_width = pos_top.width * 1.1
+    cbar_height = 0.02
+    cbar_x = x_center - cbar_width / 2
+    cbar_y = pos_bottom.y0 - 0.1  # a bit below the bottom subplot
+
+    cbar_ax = fig.add_axes([cbar_x, cbar_y, cbar_width, cbar_height])
+    cbar = fig.colorbar(pcms[col + 3], cax=cbar_ax, orientation='horizontal', ticks=tick_list[col])
+    cbar.ax.tick_params(labelsize=10)
     cbar.set_label(
-        datasets[i]['label'],
-        fontsize=13,
-        rotation=270,
-        labelpad=15,  # increase space between label and ticks
-        verticalalignment='center'
+        datasets[col]['label'],
+        fontsize=11,
+        labelpad=8
     )
 
-plt.tight_layout(rect=[0, 0, 1, 1.2]) #left, bottom, right, top
-plt.suptitle("Decomposition of the Growth Equation (Atkinson et al. 2006)", fontsize=20)
-# plt.show()
-# Converts all plot elements to raster inside the PDF --> reducing size while keeping the vector type
-for pcm in pcms:
-    pcm.set_rasterized(True)
-plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/growth_decomp_avg1980_2019.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 
+# # === One shared colorbar per column ===
+# cbar_positions = [
+#     [0.34, 0.1, 0.01, 0.8],  # for column 0 (growth)
+#     [0.62, 0.1, 0.01, 0.8],  # for column 1 (food)
+#     [0.92, 0.1, 0.01, 0.8]   # for column 2 (temp)
+# ]
 
+# for i in range(3):
+#     cbar_ax = fig.add_axes(cbar_positions[i])
+#     cbar = fig.colorbar(pcms[i + 3], cax=cbar_ax, ticks=tick_list[i])
+#     cbar.ax.tick_params(labelsize=10)
+#     cbar.set_label(
+#         datasets[i]['label'],
+#         fontsize=11,
+#         rotation=270,
+#         labelpad=12,
+#         verticalalignment='center'
+#     )
+
+
+plt.suptitle("Decomposition of the Growth Equation (Atkinson et al. 2006)", fontsize=14, y=1.1, x=0.52)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/equation_decomp_2periods.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 
 # %% Influence of SST and Chla on growth - 2D Histogram
@@ -718,7 +723,7 @@ plt.show()
 # plt.tight_layout()
 # plt.show()
 
-#%% === Plot averaged growth ===
+#%% ==== Periods comparison ====
 import cmocean
 import matplotlib.colors as mcolors
 def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label=''):
@@ -803,15 +808,15 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label=''):
     cbar2.set_label("Difference", fontsize=14)
     cbar2.ax.tick_params(labelsize=12)
 
-    # plt.show()
+    plt.show()
     # Converts all plot elements to raster inside the PDF --> reducing size while keeping the vector type
-    for sc in scs:
-        sc.set_rasterized(True)
+    # for sc in scs:
+    #     sc.set_rasterized(True)
 
-    if 'contours1' in locals():
-        for c in contours1.collections:
-            c.set_rasterized(True)
-    plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/{varname}_diff.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+    # if 'contours1' in locals():
+    #     for c in contours1.collections:
+    #         c.set_rasterized(True)
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/{varname}_diff.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # Choose variable to plot
 variable = 'temp'  #'growth', 'temp', 'chla'
@@ -837,180 +842,263 @@ elif variable == 'chla':
 plot_comparison(variable, ds, cmap_var=cmap_var, ticks=ticks, cbar_label=label)
 
 
+#%% ==== Decadal comparison ====
+import matplotlib.ticker as mticker
+
+def plot_variables_decades(growth_ds, chla_ds, temp_ds):
+    fig, axs = plt.subplots(3, 4, figsize=(24, 16), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+    # Circular boundary for polar plot
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+
+    # Define decade slices (assumes 'years' dimension is ordered 1980...2019)
+    decades = [(0, 10), (10, 20), (20, 30), (30, 40)]
+    titles = ['1980-1989', '1990-1999', '2000-2009', '2010-2019']
+
+    # Set color maps and norms for each variable
+    growth_cmap = 'PuOr_r'
+    growth_norm = mcolors.Normalize(vmin=-0.2, vmax=0.2)
+    growth_ticks = [-0.2, -0.1, 0, 0.1, 0.2]
+
+    chla_cmap = cmocean.cm.algae
+    chla_norm = mcolors.Normalize(vmin=0, vmax=5)
+    chla_ticks = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]
+
+    temp_cmap = cmocean.cm.thermal
+    temp_norm = mcolors.Normalize(vmin=-6, vmax=6)
+    temp_ticks = [-6, -4, -2, 0, 2, 4, 6]
+
+    # Variable info for looping
+    vars_info = [
+        (growth_ds, growth_cmap, growth_norm, growth_ticks, 'Growth [mm/d]'),
+        (chla_ds, chla_cmap, chla_norm, chla_ticks, 'Chla [mg/m³]'),
+        (temp_ds, temp_cmap, temp_norm, temp_ticks, 'Temperature [°C]')
+    ]
+
+    for row, (ds, cmap, norm, ticks, label) in enumerate(vars_info):
+        for col, (start, end) in enumerate(decades):
+            ax = axs[row, col]
+            data_decade = ds.isel(years=slice(start, end)).mean(dim=('years', 'days'))
+            pcm = data_decade.plot.pcolormesh(
+                ax=ax, transform=ccrs.PlateCarree(),
+                x="lon_rho", y="lat_rho",
+                add_colorbar=False,
+                cmap=cmap,
+                norm=norm,
+                zorder=1
+            )
+            # Titles only on top row
+            if row == 0:
+                ax.set_title(titles[col], fontsize=16)
+
+            # Y-axis label on left column
+            if col == 0:
+                ax.set_ylabel(label, fontsize=14)
+
+            ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+            ax.set_boundary(circle, transform=ax.transAxes)
+            ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
+            ax.coastlines(color='black', linewidth=1)
+            ax.set_facecolor('#F6F6F3')
+
+            # Sector boundaries
+            # ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+            # ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+            # ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+
+        # Add a single colorbar to the right of each row (last column)
+        pos = axs[row, -1].get_position()
+        cbar_ax = fig.add_axes([pos.x1 + 0.015, pos.y0, 0.015, pos.height])
+        cbar = fig.colorbar(pcm, cax=cbar_ax, ticks=ticks)
+        cbar.set_label(label, fontsize=14)
+        cbar.ax.tick_params(labelsize=12)
+        cbar.ax.yaxis.set_major_locator(mticker.FixedLocator(ticks))
+
+    plt.subplots_adjust(left=0.05, right=0.9, top=0.92, bottom=0.08, wspace=0.2, hspace=0.15)
+    plt.show()
+
+
+plot_variables_decades(growth_seasons,
+                       chla_filtered_seasons.raw_chla,
+                       temp_avg_100m_seasons.avg_temp)
+
 
 # %% Growth during MHW events
-# === Select extent - south of 60°S
-south_mask = det_combined_ds['lat_rho'] <= -60
-det_combined_ds_60S = det_combined_ds.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
+# # === Select extent - south of 60°S
+# south_mask = det_combined_ds['lat_rho'] <= -60
+# det_combined_ds_60S = det_combined_ds.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
 
-# Combining grwoth with MHW events
-masked_growth_dict = {}
-for deg in range(1, 5):
-    print(f'----T°C > {deg}°C and 90th perc ----')
-    # deg=1
-    # Extract data
-    det_mask = det_combined_ds_60S[f'det_{deg}deg'].astype(bool)
-    # det_mask.isel(years=30, days=180, eta_rho=230, xi_rho=1249) #True for 1°C
-    # det_mask.isel(years=30, xi_rho=1000, eta_rho=200, days=0) #False for 4°C
+# # Combining grwoth with MHW events
+# masked_growth_dict = {}
+# for deg in range(1, 5):
+#     print(f'----T°C > {deg}°C and 90th perc ----')
+#     # deg=1
+#     # Extract data
+#     det_mask = det_combined_ds_60S[f'det_{deg}deg'].astype(bool)
+#     # det_mask.isel(years=30, days=180, eta_rho=230, xi_rho=1249) #True for 1°C
+#     # det_mask.isel(years=30, xi_rho=1000, eta_rho=200, days=0) #False for 4°C
 
-    # Associate growth during a mhw
-    growth_MHW = xr.where(det_mask, growth_ds.growth, np.nan)
-    # growth_ds.growth.isel(years=30, days=180, eta_rho=230, xi_rho=1249).values #-0.02353081
-    # growth_MHW.isel(years=30, xi_rho=1000, eta_rho=200, days=0).values #nan
+#     # Associate growth during a mhw
+#     growth_MHW = xr.where(det_mask, growth_ds.growth, np.nan)
+#     # growth_ds.growth.isel(years=30, days=180, eta_rho=230, xi_rho=1249).values #-0.02353081
+#     # growth_MHW.isel(years=30, xi_rho=1000, eta_rho=200, days=0).values #nan
 
-    # Store in dict
-    masked_growth_dict[f'growth_{deg}deg'] = growth_MHW
+#     # Store in dict
+#     masked_growth_dict[f'growth_{deg}deg'] = growth_MHW
 
-# === PLOTs
-# Avg grwoth over the 'warm' period - mean (excluding nan)
-datasets = [masked_growth_dict['growth_1deg'].isel(years=slice(30,40)).mean(dim=('years', 'days')), 
-            masked_growth_dict['growth_2deg'].isel(years=slice(30,40)).mean(dim=('years', 'days')), 
-            masked_growth_dict['growth_3deg'].isel(years=slice(30,40)).mean(dim=('years', 'days')), 
-            masked_growth_dict['growth_4deg'].isel(years=slice(30,40)).mean(dim=('years', 'days'))]
+# # === PLOTs
+# # Avg grwoth over the 'warm' period - mean (excluding nan)
+# datasets = [masked_growth_dict['growth_1deg'].isel(years=slice(30,40)).mean(dim=('years', 'days')), 
+#             masked_growth_dict['growth_2deg'].isel(years=slice(30,40)).mean(dim=('years', 'days')), 
+#             masked_growth_dict['growth_3deg'].isel(years=slice(30,40)).mean(dim=('years', 'days')), 
+#             masked_growth_dict['growth_4deg'].isel(years=slice(30,40)).mean(dim=('years', 'days'))]
 
-# Prepare figure and axes
-fig, axs = plt.subplots(1, 4, figsize=(16, 8), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+# # Prepare figure and axes
+# fig, axs = plt.subplots(1, 4, figsize=(16, 8), subplot_kw={'projection': ccrs.SouthPolarStereo()})
 
-# Circular boundary
-theta = np.linspace(0, 2 * np.pi, 100)
-center, radius = [0.5, 0.5], 0.5
-verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-circle = mpath.Path(verts * radius + center)
+# # Circular boundary
+# theta = np.linspace(0, 2 * np.pi, 100)
+# center, radius = [0.5, 0.5], 0.5
+# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+# circle = mpath.Path(verts * radius + center)
 
-for  i, (ax, ds, title) in enumerate(zip(axs, datasets, [f"Avg Growth during MHW 1°C", f"Avg Growth during MHW 2°C", "Avg Growth during MHW 3°C", "Avg Growth during MHW 4°C"])):
+# for  i, (ax, ds, title) in enumerate(zip(axs, datasets, [f"Avg Growth during MHW 1°C", f"Avg Growth during MHW 2°C", "Avg Growth during MHW 3°C", "Avg Growth during MHW 4°C"])):
     
-    vmin = np.min(ds)
-    vmax = np.max(ds)
-    # abs_max = max(abs(vmin), abs(vmax))
-    norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
+#     vmin = np.min(ds)
+#     vmax = np.max(ds)
+#     # abs_max = max(abs(vmin), abs(vmax))
+#     norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
 
-    sc = ds.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(),
-                            x="lon_rho", y="lat_rho",
-                            add_colorbar=False, cmap='PuOr_r', norm=norm)
-    ax.set_title(title, fontsize=18)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-    ax.set_boundary(circle, transform=ax.transAxes)
-    ax.coastlines(color='black', linewidth=1.5, zorder=1)
-    ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
-    ax.set_facecolor('#F6F6F3')
-    # Sector boundaries
-    ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-    ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-    ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+#     sc = ds.plot.pcolormesh(ax=ax, transform=ccrs.PlateCarree(),
+#                             x="lon_rho", y="lat_rho",
+#                             add_colorbar=False, cmap='PuOr_r', norm=norm)
+#     ax.set_title(title, fontsize=18)
+#     ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+#     ax.set_boundary(circle, transform=ax.transAxes)
+#     ax.coastlines(color='black', linewidth=1.5, zorder=1)
+#     ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
+#     ax.set_facecolor('#F6F6F3')
+#     # Sector boundaries
+#     ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+#     ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+#     ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
 
-# Add common colorbar
-pos = axs[1].get_position()
-plt.subplots_adjust(right=1.2, wspace=0.4)
-cbar_ax = fig.add_axes([pos.x1 + 0.51, pos.y0 - 0.015, 0.01, pos.height - 0.022])
-ticks = [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3]
-cbar = fig.colorbar(sc, cax=cbar_ax, ticks=ticks)
-cbar.set_label('Growth [mm/d]', fontsize=16)
-cbar.ax.tick_params(labelsize=13)
+# # Add common colorbar
+# pos = axs[1].get_position()
+# plt.subplots_adjust(right=1.2, wspace=0.4)
+# cbar_ax = fig.add_axes([pos.x1 + 0.51, pos.y0 - 0.015, 0.01, pos.height - 0.022])
+# ticks = [-0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3]
+# cbar = fig.colorbar(sc, cax=cbar_ax, ticks=ticks)
+# cbar.set_label('Growth [mm/d]', fontsize=16)
+# cbar.ax.tick_params(labelsize=13)
 
-plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.show()
+# plt.tight_layout(rect=[0, 0, 1, 0.95])
+# plt.show()
 
-#%%  Selecting 1 location for plotting
-choice_eta = 220  #190, 200
-choice_xi = 950  #600, 1000
+# #%%  Selecting 1 location for plotting
+# choice_eta = 220  #190, 200
+# choice_xi = 950  #600, 1000
 
-# Temperature, Chlorophyll and Growth
-temp_100m_selected_loc_stack = temp_100m_stack.isel(eta_rho=choice_eta, xi_rho=choice_xi)
-chla_100m_selected_loc_stack = temp_100m_stack.isel(eta_rho=choice_eta, xi_rho=choice_xi)
-growth_all_selected_loc_stack = growth_da.isel(eta_rho=choice_eta, xi_rho=choice_xi)
-growth_clim_selected_loc = growth_clim.isel(eta_rho=choice_eta, xi_rho=choice_xi)
-growth_2010_2019_selected_loc = growth_2010_2019.isel(eta_rho=choice_eta, xi_rho=choice_xi)
+# # Temperature, Chlorophyll and Growth
+# temp_100m_selected_loc_stack = temp_100m_stack.isel(eta_rho=choice_eta, xi_rho=choice_xi)
+# chla_100m_selected_loc_stack = temp_100m_stack.isel(eta_rho=choice_eta, xi_rho=choice_xi)
+# growth_all_selected_loc_stack = growth_da.isel(eta_rho=choice_eta, xi_rho=choice_xi)
+# growth_clim_selected_loc = growth_clim.isel(eta_rho=choice_eta, xi_rho=choice_xi)
+# growth_2010_2019_selected_loc = growth_2010_2019.isel(eta_rho=choice_eta, xi_rho=choice_xi)
 
-# Find detected events (SST > 90th perc and i°C) in selected location and remove Nans
-det_selected_location = det_combined_ds.isel(eta_rho=choice_eta, xi_rho=choice_xi)
+# # Find detected events (SST > 90th perc and i°C) in selected location and remove Nans
+# det_selected_location = det_combined_ds.isel(eta_rho=choice_eta, xi_rho=choice_xi)
 
-# Reformat 
-det_selected_location_stack = det_selected_location.stack(time= ['years', 'days']) # shape (time: 7240)
-growth_clim_selected_loc_stack = growth_clim_selected_loc.stack(time= ['years', 'days'])#shape (time: 5430)
-growth_2010_2019_selected_loc_stack = growth_2010_2019_selected_loc.stack(time= ['years', 'days']) #shape (time: 1810)
+# # Reformat 
+# det_selected_location_stack = det_selected_location.stack(time= ['years', 'days']) # shape (time: 7240)
+# growth_clim_selected_loc_stack = growth_clim_selected_loc.stack(time= ['years', 'days'])#shape (time: 5430)
+# growth_2010_2019_selected_loc_stack = growth_2010_2019_selected_loc.stack(time= ['years', 'days']) #shape (time: 1810)
 
-det_1deg = det_selected_location_stack.det_1deg[~np.isnan(det_selected_location_stack.det_1deg)] 
-det_2deg = det_selected_location_stack.det_2deg[~np.isnan(det_selected_location_stack.det_2deg)] 
-det_3deg = det_selected_location_stack.det_3deg[~np.isnan(det_selected_location_stack.det_3deg)] 
-det_4deg = det_selected_location_stack.det_4deg[~np.isnan(det_selected_location_stack.det_4deg)] 
+# det_1deg = det_selected_location_stack.det_1deg[~np.isnan(det_selected_location_stack.det_1deg)] 
+# det_2deg = det_selected_location_stack.det_2deg[~np.isnan(det_selected_location_stack.det_2deg)] 
+# det_3deg = det_selected_location_stack.det_3deg[~np.isnan(det_selected_location_stack.det_3deg)] 
+# det_4deg = det_selected_location_stack.det_4deg[~np.isnan(det_selected_location_stack.det_4deg)] 
 
-# %% -- PLOT
-fig = plt.figure(figsize=(15, 5))
-# fig = plt.figure(figsize=(5, 5))
-ax = fig.add_subplot(111)
-ax2 = ax.twinx()
+# # %% -- PLOT
+# fig = plt.figure(figsize=(15, 5))
+# # fig = plt.figure(figsize=(5, 5))
+# ax = fig.add_subplot(111)
+# ax2 = ax.twinx()
 
-# Plot absolute threshold lines
-for thresh in absolute_thresholds:
-    ax2.axhline(y=thresh, xmin=0, xmax=1, linestyle='--', color='gray', alpha=0.7, lw=1)
+# # Plot absolute threshold lines
+# for thresh in absolute_thresholds:
+#     ax2.axhline(y=thresh, xmin=0, xmax=1, linestyle='--', color='gray', alpha=0.7, lw=1)
 
-# Define colors and labels
-threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
-threshold_labels = ['SST>90th and 1°C', 'SST>90th and 2°C', 'SST>90th and 3°C', 'SST>90th and 4°C']
+# # Define colors and labels
+# threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
+# threshold_labels = ['SST>90th and 1°C', 'SST>90th and 2°C', 'SST>90th and 3°C', 'SST>90th and 4°C']
 
-# Dictionary of detected temperature datasets
-detected_temps = {
-    '1deg': det_1deg,
-    '2deg': det_2deg,
-    '3deg': det_3deg,
-    '4deg': det_4deg
-}
+# # Dictionary of detected temperature datasets
+# detected_temps = {
+#     '1deg': det_1deg,
+#     '2deg': det_2deg,
+#     '3deg': det_3deg,
+#     '4deg': det_4deg
+# }
 
-# Loop through each dataset and add vertical bands
-for (key, det_data), color in zip(detected_temps.items(), threshold_colors):
-    if det_data is None or det_data.size == 0:  # Skip empty datasets
-        continue
-    time_idx = (det_data['years'].values - det_data['years'].values.min()) * 365 + det_data['days'].values  # Convert to days since base_year
+# # Loop through each dataset and add vertical bands
+# for (key, det_data), color in zip(detected_temps.items(), threshold_colors):
+#     if det_data is None or det_data.size == 0:  # Skip empty datasets
+#         continue
+#     time_idx = (det_data['years'].values - det_data['years'].values.min()) * 365 + det_data['days'].values  # Convert to days since base_year
     
-    # Identify breaks in continuous segments
-    time_diff = np.diff(time_idx)
-    idx_split = np.where(time_diff > 1)[0] + 1
-    time_segments = np.split(time_idx, idx_split)
+#     # Identify breaks in continuous segments
+#     time_diff = np.diff(time_idx)
+#     idx_split = np.where(time_diff > 1)[0] + 1
+#     time_segments = np.split(time_idx, idx_split)
 
-    # Add vertical shading
-    for segment in time_segments:
-        if len(segment) > 1:
-            ax.axvspan(segment[0], segment[-1], alpha=0.8, color=color, label=threshold_labels[int(key[0])-1])
+#     # Add vertical shading
+#     for segment in time_segments:
+#         if len(segment) > 1:
+#             ax.axvspan(segment[0], segment[-1], alpha=0.8, color=color, label=threshold_labels[int(key[0])-1])
 
-# SST ad growth rate plot
-lns1 = ax.plot(growth_all_selected_loc_stack, '-', color='#3E6F8E')
-lns2 = ax2.plot(temp_100m_selected_loc_stack.avg_temp,  '-', color='black')
+# # SST ad growth rate plot
+# lns1 = ax.plot(growth_all_selected_loc_stack, '-', color='#3E6F8E')
+# lns2 = ax2.plot(temp_100m_selected_loc_stack.avg_temp,  '-', color='black')
 
-# Add legend (only one label per threshold)
-handles, labels = [], []
-for i, label in enumerate(threshold_labels):
-    handles.append(plt.Rectangle((0, 0), 1, 1, color=threshold_colors[i], alpha=0.5))
-# ax.legend(handles, threshold_labels, loc='upper right', bbox_to_anchor=(1.005, 1.15), ncol=2)
+# # Add legend (only one label per threshold)
+# handles, labels = [], []
+# for i, label in enumerate(threshold_labels):
+#     handles.append(plt.Rectangle((0, 0), 1, 1, color=threshold_colors[i], alpha=0.5))
+# # ax.legend(handles, threshold_labels, loc='upper right', bbox_to_anchor=(1.005, 1.15), ncol=2)
 
-# -- Axis settings
-ax.grid(alpha=0.5)
-# y-axis left
-ax.yaxis.label.set_color('#3E6F8E')
-ax.spines['left'].set_color('#3E6F8E')
-ax.tick_params(axis='y', colors='#3E6F8E')  
-# ax.set_ylim(0, 0.3)
-ax.set_ylabel(r"Growth [mm]")
+# # -- Axis settings
+# ax.grid(alpha=0.5)
+# # y-axis left
+# ax.yaxis.label.set_color('#3E6F8E')
+# ax.spines['left'].set_color('#3E6F8E')
+# ax.tick_params(axis='y', colors='#3E6F8E')  
+# # ax.set_ylim(0, 0.3)
+# ax.set_ylabel(r"Growth [mm]")
 
-# y-axis right
-ax2.spines['right'].set_color('black')
-ax2.yaxis.label.set_color('black')
-ax2.set_ylabel(r"Temperature ($^\circ$C)")
+# # y-axis right
+# ax2.spines['right'].set_color('black')
+# ax2.yaxis.label.set_color('black')
+# ax2.set_ylabel(r"Temperature ($^\circ$C)")
 
-# x-axis --  TO CHANGE NOW A YEAR IS NOT *&% DAYS SINCE ONLY 1 SEASON
-ax.tick_params(axis='x', colors='black')
-ticks_years = np.arange(0, 40*365, 365)
-ax.set_xticks(ticks_years)  
-tick_labels = np.arange(1980, 2020)
-ax.set_xticklabels(tick_labels)
-ax.set_xlabel("Time (days)")
-ax.set_xlim(0*365, 30*365) #2014-2019
-# ax.set_xlim(35*365+150, 36*365) #above 1°C
-# ax.set_xlim(36*365+150, 37*365) #above 3°C
-# ax.set_xlim(37*365-50, 37*365+150) #above 3°C
+# # x-axis --  TO CHANGE NOW A YEAR IS NOT *&% DAYS SINCE ONLY 1 SEASON
+# ax.tick_params(axis='x', colors='black')
+# ticks_years = np.arange(0, 40*365, 365)
+# ax.set_xticks(ticks_years)  
+# tick_labels = np.arange(1980, 2020)
+# ax.set_xticklabels(tick_labels)
+# ax.set_xlabel("Time (days)")
+# ax.set_xlim(0*365, 30*365) #2014-2019
+# # ax.set_xlim(35*365+150, 36*365) #above 1°C
+# # ax.set_xlim(36*365+150, 37*365) #above 3°C
+# # ax.set_xlim(37*365-50, 37*365+150) #above 3°C
 
-plt.title(f'Growth for Antarctic krill \n location: ({np.int32(np.round(temp_100m_selected_loc_stack.lat_rho.values))}°S, {np.int32(np.round(temp_100m_selected_loc_stack.lon_rho.values))}°E)')
-plt.tight_layout()
-plt.show()
+# plt.title(f'Growth for Antarctic krill \n location: ({np.int32(np.round(temp_100m_selected_loc_stack.lat_rho.values))}°S, {np.int32(np.round(temp_100m_selected_loc_stack.lon_rho.values))}°E)')
+# plt.tight_layout()
+# plt.show()
 
-# %% Temperature VS Chla Contribution
+# # %% Temperature VS Chla Contribution
 
