@@ -23,6 +23,10 @@ import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import matplotlib.path as mpath
 import matplotlib.colors as mcolors
+import cmocean
+import matplotlib.gridspec as gridspec
+from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
+from matplotlib.cm import ScalarMappable
 
 import time
 from tqdm.contrib.concurrent import process_map
@@ -42,14 +46,15 @@ mpl.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
     'font.serif':['Times'],
-    "font.size": 9,           
-    "axes.titlesize": 10,
-    "axes.labelsize": 9,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 9,   
-    "text.latex.preamble": r"\usepackage{mathptmx} \usepackage[x11names, dvipsnames, table]{xcolor}",
+    "font.size": 10,           
+    "axes.titlesize": 11,
+    "axes.labelsize": 10,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
+    "legend.fontsize": 10,   
+    "text.latex.preamble": r"\usepackage{mathptmx}",  # to match your Overleaf font
 })
+
 
 
 # %% -------------------------------- SETTINGS --------------------------------
@@ -156,8 +161,7 @@ cha_ROMS_monthly = cha_ROMS_monthly.assign_coords(month=('month', np.arange(1, 1
 cha_ROMS_1998_2019 = cha_ROMS_monthly.isel(years=slice(18, 40)) 
 
 
-
-# %% Selcet time and averge
+# %% Select time and average
 # Select only from november to april (included)
 months_nov_apr = [10, 11, 0, 1, 2, 3]  # Corresponding to Nov-Apr
 
@@ -192,9 +196,6 @@ diff_1998_2009 = cha_ROMS_1998_2009_avg - cha_obs_1998_2009_avg_rg
 diff_2010_2019 = cha_ROMS_2010_2019_avg - cha_obs_2010_2019_avg_rg
 
 # %% === Comparison map year per year 
-import matplotlib.gridspec as gridspec
-from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
-from matplotlib.cm import ScalarMappable
 
 # === Create figure ===
 fig_width = 6.3228348611  # inches = \textwidth
@@ -288,8 +289,8 @@ norm_avg = mcolors.Normalize(vmin=vmin, vmax=vmax)
 sm_avg = ScalarMappable(cmap=cmap, norm=norm_avg)
 sm_avg.set_array([])
 cbar_avg = fig.colorbar(sm_avg, cax=cax_avg, orientation='horizontal', extend='max')
-cbar_avg.ax.tick_params(labelsize=9)
-cbar_avg.set_label('Chl-a (mg/m³)', fontsize=11)
+# cbar_avg.ax.tick_params(labelsize=9)
+cbar_avg.set_label('Chl-a (mg/m³)')
 
 # === Vertical colorbar for differences ===
 cax_diff = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
@@ -297,23 +298,76 @@ norm_diff = mcolors.TwoSlopeNorm(vmin=diff_vmin, vcenter=0, vmax=diff_vmax)
 sm_diff = ScalarMappable(cmap=diff_cmap, norm=norm_diff)
 sm_diff.set_array([])
 cbar_diff = fig.colorbar(sm_diff, cax=cax_diff, extend='both')
-cbar_diff.ax.tick_params(labelsize=9)
-cbar_diff.set_label('$\Delta$ Chl-a (mg/m³)', fontsize=11)
+# cbar_diff.ax.tick_params(labelsize=9)
+cbar_diff.set_label('$\Delta$ Chl-a (mg/m³)')
 
 
 # === Add column titles ===
-fig.text(0.25, 0.9, 'CMEMS', fontsize=11, ha='center')
-fig.text(0.5, 0.9, 'ROMS', fontsize=11, ha='center')
-fig.text(0.8, 0.9, 'Difference$_{(CMEMS - ROMS)}$', fontsize=11, ha='center')
+fig.text(0.25, 0.9, 'CMEMS', ha='center')
+fig.text(0.5, 0.9, 'ROMS', ha='center')
+fig.text(0.8, 0.9, 'Difference$_{(CMEMS - ROMS)}$', ha='center')
 
 # === Add row titles ===
-fig.text(0.09, 0.75, '1998–2008 avg', fontsize=11, va='center', rotation='vertical')
-fig.text(0.09, 0.3, '2009–2019 avg', fontsize=11, va='center', rotation='vertical')
+fig.text(0.09, 0.75, '1998–2008 avg', va='center', rotation='vertical')
+fig.text(0.09, 0.3, '2009–2019 avg', va='center', rotation='vertical')
 
-fig.suptitle('Comparison CMEMS and ROMS Chlorophyll-a Concentrations', fontsize=12, y=0.99, x=0.57)
+fig.suptitle('Comparison CMEMS and ROMS Chlorophyll-a Concentrations', y=0.99, x=0.57)
 
-plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_comparison.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_comparison.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
+
+# %% --------------- Difference between decades ---------------
+# Compute differences
+cmems_decadal_diff = cha_obs_2010_2019_avg_rg - cha_obs_1998_2009_avg_rg
+roms_decadal_diff = cha_ROMS_2010_2019_avg - cha_ROMS_1998_2009_avg
+
+# === Plot ===
+fig_width = 6.3228348611  # inches = \textwidth
+fig_height = fig_width * 2 / 3  # adjust for 2 rows
+fig = plt.figure(figsize = (fig_width, fig_height)) #(20, 12)
+
+# 1 rows, 2 columns: 
+gs = gridspec.GridSpec(1, 2, wspace=0.1, hspace=0.25)
+axes = [fig.add_subplot(gs[i, j], projection=ccrs.SouthPolarStereo())
+        for i in range(1) for j in range(2)]
+
+# Circular boundary
+theta = np.linspace(0, 2 * np.pi, 100)
+circle = mpath.Path(np.vstack([np.sin(theta), np.cos(theta)]).T * 0.5 + 0.5)
+
+# Colormap and normalization
+vmin, vmax = -1, 1
+cmap = 'RdBu_r'
+norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+
+# -- CMEMS subplot
+format_ax(axes[0])
+cmems_decadal_diff.plot(
+    ax=axes[0], x='lon_rho', y='lat_rho',
+    transform=ccrs.PlateCarree(),
+    cmap=cmap, norm=norm, add_colorbar=False
+)
+axes[0].set_title('CMEMS decadal change\n 2010–2019 minus 1998–2009')
+
+# -- ROMS subplot
+format_ax(axes[1])
+roms_decadal_diff.plot(
+    ax=axes[1], x='lon_rho', y='lat_rho',
+    transform=ccrs.PlateCarree(),
+    cmap=cmap, norm=norm, add_colorbar=False
+)
+axes[1].set_title('ROMS decadal change\n 2010–2019 minus 1998–2009')
+
+# Shared colorbar
+cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+cbar = fig.colorbar(sm, cax=cbar_ax, orientation='vertical', extend='both')
+cbar.set_label(r'$\Delta$Chl-a (mg/m³)')
+
+plt.tight_layout(rect=[0, 0.12, 1, 1])  # leave space for colorbar
+# plt.show()
+
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_decadal_comparison.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %%
