@@ -30,12 +30,12 @@ mpl.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
     'font.serif':['Times'],
-    "font.size": 9,           
-    "axes.titlesize": 10,
-    "axes.labelsize": 9,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
-    "legend.fontsize": 9,   
+    "font.size": 10,           
+    "axes.titlesize": 11,
+    "axes.labelsize": 10,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
+    "legend.fontsize": 10,   
     "text.latex.preamble": r"\usepackage{mathptmx}",  # to match your Overleaf font
 })
 
@@ -254,8 +254,8 @@ cbar.set_label(r'Year', fontsize=12)
 cbar.ax.tick_params(labelsize=10)
 
 plt.tight_layout()
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/time_serie_SST_30yrs.eps'), format='eps') #image vectorielle
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/time_serie_SST_30yrs.eps'), format='eps') #image vectorielle
 
 #%% --- Circular time serie
 clim_to_plot = selected_clim_sst_100m.sel(xi_rho=choice_xi, z_rho=0)
@@ -291,13 +291,13 @@ cbar.ax.tick_params(labelsize=10)
 
 plt.legend(loc='lower right', bbox_to_anchor =(1.1, -0.15))
 plt.tight_layout()
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/time_serie_SST_30yrs_circular.eps'), format='eps') #image vectorielle
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/time_serie_SST_30yrs_circular.eps'), format='eps') #image vectorielle
 
 
 # %% --- Moving window explanation
 # Day to center the window
-center_day = 105
+center_day = 75 #320
 window_start = center_day - 5
 window_end = center_day + 5
 
@@ -327,7 +327,7 @@ ax.scatter(center_day, clim_value_center, color='#3A6EA5', edgecolor='white', zo
 ax.scatter(center_day, thresh_value_center, color='black', edgecolor='white', zorder=5, s=50)#, label='Rel. Thresh (90th perc)')
 
 ax.set_xlabel(r'Day of the Year')
-ax.set_ylabel(r'SST ($^\circ$C)')
+ax.set_ylabel(r'Temperature [$^\circ$C]')
 ax.set_title('Illustration of 11days moving window calculation')#\nLocation: ({round(lat)}°S, {round(lon)}°E)')
 ax.set_xlim(center_day - 20, center_day +20)
 ax.set_ylim(-1,5)
@@ -357,7 +357,7 @@ for tick in tick_positions:
     else:
         tick_labels.append(str(int(tick)))
 
-ax.set_xticklabels(tick_labels)  # Set the corresponding labels
+ax.set_xticklabels(tick_labels, fontsize=11)  # Set the corresponding labels
 
 # Highlight the specific ticks in red
 for i, tick in enumerate(tick_positions):
@@ -366,16 +366,16 @@ for i, tick in enumerate(tick_positions):
 
 # Plot month lines and labels
 month_days = {
-    'Jan': 1, 'Feb': 32, 'March': 60, 'Apr': 91, 'May': 120, 'Jun': 151, 
+    'Jan': 1, 'Feb': 32, 'March': 60, 'April': 91, 'May': 120, 'Jun': 151, 
     'Jul': 182, 'Aug': 213, 'Sept': 244, 'Oct': 274, 'Nov': 305, 'Dec': 335
 }
 month_days_filtered = {month: day for month, day in month_days.items() if center_day - 20 <= day <= center_day + 20}
 for month, day in month_days_filtered.items():
     ax.axvline(day, color='#014F86', linestyle='--', alpha=0.9)
-    ax.text(day-0.4, ax.get_ylim()[1]-0.75, month, rotation=90, verticalalignment='bottom', horizontalalignment='center', color='#014F86', fontsize=9)
+    ax.text(day-0.4, ax.get_ylim()[1]-1.05, month, rotation=90, verticalalignment='bottom', horizontalalignment='center', color='#014F86')
 
 # ax.legend(loc='lower left', bbox_to_anchor=(0.18, 0.85), ncol=3)
-ax.legend(loc='lower left', bbox_to_anchor=(0.145, 0.03))
+ax.legend(loc='lower left', bbox_to_anchor=(0.135, 0.03))
 plt.tight_layout()
 # plt.show()
 plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/11days_window_illustration.pdf'), format='pdf', bbox_inches='tight') #image vectorielle
