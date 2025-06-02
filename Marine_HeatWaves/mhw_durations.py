@@ -4,6 +4,8 @@ Created on Mon 19 May 09:37:56 2025
 
 Calculate MHW durations for the first 100m depth 
 
+Note: We need to define the duration based on the condition that a mhw event is when T°C > absolute AND relative thresholds 
+
 @author: Marguerite Larriere (mlarriere)
 """
 
@@ -125,7 +127,7 @@ all_depths= ds['z_rho'].values
 
 def mhw_duration(depth_idx):
 # for depth_idx in range(14): # computing time ~10min per depth
-    # depth_idx=0
+    depth_idx=0
 
     print(f'---------DEPTH{depth_idx}---------')
 
@@ -138,7 +140,8 @@ def mhw_duration(depth_idx):
     det_rel_thres = det_ds_depth.mhw_rel_threshold # shape: (40, 365, 434, 1442). Boolean
     det_abs_1deg = det_ds_depth.mhw_abs_threshold_1_deg # shape: (40, 365, 434, 1442). Boolean
     mhw_both_thresholds = np.logical_and(det_rel_thres, det_abs_1deg) #rel thresh is True if >1°C else False ~1min computing
-    
+    print(mhw_both_thresholds.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+
     mhw_both_thresholds_stacked = mhw_both_thresholds.stack(time=('years', 'days')) #consider time as continuous
     mhw_both_thresholds_stacked = mhw_both_thresholds_stacked.transpose('time', 'eta_rho', 'xi_rho') #time as first dim
 
@@ -184,6 +187,8 @@ def mhw_duration(depth_idx):
         "lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
         "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
     })
+    print(ds_intermediate.mhw_durations.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
+
 
     # print(ds_intermediate.mhw_durations.isel(time=slice(38*365+70, 39*365-70), eta_rho=200, xi_rho=1000).values)
     # print(ds_intermediate.non_mhw_durations.isel(time=slice(38*365+70, 39*365-70), eta_rho=200, xi_rho=1000).values)
@@ -199,7 +204,7 @@ def mhw_duration(depth_idx):
 
     # MHW last at least 5 days
     mhw_event = ds_intermediate['mhw_durations'] >= 5 
-    # print(mhw_event.isel(time=slice(38*365+70, 39*365-70), eta_rho=200, xi_rho=1000).values)
+    print(mhw_event.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
 
     # Gap of 1 day -- ~15min
     # gap_1_day = (ds_intermediate['non_mhw_durations'] == 1) & (mhw_event.shift(time=1).astype(bool)) & (mhw_event.shift(time=-1).astype(bool))
@@ -221,7 +226,8 @@ def mhw_duration(depth_idx):
     mhw_prev[0, :, :] = False  # First timestep invalid (1 January 1980)
     mhw_next[-1, :, :] = False  # Last timestep invalid (31 Dec 2019)
     gap_1_day = (non_mhw_array == 1) & mhw_prev & mhw_next
-    
+    print(gap_1_day[38*365: 38*365 + 30, 224, 583])
+
     # np.all(gap_1_day==gap_1_day_test) #True
     
     # Gap of 2 days -- ~1min
@@ -230,13 +236,14 @@ def mhw_duration(depth_idx):
     mhw_prev2[0:2, :, :] = False  # First two timesteps invalid
     mhw_next2[-2:, :, :] = False  # Last two timesteps invalid
     gap_2_day = (non_mhw_array == 2) & mhw_prev2 & mhw_next2
+    print(gap_2_day[38*365: 38*365 + 30, 224, 583])
 
     # np.all(gap_2_day==gap_2_day_test) #True
 
     # Combine events
     mhw_event_combined_stacked = mhw_event | gap_1_day | gap_2_day
     mhw_event_combined_stacked = mhw_event_combined_stacked.astype(bool)
-    # print(mhw_event_combined_stacked.isel(time=slice(38*365+70, 39*365-70), eta_rho=200, xi_rho=1000).values)
+    print(mhw_event_combined_stacked.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
 
     # Initialization
     ntime, neta, nxi = mhw_event_combined_stacked.shape
@@ -262,7 +269,7 @@ def mhw_duration(depth_idx):
     # Reshape to (eta, xi)
     mhw_recalc = mhw_durations_recalc_all.reshape(ntime, neta, nxi)
     non_mhw_recalc= non_mhw_durations_recalc_all.reshape(ntime, neta, nxi)
-    # print(mhw_recalc[38*365+70: 39*365-70, 200, 1000])
+    print(mhw_recalc[38*365: 38*365 + 30, 224, 583])
 
     # Reformat with years and days in dim
     mhw_recalc_reshaped = mhw_recalc.reshape((40, 365, neta, nxi))
@@ -281,6 +288,7 @@ def mhw_duration(depth_idx):
             'depth': f"{-all_depths[depth_idx]}m, i.e. layer{depth_idx}",
             'description': 'Durations recalculated using Hobday rules (min 5-day events, 1-2 day gaps allowed). Events T°C are above the relative and absolute (1°C) thresholds'}
         )
+    print(ds_out.mhw_durations.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 
     # Clean memory
     del mhw_recalc_reshaped, non_mhw_recalc_reshaped, mhw_recalc, non_mhw_recalc, mhw_event_combined_stacked, mhw_event, gap_2_day, gap_1_day
