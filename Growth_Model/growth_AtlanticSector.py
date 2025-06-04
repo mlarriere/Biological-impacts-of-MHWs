@@ -103,41 +103,54 @@ print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).
 det_combined_ds = xr.open_dataset(os.path.join(path_combined_thesh, 'det_depth5m.nc')) #boolean shape (40, 181, 434, 1442)
 print(det_combined_ds.det_1deg.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 
-# === Select only austral summer and early spring
-jan_april = mhw_duration_5m.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
-jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
-jan_april.coords['years'] = 1980+ jan_april.coords['years'] #keep info on day
-nov_dec = mhw_duration_5m.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
-nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
-nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
-mhw_duration_austral_summer = xr.concat([nov_dec, jan_april], dim="days") #181days
+# -- Write or load data
+combined_file = os.path.join(os.path.join(path_duration, 'duration_combined_abs_thresh.nc'))
 
-# === Select 60°S south extent
-south_mask = mhw_duration_austral_summer['lat_rho'] <= -60
-mhw_duration_5m_NEW_60S_south = mhw_duration_austral_summer.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
-det_combined_ds_60S_south = det_combined_ds.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
+if not os.path.exists(combined_file):
 
-# === Associate each mhw duration with the event threshold 
-ds_mhw_duration= xr.Dataset(
-    data_vars=dict(
-        duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 181, 434, 1442)
-        det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_1deg'].data),
-        det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_2deg'].data),
-        det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_3deg'].data),
-        det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_4deg'].data)
-        ),
-    coords=dict(
-        lon_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lat_rho.values), #(434, 1442)
-        days_of_yr=(['days'], mhw_duration_5m_NEW_60S_south.coords['days'].values), # Keeping information on day 
-        years=(['years'], mhw_duration_5m_NEW_60S_south.coords['years'].values), # Keeping information on day 
-        ),
-    attrs = {
-            "depth": "5m",
-            "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
-            "det_ideg": "Detected events where SST > (absolute threshold (i°C) AND 90th percentile) , boolean array"
-            }                
-        )
+    # === Select only austral summer and early spring
+    jan_april = mhw_duration_5m.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
+    jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
+    jan_april.coords['years'] = 1980+ jan_april.coords['years'] #keep info on day
+    nov_dec = mhw_duration_5m.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
+    nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
+    nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
+    mhw_duration_austral_summer = xr.concat([nov_dec, jan_april], dim="days") #181days
+
+    # === Select 60°S south extent
+    south_mask = mhw_duration_austral_summer['lat_rho'] <= -60
+    mhw_duration_5m_NEW_60S_south = mhw_duration_austral_summer.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
+    det_combined_ds_60S_south = det_combined_ds.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
+
+    # === Associate each mhw duration with the event threshold 
+    ds_mhw_duration= xr.Dataset(
+        data_vars=dict(
+            duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 181, 434, 1442)
+            det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_1deg'].data),
+            det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_2deg'].data),
+            det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_3deg'].data),
+            det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_4deg'].data)
+            ),
+        coords=dict(
+            lon_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lon_rho.values), #(434, 1442)
+            lat_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lat_rho.values), #(434, 1442)
+            days_of_yr=(['days'], mhw_duration_5m_NEW_60S_south.coords['days'].values), # Keeping information on day 
+            years=(['years'], mhw_duration_5m_NEW_60S_south.coords['years'].values), # Keeping information on day 
+            ),
+        attrs = {
+                "depth": "5m",
+                "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
+                "det_ideg": "Detected events where SST > (absolute threshold (i°C) AND 90th percentile) , boolean array"
+                }                
+            )
+
+    # Write to file
+    ds_mhw_duration.to_netcdf(os.path.join(path_duration, 'duration_combined_abs_thresh.nc')) # Write to file
+
+else: 
+    # Load data
+    ds_mhw_duration = xr.open_dataset(os.path.join(path_duration, 'duration_combined_abs_thresh.nc'))
+
 
 #%% ======================== Select extent (Atlantic Sector) ========================
 # According to Atkinson 2009: 70 % of the entire circumpolar population is concentrated within the Southwest Atlantic (0–90W)
@@ -153,29 +166,36 @@ def subset_spatial_domain(ds, lat_range=(-80, -60), lon_range=(270, 360)): #, (0
 
     return ds.where(lat_mask & lon_mask, drop=True)
 
-growth_study_area = subset_spatial_domain(growth_seasons) #shape (years, eta_rho, xi_rho, days): (39, 231, 385, 181) - 2019 excluded (not full season)
-mhw_duration_study_area = subset_spatial_domain(ds_mhw_duration) #shape (years, days, eta_rho, xi_rho) :(40, 181, 231, 385)
+# -- Write or load data
+growth_file = os.path.join(os.path.join(path_growth, 'atlantic_sector/growth_study_area.nc'))
+duration_file = os.path.join(os.path.join(path_growth, 'atlantic_sector/mhw_duration_study_area.nc'))
+
+if not os.path.exists(growth_file):
+    growth_study_area = subset_spatial_domain(growth_seasons) #shape (years, eta_rho, xi_rho, days): (39, 360, 385, 181) - 2019 excluded (not full season)
+    growth_study_area.to_netcdf(os.path.join(path_growth, 'atlantic_sector/growth_study_area.nc')) # Write to file
+
+if not os.path.exists(duration_file):
+    mhw_duration_study_area = subset_spatial_domain(ds_mhw_duration) #shape (years, days, eta_rho, xi_rho) :(40, 181, 231, 360)
+    mhw_duration_study_area.to_netcdf(os.path.join(path_growth, 'atlantic_sector/mhw_duration_study_area.nc')) # Write to file
+
+else: 
+    # Load data
+    growth_study_area = xr.open_dataset(os.path.join(path_growth, 'atlantic_sector/growth_study_area.nc'))
+    mhw_duration_study_area = xr.open_dataset(os.path.join(path_growth, 'atlantic_sector/mhw_duration_study_area.nc'))
 
 # %% ======================== Find year with maximum 4°C MHWs events ========================
 # Define thresholds
 duration_thresh = 30  # at least 30days
-intensity_mask = mhw_duration_study_area['det_4deg'].astype(bool) #4deg intensity
+intensity_mask_4deg = mhw_duration_study_area['det_4deg'].astype(bool) # Intensity mask - only 4 deg MHWs
 
-# Intensity mask for 4 deg MHWs
-intensity_mask_4deg = mhw_duration_study_area['det_4deg'].astype(bool)
-
-# Valid events for 4 deg threshold (duration > threshold)
-valid_events_4deg = mhw_duration_study_area['duration'].where(
-    (mhw_duration_study_area['duration'] > duration_thresh) & intensity_mask_4deg,
-    drop=True
-)
-
+# Valid events (duration > 30days and 4°C events)
+valid_events_4deg = mhw_duration_study_area['duration'].where((mhw_duration_study_area['duration'] > duration_thresh) & intensity_mask_4deg, drop=True)
 valid_mask_4deg = ~np.isnan(valid_events_4deg.values)
-valid_indices_4deg = np.array(np.nonzero(valid_mask_4deg)).T
 
+# Find when and where
+valid_indices_4deg = np.array(np.nonzero(valid_mask_4deg)).T
 years_4deg = valid_events_4deg['years'].values
 years_list_4deg = []
-
 for idx in valid_indices_4deg:
     y_idx, _, _, _ = idx
     years_list_4deg.append(years_4deg[y_idx])
@@ -183,57 +203,10 @@ for idx in valid_indices_4deg:
 import collections
 year_counts_4deg = collections.Counter(years_list_4deg)
 year_max_events_4deg, max_events = year_counts_4deg.most_common(1)[0]
-
 print(f"Year with most 4°C MHW events: {year_max_events_4deg} ({max_events} events)")
 
-# # Extract in the study area
-# valid_events = mhw_duration_study_area['duration'].where(((mhw_duration_study_area['duration'] > duration_thresh) & intensity_mask), drop=True)
-# valid_mask = ~np.isnan(valid_events.values)
-
-# # Get info on events - where, when, how long
-# valid_indices = np.array(np.nonzero(valid_mask)).T  # shape (N_valid, 4)
-# years_dim, days_dim, eta_dim, xi_dim = valid_events.shape
-# years = valid_events['years'].values  # shape (years_dim,)
-# days = valid_events['days_of_yr'].values  # shape (days_dim,)
-# lat_rho = valid_events['lat_rho'].values  # shape (eta_dim, xi_dim)
-# lon_rho = valid_events['lon_rho'].values  # shape (eta_dim, xi_dim)
-
-# years_list = []
-# days_list = []
-# lats_list = []
-# lons_list = []
-# duration_list = []
-
-# for idx in valid_indices:
-#     y_idx, d_idx, e_idx, x_idx = idx
-#     years_list.append(years[y_idx])
-#     days_list.append(days[d_idx])
-#     lats_list.append(lat_rho[e_idx, x_idx])
-#     lons_list.append(lon_rho[e_idx, x_idx])
-#     duration_list.append(valid_events.values[y_idx, d_idx, e_idx, x_idx])
-
-# # To numpy arrays
-# years_array = np.array(years_list)
-# days_array = np.array(days_list)
-# lats_array = np.array(lats_list)
-# lons_array = np.array(lons_list)
-# duration_array = np.array(duration_list)
-
-# # Print last 5 events
-# for i in range(1, 6):
-#     print(f"Year: {years_array[-i]}, Day: {days_array[-i]}, Lat: {lats_array[-i]:.2f}, Lon: {lons_array[-i]:.2f}, Duration: {duration_array[-i]:.1f}")
-
-# # Find the amount of events per year
-# import collections
-# # Count occurrences of each year
-# year_counts = collections.Counter(years_array)
-# year_max_events_4deg, max_events = year_counts.most_common(1)[0]
-# # for year, count in sorted(year_counts.items()):
-# #     print(f"{year}: {count} events")
-# # Year with maximum number of 4°C MHWs
-# print(f"Year with most 4°C MHW events: {year_max_events_4deg} ({max_events} events)")
-
 #%% ======================== Plot Study Area for 1 year ========================
+year_max_events_4deg=2017
 # Year of interest
 selected_year = year_max_events_4deg
 year_index = selected_year - 1980
@@ -309,18 +282,11 @@ ax1.legend(handles=legend_handles,
            loc='upper center', bbox_to_anchor=(0.8, 0.52),
            fontsize=8, ncol=1, frameon=True)
 
+
 # Maps Features
-# for ax in [ax0, ax1]:
-    # Circular boundary
-    # theta = np.linspace(np.pi/2, np.pi, 100)  # from 0° to -90° in radians
-    # center, radius = [0.5, 0.5], 0.5
-    # arc = np.vstack([0.5 + 0.5 * np.cos(theta), 0.5 + 0.5 * np.sin(theta)]).T
-    # verts = np.concatenate([[[0.5, 0.5]], arc, [[0.5, 0.5]]])
-    # circle = mpath.Path(verts)
-    # ax.set_boundary(circle, transform=ax.transAxes)
-# Quarter-circle sector boundary: from 0° to -90°, centered at 0.5,0.5
-theta = np.linspace(np.pi / 2,np.pi, 100)  # from 0° to -90° clockwise
-center, radius = [0.5, 0.5], 0.5
+theta = np.linspace(np.pi / 2,np.pi, 100)  # from 0° to -90° clockwise - Quarter-circle sector boundary
+# theta = np.linspace(0 , 2*np.pi, 100)  # from 0° to 369° clockwise
+center, radius = [0.5, 0.5], 0.5 # centered at 0.5,0.5
 arc = np.vstack([np.cos(theta), np.sin(theta)]).T
 verts = np.concatenate([[center], arc * radius + center, [center]])
 circle = mpath.Path(verts)
@@ -336,25 +302,26 @@ for ax in [ax0, ax1]:
     gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7)
     gl.xlabels_top = False
     gl.ylabels_right = False
-    gl.xlabel_style = {'size': 10}
-    gl.ylabel_style = {'size': 10}
+    gl.xlabel_style = {'size': 6}
+    gl.ylabel_style = {'size': 6}
     gl.xformatter = LongitudeFormatter()
     gl.yformatter = LatitudeFormatter()
 
     # Map extent and features
     ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
     # ax.set_extent([0, -90, -90, -60], crs=ccrs.PlateCarree())
-    ax.coastlines(color='black', linewidth=1.5, zorder=1)
+    ax.coastlines(color='black', linewidth=0.5, zorder=4)
     ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
     ax.set_facecolor('lightgrey')
+
 
 fig.suptitle(f"Growth and MHW events from 1st November {selected_year} until 30th April {selected_year+1}", y=1.05)
 fig.text(0.5, 0.1, f"Note that on panel2, frequent corresponds to events lasting $\geq${round(181*0.166)} days during the growing season", ha='center')
 
 # Final layout
-plt.tight_layout(rect=[0, 0, 0.4, 0.95]) #[right, left, bottom, top]
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/atlantic_sector.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+plt.tight_layout(rect=[0, 0, 0.5, 0.95]) #[right, left, bottom, top]
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/atlantic_sector{selected_year}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% Select only year of interest 
 def defining_season(ds, starting_year):
@@ -436,7 +403,7 @@ ax1.set_xticks(tick_positions)
 ax1.set_xticklabels(tick_labels, rotation=45, fontsize=14)  # bigger x-axis tick labels
 
 # Title and grid
-plt.title("Spatial mean time series of Temperature and Chlorophyll", fontsize=18)
+plt.title(f"Spatial mean time series of Temperature and Chlorophyll \n Austral Summer {year_max_events_4deg}", fontsize=18)
 ax1.grid(True)
 
 # Combine legends from both axes
@@ -482,13 +449,13 @@ valid_events_dict = {}  # To store data per threshold
 
 for thresh in abs_thresholds:
     print(f'------ {thresh} ------')
+    # Select intensity of MHWs
     intensity_mask = mhw_duration_study_area[f'det_{thresh}deg'].astype(bool)
-    valid_events = mhw_duration_study_area['duration'].where(
-        ((mhw_duration_study_area['duration'] > duration_thresh) & intensity_mask),
-        drop=True
-    )
+    # Valid events
+    valid_events = mhw_duration_study_area['duration'].where(((mhw_duration_study_area['duration'] > duration_thresh) & intensity_mask), drop=True)
     valid_mask = ~np.isnan(valid_events.values)
 
+    # Find when and where
     valid_indices = np.array(np.nonzero(valid_mask)).T
     years_dim, days_dim, eta_dim, xi_dim = valid_events.shape
     years = valid_events['years'].values
@@ -510,6 +477,7 @@ for thresh in abs_thresholds:
         lons_list.append(lon_rho[e_idx, x_idx])
         duration_list.append(valid_events.values[y_idx, d_idx, e_idx, x_idx])
 
+    # Store results
     valid_events_dict[thresh] = {
         'years_array': np.array(years_list),
         'days_array': np.array(days_list),
@@ -527,7 +495,7 @@ length_all_thresh = []
 for thresh in abs_thresholds:
     print(f" ----------- {thresh}°C -----------")
 
-    # Extract arrays from valid_events_dict for this threshold
+    # Extract data arrays from valid_events_dict for selected absolute threshold
     years_array = valid_events_dict[thresh]['years_array']
     lats_array = valid_events_dict[thresh]['lats_array']
     lons_array = valid_events_dict[thresh]['lons_array']
@@ -535,22 +503,22 @@ for thresh in abs_thresholds:
     # Select events only from year with max 4deg events
     mask = (years_array == year_max_events_4deg)
 
+    # Find lat, lon of these events
     lat_extreme_locations = lats_array[mask]
     lon_extreme_locations = lons_array[mask]
 
     eta_xi_indices = []
     for lat_val, lon_val in zip(lat_extreme_locations, lon_extreme_locations):
-        # Create boolean mask for grid points matching lat/lon within tolerance
-        match_mask = (
-            np.isclose(simulated_length_study_area.lat_rho, lat_val, atol=1e-4) &
-            np.isclose(simulated_length_study_area.lon_rho, lon_val, atol=1e-4)
-        )
+        # Grid points matching lat/lon with small buffer
+        match_mask = (np.isclose(simulated_length_study_area.lat_rho, lat_val, atol=1e-4) &
+                      np.isclose(simulated_length_study_area.lon_rho, lon_val, atol=1e-4))
         indices = np.argwhere(match_mask)
         if indices.size > 0:
             eta_xi_indices.append(indices[0])  # first match: [eta_idx, xi_idx]
         else:
             eta_xi_indices.append([np.nan, np.nan])
 
+    # Extract length time series for these events
     length_series_list = []
     for eta_idx, xi_idx in eta_xi_indices:
         if np.isnan(eta_idx) or np.isnan(xi_idx):
@@ -558,7 +526,7 @@ for thresh in abs_thresholds:
         ts = simulated_length_study_area[:, int(eta_idx), int(xi_idx)]
         length_series_list.append(ts.values)
 
-    # Stack to shape (time, n_cells)
+    # Calculating averaged time series (time, n_cells)
     length_series_array = np.stack(length_series_list, axis=1)  # axis=0: time, axis=1: cells
     average_length_ts = np.nanmean(length_series_array, axis=1)  # mean over cells, result shape: (time,)
 
@@ -579,7 +547,10 @@ base_year = 2021  #non-leap year
 doy_list = list(range(304, 364)) + list(range(0+365, 121+365)) #181
 date_list = [(doy, (datetime(base_year, 1, 1) + timedelta(days=doy - 1)).strftime('%b %d')) for doy in doy_list]
 date_dict = dict(date_list)
-fig, ax_len = plt.subplots(figsize=(12, 6))
+
+fig_width = 6.3228348611  # inches = \textwidth
+fig_height = fig_width *2
+fig, ax_len = plt.subplots(figsize=(fig_width, fig_width/2))#fig_width, fig_height
 
 # --- Bottom subplot: Length time series ---
 for i, avg_length_ts in enumerate(length_all_thresh):
@@ -601,16 +572,20 @@ for day, label in date_dict.items():
         tick_positions.append(day)
         tick_labels.append(label)
 ax_len.set_xticks(tick_positions)
-ax_len.set_xticklabels(tick_labels, rotation=45, fontsize=12)
-ax_len.set_xlabel("Date", fontsize=14)
-ax_len.set_ylabel("Length (mm)", fontsize=14)
+ax_len.set_xticklabels(tick_labels, rotation=45)
+ax_len.set_xlabel("Date")
+ax_len.set_ylabel("Length (mm)")
+ax_len.set_ylim(10, 50)
 ax_len.grid(True, alpha=0.3)
 
-ax_len.tick_params(axis='both', labelsize=12)
-ax_len.legend(loc='lower left', fontsize=12)
+ax_len.tick_params(axis='both')
+ax_len.legend(loc='lower left')
+
+fig.suptitle(f"Length of krill in the Atlantic Sector — {year_max_events_4deg}-{year_max_events_4deg+1}")
+
 
 plt.tight_layout()
 plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/length_mhw_{target_start_year}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/length_mhw_{year_max_events_4deg}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %%
