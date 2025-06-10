@@ -159,7 +159,7 @@ if not os.path.exists(nb_days_file_FULL):
     mhw_days_4deg = ds_mhw_duration['det_4deg'].sum(dim='days') #max: 365 days
 
     # Number of MHWs days per year
-    mhw1deg_days_per_year = mhw_days_1deg.sum(dim='years') #max: 365 days/yr
+    mhw1deg_days_per_year = mhw_days_1deg.mean(dim='years') #max: 365 days/yr
     mhw2deg_days_per_year = mhw_days_2deg.mean(dim='years') #max: 365 days/yr
     mhw3deg_days_per_year = mhw_days_3deg.mean(dim='years') #max: 362.9 days/yr
     mhw4deg_days_per_year = mhw_days_4deg.mean(dim='years') #max: 253.45 days/yr
@@ -181,11 +181,141 @@ if not os.path.exists(nb_days_file_FULL):
                     "nb_days_ideg_per_yr":"Number of days per year being under MHW of i°C"
                     }                
                 )
+    
     # Write to file
     ds_mhw_daysperyear.to_netcdf(nb_days_file_FULL)
 else: 
     # Load data
     ds_mhw_daysperyear = xr.open_dataset(nb_days_file_FULL)
+
+# %% Temperature water column under MHWs
+# -- Write or load data
+avg_temp_FULL = os.path.join(os.path.join(path_clim, 'avg_temp_watercolumn_MHW.nc'))
+
+if not os.path.exists(avg_temp_FULL):
+    ds_avg_temp= xr.open_dataset(os.path.join(path_clim, 'avg_temp_watercolumn.nc'))
+
+    # === Select 60°S south extent
+    south_mask = ds_avg_temp['lat_rho'] <= -60
+    ds_avg_temp_60S_south = ds_avg_temp.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
+
+    # Mask -- only cell under MHWs
+    ds_mhw_duration = ds_mhw_duration.assign_coords(years=ds_avg_temp_60S_south['years'])
+    ds_avg_temp_1deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_1deg'].astype(bool)>0)
+    ds_avg_temp_2deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_2deg'].astype(bool)>0)
+    ds_avg_temp_3deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_3deg'].astype(bool)>0)
+    ds_avg_temp_4deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_4deg'].astype(bool)>0)
+    
+    # To dataset
+    ds_avg_temp_mhw= xr.Dataset(
+                data_vars=dict(
+                    det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], ds_avg_temp_1deg.temp.data),
+                    det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], ds_avg_temp_2deg.temp.data),
+                    det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], ds_avg_temp_3deg.temp.data),
+                    det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], ds_avg_temp_4deg.temp.data)
+                    ),
+                coords=dict(
+                    lon_rho=(["eta_rho", "xi_rho"], ds_mhw_duration.lon_rho.values), #(231, 1442)
+                    lat_rho=(["eta_rho", "xi_rho"], ds_mhw_duration.lat_rho.values), #(231, 1442)
+                    ),
+                attrs = {
+                        "det_ideg":"Avg temperature in the water column under MHW of i°C"
+                        }                
+                    )
+    
+    # Mean temperature over years
+    ds_avg_temp_mhw_meantime = ds_avg_temp_mhw.mean(dim=('years', 'days'))
+
+    # Write to file
+    ds_avg_temp_mhw.to_netcdf(avg_temp_FULL)
+    ds_avg_temp_mhw_meantime.to_netcdf(os.path.join(path_clim, 'avg_temp_watercolumn_MHW_mean.nc'))
+
+else: 
+    # Load data
+    ds_avg_temp_mhw = xr.open_dataset(avg_temp_FULL)
+    ds_avg_temp_mhw_meantime = xr.open_dataset(os.path.join(path_clim, 'avg_temp_watercolumn_MHW_mean.nc'))
+
+
+
+# %% Plot Avg temperature
+# --- Define cmap and norm for temperature (2nd row) ---
+cmap_temp = 'coolwarm'
+vmin_temp = -2
+vmax_temp = 2
+norm_temp = mcolors.TwoSlopeNorm(vmin=vmin_temp, vcenter=0, vmax=vmax_temp)
+variables_temp = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
+titles = ['1°C', '2°C', '3°C', '4°C']
+
+# 4 subplots - 1 for each absolute threshold 
+fig_width = 6.3228348611  # inches = \textwidth
+fig_height = fig_width 
+fig = plt.figure(figsize=(fig_width*4, fig_height))  # wide enough for 4 subplots in a row
+gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)  # 4 columns
+
+axs = []
+for j in range(4):
+    # ax = fig.add_subplot(gs[j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    ax = fig.add_subplot(gs[0, j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    axs.append(ax)
+
+
+for i, var in enumerate(variables_temp):
+    ax = axs[i]
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map features
+    ax.coastlines(color='black', linewidth=1, zorder=4)
+    ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=1, zorder=5)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=2)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xlabel_style = {'size': 10}
+    gl.ylabel_style = {'size': 10}
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # Plot data
+    im = ax.pcolormesh(
+        ds_avg_temp_mhw_meantime.lon_rho,
+        ds_avg_temp_mhw_meantime.lat_rho,
+        ds_avg_temp_mhw_meantime[var],
+        transform=ccrs.PlateCarree(),
+        cmap=cmap_temp,
+        norm=norm_temp,
+        shading='auto',
+        zorder=1,
+        rasterized=True
+    )
+
+    ax.set_title(f'MHW $>$ {titles[i]}', fontsize=16)
+
+# Common colorbar
+tick_positions = np.arange(-2, 2.5, 0.5) 
+cbar = fig.colorbar(
+    im, ax=axs, orientation='horizontal',
+    fraction=0.07, pad=0.1, ticks=tick_positions
+)
+cbar.set_label('Temperature [°C]', fontsize=12)
+
+plt.suptitle("Average temperature of the first 100m under MHWs \n1980-2019", fontsize=24, y=1.05)
+plt.tight_layout(rect=[0, 0, 1, 0.99])  # [left, bottom, right, top]
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% Plot
 import matplotlib.cm as cm
@@ -193,42 +323,36 @@ import matplotlib.colors as colors
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
 
-bounds = [0, 1, 10, 20, 30, 50, 100, 150, 200, 365]
-labels = ['0', '1-10', '10-20', '20-30', '30-50', '50-100', '100-150', '150-200', '200-365']
+bounds = [0, 10, 20, 30, 50, 100, 150, 200, 365]
+labels = ['$<$10', '10-20', '20-30', '30-50', '50-100', '100-150', '150-200', '200-365']
 n_bins = len(bounds) - 1
 colors_list = [
-    '#FFFFFF',      # 0 = white (blank)
-    '#440154',      # deep purple
-    '#3B528B',      # dark blue
-    '#21908C',      # teal
-    '#5DC963',      # green
-    '#FDE725',      # yellow
-    "#FEC425",      # bright yellow
-    "#E99220",      # orange
-    "#A32017"       # red/orange
+    # '#FFFFFF',      # 0 = white (blank)
+    '#440154',      # <10
+    '#3B528B',      # 10-20
+    '#21908C',      # 20-30
+    '#5DC963',      # 30-50
+    '#FDE725',      # 50-100
+    "#FEC425",      # 100-150
+    "#E99220",      # 150-200
+    "#A32017"       # 250-365
 ]
-
 cmap = ListedColormap(colors_list)
-
-# Define the norm using your bin boundaries
 norm = BoundaryNorm(bounds, ncolors=len(colors_list))#, extend='max')
 
 # Parameters
 variables = ['nb_days_1deg_per_yr', 'nb_days_2deg_per_yr', 'nb_days_3deg_per_yr', 'nb_days_4deg_per_yr']
 titles = ['1°C', '2°C', '3°C', '4°C']
 
+# Mask zeros in dataset
+for var in variables:
+    ds_mhw_daysperyear[var] = ds_mhw_daysperyear[var].where(ds_mhw_daysperyear[var]!=0)
+
+
 # 4 subplots - 1 for each absolute threshold 
 fig_width = 6.3228348611  # inches = \textwidth
 fig_height = fig_width 
-
-report = True 
-if report==True:
-    figsize=(fig_width*2, fig_height)
-
-else:
-    figsize=(fig_width*4, fig_height)
-
-fig = plt.figure(figsize=figsize)  # wide enough for 4 subplots in a row
+fig = plt.figure(figsize=(fig_width*4, fig_height))  # wide enough for 4 subplots in a row
 gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)  # 4 columns
 
 axs = []
@@ -281,15 +405,15 @@ for i, var in enumerate(variables):
         rasterized=True
     )
 
-    ax.set_title(f'MHW $>$ {titles[i]}')#, fontsize=16)
+    ax.set_title(f'MHW $>$ {titles[i]}', fontsize=16)
 
 # Common colorbar
 tick_positions = [(bounds[i] + bounds[i+1]) / 2 for i in range(len(bounds)-1)]  # Tick positions at bin centers
 cbar = fig.colorbar(im, ax=axs, orientation='horizontal',  fraction=0.07, ticks=tick_positions)#aspect=10)
-cbar.set_label('days per year')#, fontsize=12)
+cbar.set_label('days per year', fontsize=12)
 cbar.ax.set_xticklabels(labels)
 
-plt.suptitle("Number of days per year under MHWs \n1980-2019 period - 5m depth")#, fontsize=20, y=1.05)
+plt.suptitle("Number of days per year under MHWs \n1980-2019 period - 5m depth", fontsize=20, y=1.05)
 
 plt.tight_layout(rect=[0, 0, 1, 0.89])  # [left, bottom, right, top]
 plt.show()
@@ -430,7 +554,7 @@ long_mhw_ref = None  # To store the first mappable
 # titles = ['$>1^\circ C$', '$>2^\circ C$', '$>3^\circ C$', '$>4^\circ C$']
 titles = ['1°C', '2°C', '3°C', '4°C']
 
-report = True 
+report = False 
 if report==True:
     figsize=(fig_width*2, fig_height)
 
@@ -496,32 +620,33 @@ for i, var in enumerate(variables):
     no_mhw_plot = ax.pcolormesh(ds_no_mhw['lon_rho'], ds_no_mhw['lat_rho'], ds_no_mhw[var].astype(int),
                                 cmap=cmap_no, transform=ccrs.PlateCarree(), zorder=3)
 
-    ax.set_title(f'MHW $>$ {titles[i]}')#, fontsize=16)
+    ax.set_title(f'MHW $>$ {titles[i]}', fontsize=16)
 
 # Legend
 import matplotlib.patches as mpatches
-short_mhw_patch = mpatches.Patch(facecolor='grey', edgecolor='black', label='Short MHWs', linewidth=1)
+short_mhw_patch = mpatches.Patch(facecolor='grey', edgecolor='black', label='Short MHWs ($<$30days)', linewidth=1)
 no_mhw_patch = mpatches.Patch(facecolor='white', edgecolor='black', label='No MHWs', linewidth=1)
 ax.legend(handles=[short_mhw_patch, no_mhw_patch], 
-          loc='lower center', bbox_to_anchor=(0.05, -0.4),
-           ncol=1, frameon=True, fontsize=10)
+          loc='lower center', bbox_to_anchor=(0.02, -0.1),
+           ncol=1, frameon=True, fontsize=12)
 
 
 # Create common colorbar with ticks centered on bins
 tick_positions = [(bins[j] + bins[j+1]) / 2 for j in range(len(bins)-1)]
-cbar_ax = fig.add_axes([0.2, 0.1, 0.6, 0.03])  
+cbar_ax = fig.add_axes([0.2, 0.01, 0.6, 0.03])  #[left, bottom, width, height]
 cbar = fig.colorbar(
     mappable=long_mhw_ref,
     cax=cbar_ax,
     fraction=0.04,
     orientation='horizontal',
-    ticks=tick_positions
+    ticks=tick_positions,
+    extend='max'
 )
 
-cbar.ax.set_xticklabels(['1-5', '5-10', '10-15', '15-20', '20-25', '$>$25'])#, fontsize=14)
-cbar.set_label("Years")#, fontsize=16)
+cbar.ax.set_xticklabels(['1-5', '5-10', '10-15', '15-20', '20-25', '$>$25'], fontsize=14)
+cbar.set_label("Years", fontsize=16)
 
-plt.suptitle("Number of years with events lasting more than 30 days \n1980-2019 period - 5m depth")#s, fontsize=20, y=0.9)
+plt.suptitle("Number of years with events lasting more than 30 days \n1980-2019 period - 5m depth", fontsize=20, y=1.05)
 plt.tight_layout(rect=[0, 0, 0, 0.95])
 plt.show()
 # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years.pdf'), dpi =150, format='pdf', bbox_inches='tight')
