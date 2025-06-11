@@ -101,59 +101,8 @@ date_dict = dict(date_list)
 
 
 # %% ======================== Load data ========================
-# MHW durations
-mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
-print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
-det_combined_ds = xr.open_dataset(os.path.join(path_combined_thesh, 'det_depth5m.nc')) #boolean shape (40, 181, 434, 1442)
-print(det_combined_ds.det_1deg.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
-
-# -- Write or load data
-combined_file = os.path.join(os.path.join(path_duration, 'duration_combined_abs_thresh.nc'))
-
-if not os.path.exists(combined_file):
-
-    # === Select only austral summer and early spring
-    jan_april = mhw_duration_5m.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
-    jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
-    jan_april.coords['years'] = 1980+ jan_april.coords['years'] #keep info on day
-    nov_dec = mhw_duration_5m.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
-    nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
-    nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
-    mhw_duration_austral_summer = xr.concat([nov_dec, jan_april], dim="days") #181days
-
-    # === Select 60°S south extent
-    south_mask = mhw_duration_austral_summer['lat_rho'] <= -60
-    mhw_duration_5m_NEW_60S_south = mhw_duration_austral_summer.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
-    det_combined_ds_60S_south = det_combined_ds.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
-
-    # === Associate each mhw duration with the event threshold 
-    ds_mhw_duration= xr.Dataset(
-        data_vars=dict(
-            duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 181, 434, 1442)
-            det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_1deg'].data),
-            det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_2deg'].data),
-            det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_3deg'].data),
-            det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_4deg'].data)
-            ),
-        coords=dict(
-            lon_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lon_rho.values), #(434, 1442)
-            lat_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lat_rho.values), #(434, 1442)
-            days_of_yr=(['days'], mhw_duration_5m_NEW_60S_south.coords['days'].values), # Keeping information on day 
-            years=(['years'], mhw_duration_5m_NEW_60S_south.coords['years'].values), # Keeping information on day 
-            ),
-        attrs = {
-                "depth": "5m",
-                "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
-                "det_ideg": "Detected events where SST > (absolute threshold (i°C) AND 90th percentile) , boolean array"
-                }                
-            )
-
-    # Write to file
-    ds_mhw_duration.to_netcdf(os.path.join(path_duration, 'duration_combined_abs_thresh.nc')) # Write to file
-
-else: 
-    # Load data
-    ds_mhw_duration = xr.open_dataset(os.path.join(path_duration, 'duration_combined_abs_thresh.nc'))
+combined_file = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))
+ds_mhw_duration = xr.open_dataset(combined_file) #shape: (40, 181, 231, 1442)
 
 # %% Find longest and more intense MHW
 det3deg = False #True #False
@@ -387,7 +336,7 @@ chla_surf_1season = defining_season(chla_surf_study_area, target_start_year) #se
 
 #%% === TEST === 
 temp_mean_ts = temp_avg_100m_1season['avg_temp'].mean(dim=['eta_rho', 'xi_rho'])
-chla_mean_ts = chla_surf_1season['raw_chla'].mean(dim=['eta_rho', 'xi_rho'])
+chla_mean_ts = chla_surf_1season['raw_chla'].mean(dim=['eta_rho', 'xi_rho'], skipna=True)
 days = temp_avg_100m_1season['avg_temp'].days.values
 days_xaxis = np.where(days < 304, days+ 365, days).astype(int)
 base_year = 2021  #non-leap year 
