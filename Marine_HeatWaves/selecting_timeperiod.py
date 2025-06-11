@@ -78,22 +78,33 @@ os.makedirs(os.path.join(path_det, "austral_summer"), exist_ok=True)
 det_files = glob.glob(os.path.join(path_det, "det_*.nc"))
 
 def austral_sumer(file):
-
     start_time = time.time()
 
-    # For testing
-    # file =  '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth/det_11m.nc'
+    absolute_thresh_extended=True
 
-    # Retrieve depth of file as string
-    basename = os.path.basename(file)
-    depth_str = basename.split('_')[1].replace('m.nc', '')
-    print(f'Depth being processed: {depth_str}\n')
+    if absolute_thresh_extended:
+        # For testing    
+        file='/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth/det5m_extended.nc'
+
+        # Retrieve depth of file as string
+        basename = os.path.basename(file)
+        depth_str = basename.split('_')[0][3:-1].replace('m_extended.nc', '')
+        print(f'Depth being processed: {depth_str}\n')
+
+    else:
+        # For testing
+        # file =  '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth/det_11m.nc'
+
+        # Retrieve depth of file as string
+        basename = os.path.basename(file)
+        depth_str = basename.split('_')[1].replace('m.nc', '')
+        print(f'Depth being processed: {depth_str}\n')
 
     # Read data
     det_ds = xr.open_dataset(file) #days ranging from idx0 to idx364
 
     # Select only austral summer and early spring
-    jan_april = det_ds.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
+    jan_april = det_ds.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
     jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
     
     nov_dec = det_ds.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
@@ -102,7 +113,11 @@ def austral_sumer(file):
     det_austral = xr.concat([nov_dec, jan_april], dim="days") #181days
 
     # Save to file
-    output_file = os.path.join(path_det, "austral_summer", f"det_depth{depth_str}m.nc")
+    if absolute_thresh_extended:
+        output_file = os.path.join(path_det, "austral_summer", f"det_depth{depth_str}m_extended.nc")
+    else:
+        output_file = os.path.join(path_det, "austral_summer", f"det_depth{depth_str}m.nc")
+
     if not os.path.exists(output_file):
         try:
             det_austral.to_netcdf(output_file, engine="netcdf4")
