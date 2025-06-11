@@ -106,6 +106,7 @@ print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).
 det_combined_ds = xr.open_dataset(os.path.join(path_det, 'det5m_extended.nc')) #boolean shape (40, 365, 434, 1442)
 print(det_combined_ds.det_4deg_extended.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 
+# -------------------------------------- FULL YEAR --------------------------------------
 # -- Write or load data
 combined_file_FULL = os.path.join(os.path.join(path_det, 'duration_AND_thresh_5mFULL.nc'))
 
@@ -146,8 +147,31 @@ else:
     # Load data
     ds_mhw_duration = xr.open_dataset(combined_file_FULL)
 
-# %% ---- Compute Number of days under MHWs
+# -------------------------------------- SEASONAL --------------------------------------
+ds_duration_thresh_FULLyear = xr.open_dataset(os.path.join(path_det, 'duration_AND_thresh_5mFULL.nc')) # shape: (40, 365, 231, 1442)
 
+# -- Write or load data
+combined_file = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))
+
+if not os.path.exists(combined_file):
+
+    # === Select only austral summer and early spring
+    jan_april = ds_duration_thresh_FULLyear.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
+    jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
+    jan_april.coords['years'] = 1980+ jan_april.coords['years'] #keep info on day
+    nov_dec = ds_duration_thresh_FULLyear.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
+    nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
+    nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
+    ds_duration_thresh_SEASON = xr.concat([nov_dec, jan_april], dim="days") #181days
+
+    # Write to file
+    ds_duration_thresh_SEASON.to_netcdf(combined_file) #shape: (40, 181, 231, 1442)
+
+else: 
+    # Load data
+    ds_mhw_duration = xr.open_dataset(combined_file) #shape: (40, 181, 231, 1442)
+
+# %% ---- Compute Number of days under MHWs
 # -- Write or load data
 nb_days_file_FULL = os.path.join(os.path.join(path_det, 'nb_days_underMHWs_5mFULL.nc'))
 
@@ -322,7 +346,6 @@ plt.show()
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 from matplotlib.colors import BoundaryNorm, ListedColormap
-
 
 bounds = [0, 10, 20, 30, 50, 100, 150, 200, 365]
 labels = ['$<$10', '10-20', '20-30', '30-50', '50-100', '100-150', '150-200', '200-365']
