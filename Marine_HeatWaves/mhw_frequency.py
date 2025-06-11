@@ -103,8 +103,8 @@ date_dict = dict(date_list)
 # MHW durations
 mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
 print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
-det_combined_ds = xr.open_dataset(os.path.join(path_det, 'det_5m.nc')) #boolean shape (40, 365, 434, 1442)
-print(det_combined_ds.mhw_abs_threshold_1_deg.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+det_combined_ds = xr.open_dataset(os.path.join(path_det, 'det5m_extended.nc')) #boolean shape (40, 365, 434, 1442)
+print(det_combined_ds.det_4deg_extended.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 
 # -- Write or load data
 combined_file_FULL = os.path.join(os.path.join(path_det, 'duration_AND_thresh_5mFULL.nc'))
@@ -115,26 +115,27 @@ if not os.path.exists(combined_file_FULL):
     south_mask = mhw_duration_5m['lat_rho'] <= -60
     mhw_duration_5m_NEW_60S_south = mhw_duration_5m.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
     det_combined_ds_60S_south = det_combined_ds.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
+    det_combined_ds_60S_south = det_combined_ds_60S_south.transpose('years','days','eta_rho','xi_rho')
 
     # === Associate each mhw duration with the event threshold 
     ds_mhw_duration= xr.Dataset(
         data_vars=dict(
-            duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 365, 434, 1442)
-            det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['mhw_abs_threshold_1_deg'].data),
-            det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['mhw_abs_threshold_2_deg'].data),
-            det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['mhw_abs_threshold_3_deg'].data),
-            det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['mhw_abs_threshold_4_deg'].data)
+            duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 365, 231, 1442)
+            det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_1deg_extended'].data), #float64 [0, 1]
+            det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_2deg_extended'].data), #float64 [0, 1]
+            det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_3deg_extended'].data), #float64 [0, 1]
+            det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_4deg_extended'].data) #float64 [0, 1]
             ),
         coords=dict(
-            lon_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lon_rho.values), #(434, 1442)
-            lat_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lat_rho.values), #(434, 1442)
+            lon_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lon_rho.values), #(231, 1442)
+            lat_rho=(["eta_rho", "xi_rho"], mhw_duration_5m_NEW_60S_south.lat_rho.values), #(231, 1442)
             days_of_yr=(['days'], mhw_duration_5m_NEW_60S_south.coords['days'].values), # Keeping information on day 
             years=(['years'], mhw_duration_5m_NEW_60S_south.coords['years'].values), # Keeping information on day 
             ),
         attrs = {
                 "depth": "5m",
                 "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
-                "det_ideg": "Detected events where SST > (absolute threshold (i°C) AND 90th percentile) , boolean array"
+                "det_ideg": "Detected events where SST > (EXTENDED absolute threshold (i°C) AND 90th percentile) , boolean array"
                 }                
             )
 
@@ -485,7 +486,7 @@ for var in variables:
 
 # %% Find cell with NO MHWs - for each tresholds 
 no_mhw_cells = {}
-var_no_mhws= ['mhw_abs_threshold_1_deg', 'mhw_abs_threshold_2_deg','mhw_abs_threshold_3_deg', 'mhw_abs_threshold_4_deg']
+var_no_mhws= ['det_1deg_extended', 'det_2deg_extended','det_3deg_extended', 'det_4deg_extended']
 
 # -- Write or load data
 no_mhw_file = os.path.join(os.path.join(path_det, 'noMHW_5m.nc'))
@@ -502,10 +503,10 @@ else:
     # Load data
     ds_no_mhw = xr.open_dataset(no_mhw_file)
     ds_no_mhw = ds_no_mhw.rename({
-    'mhw_abs_threshold_1_deg': 'det_1deg',
-    'mhw_abs_threshold_2_deg': 'det_2deg',
-    'mhw_abs_threshold_3_deg': 'det_3deg',
-    'mhw_abs_threshold_4_deg': 'det_4deg'})
+    'det_1deg_extended': 'det_1deg',
+    'det_2deg_extended': 'det_2deg',
+    'det_3deg_extended': 'det_3deg',
+    'det_4deg_extended': 'det_4deg'})
 
 
 # %% Find cell with  MHWs lasting less than 30days - for each thredhols 
