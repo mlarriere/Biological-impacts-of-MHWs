@@ -346,7 +346,8 @@ format_ax(axes[0])
 cmems_decadal_diff.plot(
     ax=axes[0], x='lon_rho', y='lat_rho',
     transform=ccrs.PlateCarree(),
-    cmap=cmap, norm=norm, add_colorbar=False
+    cmap=cmap, norm=norm, add_colorbar=False,
+    rasterized=True
 )
 axes[0].set_title('CMEMS decadal change\n 2010–2019 minus 1998–2009')
 
@@ -355,7 +356,8 @@ format_ax(axes[1])
 roms_decadal_diff.plot(
     ax=axes[1], x='lon_rho', y='lat_rho',
     transform=ccrs.PlateCarree(),
-    cmap=cmap, norm=norm, add_colorbar=False
+    cmap=cmap, norm=norm, add_colorbar=False,
+    rasterized=True
 )
 axes[1].set_title('ROMS decadal change\n 2010–2019 minus 1998–2009')
 
@@ -367,7 +369,6 @@ cbar.set_label(r'$\Delta$Chl-a (mg/m³)')
 
 plt.tight_layout(rect=[0, 0.12, 1, 1])  # leave space for colorbar
 # plt.show()
-
-plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_decadal_comparison.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_decadal_comparison.pdf'), dpi=150, format='pdf', bbox_inches='tight')
 
 # %%
