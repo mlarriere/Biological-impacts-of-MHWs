@@ -150,7 +150,7 @@ print(f"Location: lat={lat:.2f}, lon={lon:.2f}")
 # Location: lat=-60.82, lon=169.62
 
 # Select extent based on this event
-growth_seasons = xr.open_dataset(os.path.join(path_growth, "growth_1st_attempt_seasonal.nc"))
+growth_seasons = xr.open_dataset(os.path.join(path_growth, "growth_Atkison2006_seasonal.nc"))
 
 # === Select extent to investigate
 def subset_spatial_domain(ds, lat_range=(lat-10, 60), lon_range=(lon-10, lon+30)):
@@ -184,11 +184,11 @@ ax1 = fig.add_subplot(gs[1], projection=ccrs.SouthPolarStereo())
 
 
 # === Subplot 1: Growth ===
-growth_data = growth_study_area.growth_seasons.isel(years=year_index).mean(dim='days')
+growth_data = growth_study_area.growth.isel(years=year_index).mean(dim='days')
 growth_plot = growth_data.plot.pcolormesh(
     ax=ax0, transform=ccrs.PlateCarree(),
     x='lon_rho', y='lat_rho', cmap='PuOr_r', add_colorbar=False,
-    norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth_seasons), vcenter=0, vmax=np.nanmax(growth_study_area.growth_seasons)),
+    norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth), vcenter=0, vmax=np.nanmax(growth_study_area.growth)),
     rasterized=True
 )
 ax0.set_title(f"Mean growth during the growing season 2017-2018", fontsize=14)
@@ -534,13 +534,13 @@ center, radius = [0.5, 0.5], 0.5
 verts = np.vstack([np.sin(theta), np.cos(theta)]).T
 circle = mpath.Path(verts * radius + center)
 ax.set_boundary(circle, transform=ax.transAxes)
-pcolormesh = growth_study_area.growth_seasons.isel(years=target_start_year-1980).mean(dim=('days')).plot.pcolormesh(
+pcolormesh = growth_study_area.growth.isel(years=target_start_year-1980).mean(dim=('days')).plot.pcolormesh(
     ax=ax, transform=ccrs.PlateCarree(),
     x="lon_rho", y="lat_rho",
     add_colorbar=False,
-    cmap='PuOr_r', norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth_seasons), vcenter=0, vmax=np.nanmax(growth_study_area.growth_seasons))
+    cmap='PuOr_r', norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth), vcenter=0, vmax=np.nanmax(growth_study_area.growth))
 )
-point_data = growth_study_area.growth_seasons.isel(eta_rho=eta_idx, xi_rho=xi_idx, years=year_idx, days= growth_study_area.coords['days'].values.tolist().index(day_idx))
+point_data = growth_study_area.growth.isel(eta_rho=eta_idx, xi_rho=xi_idx, years=year_idx, days= growth_study_area.coords['days'].values.tolist().index(day_idx))
 sc = ax.scatter(point_data.lon_rho.item(), point_data.lat_rho.item(), color='red', marker='*', s=200, transform=ccrs.PlateCarree(), edgecolor='red', zorder=3)
 
 # Map features
