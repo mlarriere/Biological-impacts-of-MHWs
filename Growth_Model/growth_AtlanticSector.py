@@ -104,7 +104,7 @@ det_combined_ds = xr.open_dataset(os.path.join(path_combined_thesh, 'det_depth5m
 print(det_combined_ds.det_1deg.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
 
 # -- Write or load data
-combined_file = os.path.join(os.path.join(path_duration, 'duration_combined_abs_thresh.nc'))
+combined_file = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))
 
 if not os.path.exists(combined_file):
 
@@ -145,16 +145,15 @@ if not os.path.exists(combined_file):
             )
 
     # Write to file
-    ds_mhw_duration.to_netcdf(os.path.join(path_duration, 'duration_combined_abs_thresh.nc')) # Write to file
+    ds_mhw_duration.to_netcdf(combined_file)
 
 else: 
     # Load data
-    ds_mhw_duration = xr.open_dataset(os.path.join(path_duration, 'duration_combined_abs_thresh.nc'))
-
+    ds_mhw_duration = xr.open_dataset(combined_file)
 
 #%% ======================== Select extent (Atlantic Sector) ========================
 # According to Atkinson 2009: 70 % of the entire circumpolar population is concentrated within the Southwest Atlantic (0–90W)
-growth_seasons = xr.open_dataset(os.path.join(path_growth, "growth_1st_attempt_seasonal.nc"))
+growth_seasons = xr.open_dataset(os.path.join(path_growth, "growth_Atkison2006_seasonal.nc"))
 growth_seasons = growth_seasons.rename_vars({'days': 'days_of_yr'})
 
 def subset_spatial_domain(ds, lat_range=(-80, -60), lon_range=(270, 360)): #, (0, 30)
@@ -205,8 +204,10 @@ year_counts_4deg = collections.Counter(years_list_4deg)
 year_max_events_4deg, max_events = year_counts_4deg.most_common(1)[0]
 print(f"Year with most 4°C MHW events: {year_max_events_4deg} ({max_events} events)")
 
+# year_max_events_4deg=2017
+
+
 #%% ======================== Plot Study Area for 1 year ========================
-year_max_events_4deg=2017
 # Year of interest
 selected_year = year_max_events_4deg
 year_index = selected_year - 1980
@@ -226,13 +227,13 @@ ax0 = fig.add_subplot(gs[0], projection=ccrs.SouthPolarStereo())
 ax1 = fig.add_subplot(gs[1], projection=ccrs.SouthPolarStereo())
 
 # === Subplot 1: Growth ===
-growth_data = growth_study_area.growth_seasons.isel(years=year_index).mean(dim='days')
+growth_data = growth_study_area.growth.isel(years=year_index).mean(dim='days')
 growth_plot = growth_data.plot.pcolormesh(ax=ax0, transform=ccrs.PlateCarree(),
                                           x='lon_rho', y='lat_rho', 
                                           cmap='PuOr_r', add_colorbar=False,
-                                          norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth_seasons), 
+                                          norm=mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_study_area.growth), 
                                                                     vcenter=0, 
-                                                                    vmax=np.nanmax(growth_study_area.growth_seasons)),
+                                                                    vmax=np.nanmax(growth_study_area.growth)),
                                           rasterized=True)
 ax0.set_title(f"Mean growth")# \n Growing season {selected_year}-{selected_year+1}")
 
@@ -320,8 +321,8 @@ fig.text(0.5, 0.1, f"Note that on panel2, frequent corresponds to events lasting
 
 # Final layout
 plt.tight_layout(rect=[0, 0, 0.5, 0.95]) #[right, left, bottom, top]
-plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/atlantic_sector{selected_year}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/atlantic_sector{selected_year}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% Select only year of interest 
 def defining_season(ds, starting_year):
@@ -339,33 +340,60 @@ def defining_season(ds, starting_year):
 growth_1season = defining_season(growth_study_area, year_max_events_4deg)
 mhw_duration_1season = defining_season(mhw_duration_study_area, year_max_events_4deg)
 
+# %% Define grwoth season for all years
+def define_season_all_years(ds):
+    # ds = growth_redimensioned
+    all_years = ds['years'].values
+    season_list = []
+    all_years_set = set(all_years)
+    
+    for y in all_years: #about 40s per year
+        print(y)
+        if (y + 1) in all_years_set:  
+        # Verify if next year exist - otherwise incomplete season
+            try: 
+                days_nov_dec = ds.sel(days=slice(304, 364), years=y)
+                days_jan_apr = ds.sel(days=slice(0, 119), years=y + 1)
+
+                # Combine days
+                season = xr.concat(
+                    [days_nov_dec, days_jan_apr],
+                    dim=xr.DataArray(np.concatenate([days_nov_dec['days'].values, 
+                                                     days_jan_apr['days'].values]),
+                                                     dims="days", 
+                                                     name="days"))
+
+                season = season.expand_dims(season_year=[y])  # tag with season start year
+                season_list.append(season)
+
+            except Exception as e: # Skip incomplete seasons
+                print(f"Skipping year {y} due to error: {e}")
+                continue
+
+    if not season_list:
+        raise ValueError("No valid seasons found.")
+
+    # Concatenate
+    return xr.concat(season_list, dim="season_year")
+
 # %% INPUTS growth calculation
-# ---- Coefficients of models predicting DGR and GI from length, food, and temperature in Eq. 4 (Atkinson et al., 2006), Here we use model4, i.e. sex and maturity considered (krill length min 35mm)
-a, std_a= np.mean([-0.196, -0.216]), 0.156  # constant term. mean value between males and mature females 
-
-# Length
-b, std_b = 0.00674,  0.00611 #linear term 
-c, std_c = -0.000101, 0.000071 #quadratic term 
-
-# Food
-d, std_d = 0.377, 0.087 #maximum term
-e, std_e = 0.321, 0.232 #half saturation constant
-
-# Temperature
-f, std_f = 0.013, 0.0163 #linear term
-g, std_g = -0.0115, 0.00420 #quadratic term 
-
 # ==== Temperature [°C] -- Weighted averaged temperature of the first 100m - Austral summer - 60S
 temp_avg_100m = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_allyears.nc')) #shape (40, 181, 231, 1442)
 temp_avg_100m = temp_avg_100m.rename({'year': 'years'})
 temp_avg_100m_study_area = subset_spatial_domain(temp_avg_100m) #select spatial extent
 temp_avg_100m_1season = defining_season(temp_avg_100m_study_area, year_max_events_4deg) #select temporal extent for year with the maximum number of events
+temp_avg_100m_1season_SO = defining_season(temp_avg_100m, year_max_events_4deg) #shape (181, 231, 1442)
+temp_avg_100m_study_area_allyrs = define_season_all_years(temp_avg_100m_study_area) 
+temp_avg_100m_study_area_allyrs_mean = temp_avg_100m_study_area_allyrs.mean(dim='season_year') #shape (181, 231, 360)
 
 # ==== Chla [mh Chla/m3] -- Weighted averaged chla of the first 100m - Austral summer - 60S
 chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears.nc')) 
 chla_surf = chla_surf.rename({'year': 'years'})
 chla_surf_study_area = subset_spatial_domain(chla_surf) #select spatial extent
 chla_surf_1season = defining_season(chla_surf_study_area, year_max_events_4deg) #select temporal extent for year with the maximum number of events
+chla_surf_1season_SO = defining_season(chla_surf, year_max_events_4deg) #shape (181, 231, 1442)
+chla_surf_study_area_allyrs = define_season_all_years(chla_surf_study_area) 
+chla_surf_study_area_allyrs_mean = chla_surf_study_area_allyrs.mean(dim='season_year')  #shape (181, 231, 360)
 
 #%% === TEST === 
 temp_mean_ts = temp_avg_100m_1season['avg_temp'].mean(dim=['eta_rho', 'xi_rho'])
@@ -412,36 +440,59 @@ lines_2, labels_2 = ax2.get_legend_handles_labels()
 ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left')
 
 plt.tight_layout()
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/drivers_study_area_{year_max_events_4deg}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+
+# %% ---- Valid Chla data
+valid_fraction = (~np.isnan(chla_surf_1season['raw_chla'])).mean(dim=['eta_rho', 'xi_rho'])
+
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(days_xaxis, valid_fraction, color='blue', label='Valid Chla Fraction')
+ax.set_title("Fraction of Valid (Non-NaN) Chlorophyll Values Over Time", fontsize=16)
+ax.set_ylabel("Fraction of Valid Grid Cells", fontsize=14)
+ax.set_xlabel("Date", fontsize=14)
+ax.set_xticks(tick_positions)
+ax.set_xticklabels(tick_labels, rotation=45, fontsize=12)
+ax.grid(True)
+ax.legend()
+plt.tight_layout()
 plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/drivers_study_area.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+
+# ----- CHLA all cells in the region
+fig_all, ax_all = plt.subplots(figsize=(10, 6))
+ntime, nlat, nlon = chla_surf_1season['raw_chla'].shape
+for i in range(nlat):
+    for j in range(nlon):
+        chla_ts = chla_surf_1season['raw_chla'][:, i, j].values
+        ax_all.plot(days_xaxis, chla_ts, color='green', alpha=0.1, linewidth=0.5)
+ax_all.plot(days_xaxis, chla_mean_ts, color='darkgreen', linewidth=2, label='Mean Surface Chla')
+ax_all.set_xticks(tick_positions)
+ax_all.set_xticklabels(tick_labels, rotation=45, fontsize=12)
+ax_all.set_xlabel("Date", fontsize=14)
+ax_all.set_ylabel("Chlorophyll (mg/m³)", fontsize=14)
+ax_all.grid(True)
+ax_all.set_title(f"All Chlorophyll Time Series + Mean\nAustral Summer {year_max_events_4deg}", fontsize=16)
+ax_all.legend(fontsize=12, loc='upper left')
+plt.show()
 
 # %% Calculating length for extent
 # Funtion to simulate daily growth based on CHLA, temperature, and initial length
-def run_growth_model(chla, temp, initial_length, a, b, c, d, e, f, g):
-    # Get dimensions
-    n_days = chla.sizes['days'] #181 days
-    shape = chla.isel(days=0).shape #(106, 161)
-    # Initialisation - dataarray to store length
-    length = xr.DataArray(np.full((n_days, *shape), np.nan), 
-                          dims=("days", "eta_rho", "xi_rho"),
-                          coords={"days": chla.days, "lat_rho": chla.lat_rho, "lon_rho": chla.lon_rho})
+import sys
+sys.path.append(working_dir+'Growth_Model') 
+import growth_model
+print(dir(growth_model))
+from growth_model import growth_Atkison2006, length_Atkison2006  # import growth function
 
-    # First step -- initial length (hypothethis - on Nov1st krill length = 35mm)
-    length[0] = initial_length
+simulated_length_full_SO= length_Atkison2006(chla=chla_surf_1season_SO.raw_chla, temp=temp_avg_100m_1season_SO.avg_temp, initial_length= 35, intermoult_period=10)
+mean_length_area_SO = simulated_length_full_SO.mean(dim=["eta_rho", "xi_rho"])
 
-    # Simulate growth day by day
-    for t in range(1, n_days):
-        chl = chla.isel(days=t)
-        tmp = temp.isel(days=t)
-        prev_len = length[t-1]
-        growth = (a + b * prev_len + c * prev_len**2 + (d * chl) / (e + chl) + f * tmp + g * tmp**2) # Growth model - Eq. 4 (Atkinson et al. 2006)
-        length[t] = prev_len + growth
+simulated_length_study_area_1980_2019= length_Atkison2006(chla=chla_surf_study_area_allyrs_mean.raw_chla, temp=temp_avg_100m_study_area_allyrs_mean.avg_temp, initial_length= 35, intermoult_period=10)
+mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.mean(dim=["eta_rho", "xi_rho"])
 
-    return length
-
-simulated_length_study_area = run_growth_model(chla=chla_surf_1season.raw_chla, temp=temp_avg_100m_1season.avg_temp, initial_length=35, a=a, b=b, c=c, d=d, e=e, f=f, g=g)
+simulated_length_study_area = length_Atkison2006(chla=chla_surf_1season.raw_chla, temp=temp_avg_100m_1season.avg_temp, initial_length= 35, intermoult_period=10)
 mean_length_area_study_area = simulated_length_study_area.mean(dim=["eta_rho", "xi_rho"])
 std_length_area_study_area = simulated_length_study_area.std(dim=["eta_rho", "xi_rho"])
+
 
 # %% ======================== Find all MHWs events ========================
 abs_thresholds = [1, 2, 3, 4]
@@ -543,25 +594,30 @@ threshold_labels = ['1°C and 90th perc', '2°C and 90th perc', '3°C and 90th p
 # Deal with day to have continuous x-axis
 days_xaxis = np.where(simulated_length_study_area.days.values < 304, simulated_length_study_area.days.values + 365, simulated_length_study_area.days.values).astype(int)
 from datetime import datetime, timedelta
-base_year = 2021  #non-leap year 
-doy_list = list(range(304, 364)) + list(range(0+365, 121+365)) #181
-date_list = [(doy, (datetime(base_year, 1, 1) + timedelta(days=doy - 1)).strftime('%b %d')) for doy in doy_list]
+base_date = datetime(2021, 11, 1)  # Nov 1 (season start)
+date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
 date_dict = dict(date_list)
+
+days_xaxis = np.arange(181)  # Just 0 to 180 (1 per day)
+
 
 fig_width = 6.3228348611  # inches = \textwidth
 fig_height = fig_width *2
-fig, ax_len = plt.subplots(figsize=(fig_width, fig_width/2))#fig_width, fig_height
+
+fig, ax_len = plt.subplots(figsize=(fig_width, fig_width/1.9))#fig_width, fig_height
 
 # --- Bottom subplot: Length time series ---
 for i, avg_length_ts in enumerate(length_all_thresh):
     ax_len.plot(days_xaxis, avg_length_ts, label=threshold_labels[i], color=threshold_colors[i], linewidth=2)
+mean_values_1980_2019 = mean_length_study_area_1980_2019.values
 mean_values = mean_length_area_study_area.values
 std_values = std_length_area_study_area.values
-ax_len.plot(days_xaxis, mean_values, label="Average Length", color="black", linestyle='--')
+ax_len.plot(days_xaxis, mean_values, label=f"Length$_{{{year_max_events_4deg}-{year_max_events_4deg+1}}}$", color="black", linestyle='-')
+ax_len.plot(days_xaxis, mean_values_1980_2019, label="Length$_{1980-2019}$", color="grey", linestyle='--')
 ax_len.fill_between(days_xaxis,
                 mean_values - std_values,
                 mean_values + std_values,
-                color="gray", alpha=0.2, label="±1 std across area")
+                color="gray", alpha=0.2, label=f"±1 $\sigma$ $_{{{year_max_events_4deg}-{year_max_events_4deg+1}}}$")
 
 # Define labels to keep
 wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
@@ -575,17 +631,17 @@ ax_len.set_xticks(tick_positions)
 ax_len.set_xticklabels(tick_labels, rotation=45)
 ax_len.set_xlabel("Date")
 ax_len.set_ylabel("Length (mm)")
-ax_len.set_ylim(10, 50)
+# ax_len.set_ylim(10, 50)
 ax_len.grid(True, alpha=0.3)
 
 ax_len.tick_params(axis='both')
-ax_len.legend(loc='lower left')
+ax_len.legend(loc='upper left')
 
 fig.suptitle(f"Length of krill in the Atlantic Sector — {year_max_events_4deg}-{year_max_events_4deg+1}")
 
 
 plt.tight_layout()
-plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/length_mhw_{year_max_events_4deg}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/length_mhw_{year_max_events_4deg}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %%
