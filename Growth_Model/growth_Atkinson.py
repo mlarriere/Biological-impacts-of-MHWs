@@ -120,6 +120,128 @@ chla_surf = chla_surf.rename({'year': 'years'})
 temp_100m_stack = temp_avg_100m.stack(time= ['years', 'days'])
 chla_surf_stack = chla_surf.stack(time= ['years', 'days']) 
 
+
+# %% Prepare data
+temp1 = temp_avg_100m.isel(years=37, days=slice(304,365))
+temp2 = temp_avg_100m.isel(years=37, days=slice(0,120))
+temp = xr.concat([temp1, temp2], dim='days')
+temp_jan2017 = temp.sel(days=slice(0,30)).mean(dim='days') #shape: (eta_rho, xi_rho) : (231, 1442)
+
+chla1 = chla_surf.isel(years=37, days=slice(304,365))
+chla2 = chla_surf.isel(years=37, days=slice(0,120))
+chla = xr.concat([chla1, chla2], dim='days')
+chla_jan2017 = chla.sel(days=slice(0,30)).mean(dim='days') #shape: (eta_rho, xi_rho) : (231, 1442)
+
+# %% Investigate chla 
+# Extract data and flatten, excluding NaNs
+data = chla_jan2017.raw_chla.values.flatten()
+# data = temp_jan2017.avg_temp.values.flatten()
+data = data[~np.isnan(data)]
+
+# Get min and max
+data_min = np.min(data)
+data_max = np.max(data)
+
+print(f"Chla min: {data_min:.4f} mg/m³")  # °C")
+print(f"Chla max: {data_max:.4f} mg/m³")  # °C")
+
+# Plot histogram
+plt.figure(figsize=(6, 4))
+plt.hist(data, bins=50, color='seagreen', edgecolor='black') #seagreen or darkred
+# plt.title('Histogram of Temperature \n(January 2017)', fontsize=14)
+plt.title('Histogram of Chla concentration \n(January 2017)', fontsize=14)
+plt.xlabel('Chla [mg/m3]', fontsize=12)
+# plt.xlabel('Temperature [°C]', fontsize=12)
+plt.ylabel('Frequency', fontsize=12)
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+#%% Plot ROMS outputs
+norm_chla=mcolors.Normalize(vmin=0, vmax=2)
+
+# ---- Figure and Axes ----
+fig_width, fig_height = 6, 5
+fig = plt.figure(figsize=(fig_width *2, fig_height))
+gs = gridspec.GridSpec(1, 2, wspace=0.08, hspace=0.2)
+
+axs = []
+for j in range(2): 
+    ax = fig.add_subplot(gs[0, j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    axs.append(ax)
+
+# ---- Plot Definitions ----
+plot_data = [
+    (temp_jan2017.avg_temp, "Mean Temperature (100m)", 'inferno', None),
+    (chla_jan2017.raw_chla, "Chlorophyll-a (5m)", 'YlGn', norm_chla)
+]
+
+ims = []
+for i, (data, title, cmap, norm) in enumerate(plot_data):
+    ax = axs[i]
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    import matplotlib.path as mpath
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Coastlines and land
+    ax.coastlines(color='black', linewidth=1)
+    ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=1, zorder=5)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=2)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xlabel_style = {'size': 10}
+    gl.ylabel_style = {'size': 10}
+
+    # Plot data if available
+    if data is not None:
+        lon_name = [name for name in data.coords if 'lon' in name][0]
+        lat_name = [name for name in data.coords if 'lat' in name][0]
+
+        im = ax.pcolormesh(
+            data[lon_name], data[lat_name], data,
+            transform=ccrs.PlateCarree(),
+            cmap=cmap,
+            norm=norm,
+            shading='auto',
+            rasterized=True
+        )
+        ims.append(im)
+    else:
+        ims.append(None)
+
+    ax.set_title(title, fontsize=14)
+
+# ---- Colorbars ----
+# Temperature colorbar
+cbar_ax1 = fig.add_axes([0.13, 0.01, 0.32, 0.03])  # [left, bottom, width, height]
+cbar1 = fig.colorbar(ims[0], cax=cbar_ax1, orientation='horizontal', extend='both')
+cbar1.set_label("°C", fontsize=12)
+
+# Chlorophyll colorbar
+cbar_ax2 = fig.add_axes([0.56, 0.01, 0.32, 0.03])
+cbar2 = fig.colorbar(ims[1], cax=cbar_ax2, orientation='horizontal', extend='both')
+cbar2.set_label("mg/m³", fontsize=12)
+
+
+plt.suptitle("ROMS outputs \n January 2017", fontsize=18, y=1.05)
+plt.show()
+
+
+
 # %% ========== Hypothetical Growth ==========
 # Investigate max/min values
 max_obs_chla = chla_surf_stack.raw_chla.max() #5 mg/m3 Chla
@@ -128,12 +250,12 @@ max_obs_temp = temp_100m_stack.avg_temp.max() #7.3°C
 min_obs_temp = temp_100m_stack.avg_temp.min() #-5.03°C
 
 # 2D grid of all combinations
-chla_hyp= np.arange(min_obs_chla, 5.05, 0.05)
-temp_hyp = np.arange(min_obs_temp, max_obs_temp, 0.05)
+chla_hyp= np.arange(min_obs_chla, 5.05, 0.01)
+temp_hyp = np.arange(min_obs_temp, max_obs_temp, 0.01)
 
 # Calcualting growth for all combination
 CHLA, TEMP = np.meshgrid(chla_hyp, temp_hyp)
-growth_hyp = growth_Atkison2006(CHLA, TEMP)#[mm]
+growth_hyp = growth_Atkison2006(CHLA, TEMP)#[mm] array of shape: (1234, 505)
 
 # %% Growth model - Eq. 4 (Atkinson et al. 2006)
 file_growth = os.path.join(path_growth, "growth_Atkison2006_fullyr.nc")
@@ -173,44 +295,46 @@ def defining_season(ds, starting_year):
 
 # %% ======================== Growth in yearly context - 1 plot ========================
 # Target year: start in July 1980 -> so need Jul-Dec 1980 and Jan-Jun 1981
-target_start_year = 2018
+target_start_year = 2010
 target_end_year = target_start_year + 1
 
+# --- Full year data ---
 # Extract data across July–June (full year across two calendar years)
-CHLA_jul_dec = chla_surf.raw_chla.sel(years=target_start_year).isel(days=slice(181, 365), eta_rho=200, xi_rho=1000)
-TEMP_jul_dec = temp_avg_100m.avg_temp.sel(years=target_start_year).isel(days=slice(181, 365), eta_rho=200, xi_rho=1000)
+CHLA_jul_dec = chla_surf.raw_chla.sel(years=target_start_year).isel(days=slice(181, 365)).mean(dim=["eta_rho", "xi_rho"])#, eta_rho=200, xi_rho=1000)
+TEMP_jul_dec = temp_avg_100m.avg_temp.sel(years=target_start_year).isel(days=slice(181, 365)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
 
-CHLA_jan_jun = chla_surf.raw_chla.sel(years=target_end_year).isel(days=slice(0, 181), eta_rho=200, xi_rho=1000)
-TEMP_jan_jun = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice(0, 181), eta_rho=200, xi_rho=1000)
+CHLA_jan_jun = chla_surf.raw_chla.sel(years=target_end_year).isel(days=slice(0, 181)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
+TEMP_jan_jun = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice(0, 181)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
 
 # Concatenate to get full July–June year
 CHLA_full = np.concatenate([CHLA_jul_dec, CHLA_jan_jun])
 TEMP_full = np.concatenate([TEMP_jul_dec, TEMP_jan_jun])
 
+# --- Growth season data ---
 # Identify Nov 1 – Apr 30 for the red line (Nov–Dec from current year, Jan–Apr from next year)
-CHLA_nov_dec = chla_surf.raw_chla.sel(years=target_start_year).isel(days=slice(305, 365), eta_rho=200, xi_rho=1000)
-TEMP_nov_dec = temp_avg_100m.avg_temp.sel(years=target_start_year).isel(days=slice(305, 365), eta_rho=200, xi_rho=1000)
+CHLA_nov_dec = chla_surf.raw_chla.sel(years=target_start_year).isel(days=slice(305, 365)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
+TEMP_nov_dec = temp_avg_100m.avg_temp.sel(years=target_start_year).isel(days=slice(305, 365)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
 
-CHLA_jan_apr = chla_surf.raw_chla.sel(years=target_end_year).isel(days=slice(0, 121), eta_rho=200, xi_rho=1000)
-TEMP_jan_apr = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice(0, 121), eta_rho=200, xi_rho=1000)
+CHLA_jan_apr = chla_surf.raw_chla.sel(years=target_end_year).isel(days=slice(0, 121)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
+TEMP_jan_apr = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice(0, 121)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
 
 CHLA_season = np.concatenate([CHLA_nov_dec.values, CHLA_jan_apr.values])
 TEMP_season = np.concatenate([TEMP_nov_dec.values, TEMP_jan_apr.values])
 
 # ============ Plot ============
 fig, ax = plt.subplots(figsize=(10, 6))
+norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
 
 # Background color map
-pcm = ax.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto', cmap='coolwarm_r', norm=norm)
+pcm = ax.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto', cmap='coolwarm_r', norm=norm, rasterized= True)
 contours = ax.contour(CHLA, TEMP, growth_hyp, levels=20, colors='white', linewidths=0.5)
 ax.clabel(contours, inline=True, fontsize=12, fmt="%.2f")
 
-# --- Full year growth path
+# --- Full year growth path -- no need to calcualte the growth just plot the dot (temp, chla) 
 valid_mask_full = ~np.isnan(CHLA_full) & ~np.isnan(TEMP_full) # Mask NaNs for full path
 CHLA_full_clean = CHLA_full[valid_mask_full]
 TEMP_full_clean = TEMP_full[valid_mask_full]
 ax.plot(CHLA_full_clean, TEMP_full_clean, color='#4D7C8A', linewidth=2, label='Growth Path (Jul–Jun)') 
-
 
 # --- Growth season (Nov–Apr)
 valid_mask_season = ~np.isnan(CHLA_season) & ~np.isnan(TEMP_season) # Mask NaNs for full path
@@ -230,9 +354,9 @@ start_date_str = dates_valid[0].strftime('%d %b')
 end_date_str = dates_valid[-1].strftime('%d %b')
 
 ax.scatter(CHLA_full_clean[0], TEMP_full_clean[0], facecolor='white', edgecolor='black',
-           s=150, zorder=20, label=f'Start ({start_date_str})')
+           s=100, zorder=20, label=f'Start ({start_date_str})')
 ax.scatter(CHLA_full_clean[-1], TEMP_full_clean[-1], facecolor='black', edgecolor='white',
-           s=150, zorder=20, label=f'End ({end_date_str})')
+           s=100, zorder=20, label=f'End ({end_date_str})')
 
 # Axis settings
 ax.set_title(f'Krill Growth from 1st July {target_start_year} to 30th June {target_end_year}', fontsize=18)
@@ -250,7 +374,8 @@ cbar.set_label('Growth [mm]', fontsize=16)
 cbar.ax.tick_params(labelsize=13)
 
 plt.tight_layout()
-plt.show()
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/temp_chla_diagrams/{target_start_year}_combined.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% ======================== Growth in yearly context - 2 subplots ========================
 norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
@@ -370,6 +495,96 @@ chla_filtered_seasons = define_season_all_years(chla_surf)
 chla_filtered_seasons = chla_filtered_seasons.rename({'season_year': 'years', 'years': 'day_years'})
 temp_avg_100m_seasons = define_season_all_years(temp_avg_100m)
 temp_avg_100m_seasons = temp_avg_100m_seasons.rename({'season_year': 'years', 'years': 'day_years'})
+
+# %% Plot growth season for 1 year
+growth_seasons2017 = growth_seasons.isel(years=37)
+
+# Select January
+growth_ROMS_2017_jan = growth_seasons2017.sel(days=slice(0,30)).mean(dim='days') #shape: (eta_rho, xi_rho) : (231, 1442)
+
+# Setup figure
+fig_width = 6.3228348611  # inches = \textwidth
+fig_height = fig_width
+fig = plt.figure(figsize=(fig_width, fig_height))  # Only 1 plot now
+gs = gridspec.GridSpec(1, 1)
+
+axs = []
+ax = fig.add_subplot(gs[0, 0], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+axs.append(ax)
+
+# Plot configuration
+plot_data = [
+    (growth_ROMS_2017_jan.growth, "Mean Growth")
+]
+
+# Color normalization
+vmin, vmax = -0.2, 0.2
+norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+cmap = 'PuOr_r'
+
+# -----------------------------
+# Plotting
+# -----------------------------
+ims = []
+for data, title in plot_data:
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map features
+    ax.coastlines(color='black', linewidth=1, zorder=4)
+    ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=1, zorder=5)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=2)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xlabel_style = {'size': 10}
+    gl.ylabel_style = {'size': 10}
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # Plot data
+    im = ax.pcolormesh(
+        growth_seasons2017.lon_rho,
+        growth_seasons2017.lat_rho,
+        data,
+        transform=ccrs.PlateCarree(),
+        cmap=cmap,
+        norm=norm,
+        shading='auto',
+        zorder=1,
+        rasterized=True
+    )
+    ims.append(im)
+    # ax.set_title(title, fontsize=15)
+
+# -----------------------------
+# Colorbar
+# -----------------------------
+cbar_ax = fig.add_axes([0.25, 0.01, 0.5, 0.03])  # [left, bottom, width, height]
+tick_positions = [-0.2, -0.1, 0.0, 0.1, 0.2]
+cbar = fig.colorbar(
+    ims[0], cax=cbar_ax, orientation='horizontal',
+    ticks=tick_positions, extend='both'
+)
+cbar.set_label("Growth [mm]", fontsize=14)
+cbar.ax.tick_params(labelsize=13)
+
+plt.suptitle("Growth with ROMS - January 2017", fontsize=18, y=0.98)
+plt.show()
+
 
 #%% == Equation decomposition
 # ---- Coefficients of models predicting DGR and GI from length, food, and temperature in Eq. 4 (Atkinson et al., 2006), Here we use model4, i.e. sex and maturity considered (krill length min 35mm)
@@ -605,9 +820,9 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label=''):
         ax.set_facecolor('#F6F6F3')
         
         # Sector boundaries
-        ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-        ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-        ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+        ax.plot([-90, -90], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+        ax.plot([120, 120], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+        ax.plot([0, 0], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
 
     # Adjust layout
     plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, wspace=0.5, hspace=0.3)
@@ -728,9 +943,9 @@ def plot_variables_decades(growth_ds, chla_ds, temp_ds):
             ax.set_facecolor('#F6F6F3')
 
             # Sector boundaries
-            # ax.plot([-85, -85], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-            # ax.plot([150, 150], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
-            # ax.plot([20, 20], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+            ax.plot([-90, -90], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+            ax.plot([120, 120], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+            ax.plot([0, 0], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
 
         # Add a single colorbar to the right of each row (last column)
         pos = axs[row, -1].get_position()
