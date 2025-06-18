@@ -206,6 +206,96 @@ print(f"Year with most 4°C MHW events: {year_max_events_4deg} ({max_events} eve
 
 # year_max_events_4deg=2017
 
+#%% ======================== Plot Study Area climatology and warming periods ========================
+# -----------------------------
+# Compute mean growth for two periods
+# -----------------------------
+growth_early = growth_study_area.growth.sel(years=slice(1980, 2009)).mean(dim=['years', 'days'], skipna=True)
+growth_late = growth_study_area.growth.sel(years=slice(2010, 2018)).mean(dim=['years', 'days'], skipna=True)
+
+# Common norm for both
+vmin, vmax = np.nanmin(growth_study_area.growth), np.nanmax(growth_study_area.growth)
+norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
+cmap = 'PuOr_r'
+
+# -----------------------------
+# Plotting
+# -----------------------------
+fig_width = 6.3228348611  # inches = \textwidth
+fig_height = fig_width
+fig = plt.figure(figsize=(fig_width * 2, fig_height))
+gs = gridspec.GridSpec(1, 2, wspace=0.07)
+
+axs = []
+for j in range(2): 
+    ax = fig.add_subplot(gs[0, j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    axs.append(ax)
+
+plot_data = [
+    (growth_early, "Mean Growth (1980–2009)"),
+    (growth_late, "Mean Growth (2010–2018)")
+]
+
+ims = []
+for ax, (data, title) in zip(axs, plot_data):
+    # Plot data
+    im = ax.pcolormesh(
+        growth_study_area.lon_rho,
+        growth_study_area.lat_rho,
+        data,
+        transform=ccrs.PlateCarree(),
+        cmap=cmap,
+        norm=norm,
+        shading='auto',
+        rasterized=True,
+        zorder=1
+    )
+    ims.append(im)
+    ax.set_title(title, fontsize=13)
+
+    # Circular boundary
+    theta = np.linspace(np.pi / 2, np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    arc = np.vstack([np.cos(theta), np.sin(theta)]).T
+    verts = np.concatenate([[center], arc * radius + center, [center]])
+    circle = mpath.Path(verts)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Sectors delimitation
+    for i in [-90, 0, 120]:
+        ax.plot([i, i], [-90, -60], transform=ccrs.PlateCarree(), color='#495057', linestyle='--', linewidth=1)
+    
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xlabel_style = {'size': 9}
+    gl.ylabel_style = {'size': 9}
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # Map extent and features
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+    # ax.set_extent([0, -90, -90, -60], crs=ccrs.PlateCarree())
+    ax.coastlines(color='black', linewidth=0.5, zorder=4)
+    ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+
+# -----------------------------
+# Colorbar
+# -----------------------------
+cbar_ax = fig.add_axes([0.25, 0.17, 0.5, 0.03])  # [left, bottom, width, height]
+tick_positions = [-0.4, -0.2, 0.0, 0.2]  # Explicit tick values
+cbar = fig.colorbar(ims[0], cax=cbar_ax, orientation='horizontal', extend='both', ticks=tick_positions)
+cbar.set_label("Growth [mm]", fontsize=12)
+cbar.ax.tick_params(labelsize=11)
+
+plt.suptitle("Antarctic Krill Growth – Climatological vs Warming Periods", fontsize=16, y=1.02)
+plt.tight_layout(rect=[0, 0, 0.5, 0.95]) #[right, left, bottom, top]
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/atlantic_sector_clim_warming.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+
 
 #%% ======================== Plot Study Area for 1 year ========================
 # Year of interest
