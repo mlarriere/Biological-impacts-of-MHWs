@@ -99,52 +99,97 @@ date_dict = dict(date_list)
 
 
 # %% ============== LOAD DATA ==============
-def fill_short_gaps(arr, max_gap=5):
-    """
-    arr: 1D boolean numpy array (True/False)
-    max_gap: maximum gap length to fill
-    Returns: new array with short False gaps filled with True
-    """
-    arr = arr.copy()
+def merge_valid_events_with_gap(arr, min_duration=5, max_gap=2):
+    arr = arr.astype(bool)
     n = len(arr)
-    # Find transitions: True->False or False->True
-    diff = np.diff(arr.astype(int))
-    # Start indices of False runs (+1 because diff is shifted)
-    false_starts = np.where(diff == -1)[0] + 1
-    # End indices of False runs
-    false_ends = np.where(diff == 1)[0] + 1
-    
-    # Handle edge cases where start or end with False
-    if arr[0] == False:
-        false_starts = np.insert(false_starts, 0, 0)
-    if arr[-1] == False:
-        false_ends = np.append(false_ends, n)
-    
-    # Fill short gaps
-    for start, end in zip(false_starts, false_ends):
-        length = end - start
-        if length <= max_gap:
-            arr[start:end] = True
-    return arr
+    result = np.zeros(n, dtype=bool)
+
+    # Find where arr changes (start/end of runs)
+    diff = np.diff(np.concatenate(([0], arr.view(np.int8), [0])))
+    starts = np.where(diff == 1)[0]
+    ends = np.where(diff == -1)[0]
+
+    # Classify True segments
+    valid_events = [(s, e) for s, e in zip(starts, ends) if (e - s) >= min_duration]
+    if not valid_events:
+        return result
+
+    # Merge valid events separated by short gaps
+    merged = [valid_events[0]]
+    for s, e in valid_events[1:]:
+        prev_s, prev_e = merged[-1]
+        if s - prev_e <= max_gap:
+            merged[-1] = (prev_s, e)  # merge
+        else:
+            merged.append((s, e))
+
+    for s, e in merged:
+        result[s:e] = True
+
+    return result
 
 det5m = xr.open_dataset(os.path.join(path_det,'det_5m.nc')) #boolean dataset with detection 
+mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
+
+def test_eta_xi_specific_period_with_duration(ieta=211, ixi=889, varname='mhw_abs_threshold_1_deg'):
+    det5m_yr = det5m.isel(eta_rho=ieta)
+    data = det5m_yr[varname]  # shape (years, days, xi_rho)
+    
+    durations_sel = mhw_duration_5m.isel(eta_rho=ieta)  # shape (years, days, xi_rho)
+    
+    # Select years 37 to 38 (inclusive of 37 and 38)
+    years_sel = slice(37, 39)
+    days_sel = slice(304, 365)
+    
+    # Extract detection and duration slices for the same subset
+    ts_slice = data.isel(years=years_sel, days=days_sel, xi_rho=ixi).values.astype(bool)
+    duration_slice = durations_sel.isel(years=years_sel, days=days_sel, xi_rho=ixi).values
+    
+    # Flatten years and days into one dimension
+    ts_flat = ts_slice.reshape(-1)
+    dur_flat = duration_slice.reshape(-1)
+    
+    print(f"Original detection for eta={ieta}, xi={ixi} days 304-365, years 37-38:")
+    print(ts_flat.astype(int))
+    
+    print(f"Duration values (should be >0 where event exists):")
+    print(dur_flat)
+    
+    # Only gap fill where duration > 0 (valid MHW events)
+    mask_for_gap_fill = dur_flat > 0
+    ts_to_fill = ts_flat & mask_for_gap_fill
+    
+    # Apply gap filling to the masked array
+    extended_ts = merge_valid_events_with_gap(ts_to_fill, min_duration=5, max_gap=2)
+    
+    print(f"Extended detection after applying gap filling only where duration > 0:")
+    print(extended_ts.astype(int))
+    
+    print(f"Original True count: {np.sum(ts_flat)}")
+    print(f"Masked True count (duration > 0): {np.sum(mask_for_gap_fill)}")
+    print(f"Extended True count: {np.sum(extended_ts)}")
+    
+    return ts_flat, extended_ts
+
+# Run test for your specific case
+original, extended = test_eta_xi_specific_period_with_duration()
 
 def extended_detection(ieta, varname):
-    # ieta=220
-    det5m_yr = det5m.isel(eta_rho=ieta)
-    data=det5m_yr[varname]
+    # ieta=211 
+    # varname='mhw_abs_threshold_1_deg'
+    det5m_eta = det5m.isel(eta_rho=ieta)
+    data = det5m_eta[varname]  # shape: (years, days, xi_rho)
 
-    data_stacked = data.stack(time=['years','days'])
+    # Stack data
+    data_stacked = data.stack(time=['years', 'days'])  # shape: (xi_rho, years*days)
 
-    # Fill when gaps<=5days, i.e. replacing False by True -> extending the detection
-    # Example: T T T T T T T F F T T T becomes only T 
-    # data_test = data[950, 36*365-100: 37*365-330]
-    # print(data_test)
+    # Apply the gap filling 
+    extended_array = np.empty_like(data_stacked)
+    extended_array = np.apply_along_axis(merge_valid_events_with_gap, axis=1, arr=data_stacked,
+                                        min_duration=5, # Only events ≥5 days
+                                        max_gap=2 # Merge if gap ≤2 days
+                                        )
 
-    extended_array = np.empty_like(data_stacked) 
-    for xi in range(data_stacked.shape[0]):
-        extended_array[xi] = fill_short_gaps(data_stacked[xi], max_gap=5) #shape: (1442, 14600)
-    
     return ieta, extended_array
 
 # --- Initialisation
@@ -185,23 +230,6 @@ for varname in threshold_vars:
     da_unstacked = da.unstack('time')
     da_dict[varname] = da_unstacked
 
-# Flip eta position
-# extended_det_transposed = extended_det_ds.transpose(2, 0, 1) #shape: (14600, 434, 1442)
-
-# To DataArray
-# extended_da = xr.DataArray(
-#         extended_det_transposed,
-#         coords={
-#             'time': det5m.mhw_abs_threshold_1_deg.stack(time=['years', 'days']).time,
-#             'eta_rho': det5m.mhw_abs_threshold_1_deg['eta_rho'],
-#             'xi_rho': det5m.mhw_abs_threshold_1_deg['xi_rho']
-#         },
-#         dims=['time', 'eta_rho', 'xi_rho'],
-#     )
-
-# Reshape time
-# extended_det_reshaped = extended_da.unstack('time')
-
 # --- To DataSet
 extended_ds = xr.Dataset(da_dict)
 # Rename variables
@@ -214,7 +242,6 @@ extended_ds = extended_ds.drop(['mhw_abs_threshold_3_deg'])
 extended_ds['det_4deg_extended'] = extended_ds['mhw_abs_threshold_4_deg']
 extended_ds = extended_ds.drop(['mhw_abs_threshold_4_deg'])
 
-
 # Add coordinates
 extended_ds = extended_ds.assign_coords(
     lon_rho=(('eta_rho', 'xi_rho'), ds_roms.lon_rho.values),
@@ -223,16 +250,11 @@ extended_ds = extended_ds.assign_coords(
     days=extended_ds.coords['days'],
 )
 
-
-# extended_ds = xr.Dataset(
-#     {"extended_detection": extended_det_reshaped},
-#     coords={
-#         "lon_rho": (("eta_rho", "xi_rho"), ds_roms.lon_rho.values),
-#         "lat_rho": (("eta_rho", "xi_rho"), ds_roms.lat_rho.values),
-#         "years": extended_det_reshaped.coords['years'],
-#         "days": extended_det_reshaped.coords['days'],
-#     }
-# )
+# Add description
+extended_ds.attrs["description"] = (
+    "Gap-filled detections of absolute thresholds. "
+    "Gap-filling was only applied when events last at least 5 days, with gaps of 1 or 2 days in between."
+)
 
 # --- Save file
 output_file = os.path.join(path_det, f"det5m_extended.nc")
