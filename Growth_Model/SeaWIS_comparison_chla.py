@@ -128,10 +128,46 @@ chla_obs_reshaped = xr.DataArray(chl_reshaped,
 # === Time (1998 to 2019)
 cha_obs_1998_2019 = chla_obs_reshaped.sel(year=slice(1998, 2019))
 
+
+da = cha_obs_1998_2019.sel(year=2010, month=12)
+fig = plt.figure(figsize=(8, 6))
+ax = plt.axes(projection=ccrs.SouthPolarStereo())
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+ax.coastlines()
+ax.add_feature(cfeature.LAND, facecolor='lightgrey')
+ax.set_facecolor('lightblue')
+p = ax.pcolormesh(
+    cha_obs_1998_2019.longitude, cha_obs_1998_2019.latitude, da,
+    transform=ccrs.PlateCarree(), shading='auto', cmap='viridis'
+)
+cbar = plt.colorbar(p, orientation='horizontal', pad=0.05, aspect=30)
+cbar.set_label('Chlorophyll-a (mg/m³)')
+ax.set_title('Surface Chlorophyll-a\month 12 – Year 2010', fontsize=12)
+plt.tight_layout()
+plt.show()
+
 # %% ===== ROMS =====
-# Weighted averaged chla of the first 100m - 60S - from 1980 to 2019 - daily
+# Chla at 5m - south of 60S - from 1980 to 2019 - daily
 chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears.nc')).raw_chla #shape: (years: 40, days: 365, eta_rho: 231, xi_rho: 1442)
 chla_surf = chla_surf.rename({'year': 'years'})
+
+# Check
+da = chla_surf.sel(years=2010, days=350)
+fig = plt.figure(figsize=(8, 6))
+ax = plt.axes(projection=ccrs.SouthPolarStereo())
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+ax.coastlines()
+ax.add_feature(cfeature.LAND, facecolor='lightgrey')
+ax.set_facecolor('lightblue')
+p = ax.pcolormesh(
+    chla_surf.lon_rho, chla_surf.lat_rho, da,
+    transform=ccrs.PlateCarree(), shading='auto', cmap='viridis'
+)
+cbar = plt.colorbar(p, orientation='horizontal', pad=0.05, aspect=30)
+cbar.set_label('Chlorophyll-a (mg/m³)')
+ax.set_title('Surface Chlorophyll-a\nDay 350 – Year 2010', fontsize=12)
+plt.tight_layout()
+plt.show()
 
 # === To monthly dataset
 month_day_bounds = [
@@ -151,7 +187,8 @@ month_day_bounds = [
 
 monthly_means = []
 for start, end in month_day_bounds:
-    month_mean = chla_surf.isel(days=slice(start, end)).mean(dim='days')
+    # month_mean = chla_surf.isel(days=slice(start, end)).mean(dim='days')
+    month_mean = chla_surf.isel(days=slice(start, end)).mean(dim='days', skipna=False)
     monthly_means.append(month_mean)
 
 cha_ROMS_monthly = xr.concat(monthly_means, dim='month')
@@ -160,47 +197,113 @@ cha_ROMS_monthly = cha_ROMS_monthly.assign_coords(month=('month', np.arange(1, 1
 # === Time (1998 to 2019)
 cha_ROMS_1998_2019 = cha_ROMS_monthly.isel(years=slice(18, 40)) 
 
+# Check
+m=4
+da = cha_ROMS_1998_2019.sel(years=2010, month=m)
+fig = plt.figure(figsize=(8, 6))
+ax = plt.axes(projection=ccrs.SouthPolarStereo())
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+ax.coastlines()
+ax.add_feature(cfeature.LAND, facecolor='lightgrey')
+ax.set_facecolor('lightblue')
+p = ax.pcolormesh(
+    chla_surf.lon_rho, chla_surf.lat_rho, da,
+    transform=ccrs.PlateCarree(), shading='auto', cmap='viridis'
+)
+ax.set_title(f'Surface Chlorophyll-a month {m} – Year 2010', fontsize=12)
+plt.tight_layout()
+plt.show()
 
 # %% Select time and average
 # Select only from november to april (included)
-months_nov_apr = [10, 11, 0, 1, 2, 3]  # Corresponding to Nov-Apr
+months_nov_apr = [11, 12, 1, 2, 3, 4]  # Corresponding to Nov-Apr
 
-# Select years and avg
-cha_ROMS_1998_2009_avg = cha_ROMS_1998_2019.isel(years=slice(0, 12), month=months_nov_apr).mean(dim=('month', 'years'))
-cha_ROMS_2010_2019_avg = cha_ROMS_1998_2019.isel(years=slice(12, 23), month=months_nov_apr).mean(dim=('month', 'years'))
+# Select years and avg 
+# ROMS: lon_rho range from 24.125 to 383.875
+# Obs: longitude range from -179.875 to 179.875
+cha_ROMS_1998_2009_avg = cha_ROMS_1998_2019.isel(years=slice(0, 12)).sel(month=months_nov_apr).mean(dim=('month', 'years'), skipna=True)
+cha_ROMS_2010_2019_avg = cha_ROMS_1998_2019.isel(years=slice(12, 23)).sel(month=months_nov_apr).mean(dim=('month', 'years'), skipna=True)
 
-cha_obs_1998_2009_avg = cha_obs_1998_2019.isel(year=slice(0, 12), month=months_nov_apr).mean(dim=('month', 'year'))
-cha_obs_2010_2019_avg = cha_obs_1998_2019.isel(year=slice(12, 23), month=months_nov_apr).mean(dim=('month', 'year'))
+cha_obs_1998_2009_avg = cha_obs_1998_2019.isel(year=slice(0, 12)).sel(month=months_nov_apr).mean(dim=('month', 'year'), skipna=True)
+cha_obs_2010_2019_avg = cha_obs_1998_2019.isel(year=slice(12, 23)).sel(month=months_nov_apr).mean(dim=('month', 'year'), skipna=True)
+
+
+# Shifting longitude to 0-360
+cha_ROMS_1998_2009_avg = cha_ROMS_1998_2009_avg.assign_coords(lon_rho=(cha_ROMS_1998_2009_avg.lon_rho % 360))
+cha_ROMS_2010_2019_avg = cha_ROMS_2010_2019_avg.assign_coords(lon_rho=(cha_ROMS_2010_2019_avg.lon_rho % 360))
+cha_obs_1998_2009_avg = cha_obs_1998_2009_avg.assign_coords(longitude=(cha_obs_1998_2009_avg.longitude % 360))
+cha_obs_2010_2019_avg = cha_obs_2010_2019_avg.assign_coords(longitude=(cha_obs_2010_2019_avg.longitude % 360))
+
+# Ensure latitude and longitude are sorted
+cha_obs_1998_2009_avg = cha_obs_1998_2009_avg.sortby(['latitude', 'longitude'])
+cha_obs_2010_2019_avg = cha_obs_2010_2019_avg.sortby(['latitude', 'longitude'])
 
 # %% Regridding 
 import xesmf as xe
+from scipy.spatial import cKDTree
 
-# Create the grid dictionaries
-obs_grid = {
-    "lon": cha_obs_1998_2009_avg.longitude,
-    "lat": cha_obs_1998_2009_avg.latitude,
-}
-roms_grid = {
-    "lon": cha_ROMS_1998_2009_avg.lon_rho,
-    "lat": cha_ROMS_1998_2009_avg.lat_rho,
-}
+def regrid_roms_to_obs_kdtree(roms_da, obs_da, radius=0.5):
+    """
+    Regrid ROMS data onto obs grid using KDTree-based local averaging.
 
-# Set up regridder
-regridder = xe.Regridder(cha_obs_1998_2009_avg, cha_ROMS_1998_2009_avg, method="bilinear", periodic=True)
+    Parameters:
+        roms_da (xr.DataArray): ROMS data with 2D lat_rho, lon_rho coordinates.
+        obs_da (xr.DataArray): Observational data with 1D latitude, longitude coords.
+        radius (float): Radius in degrees for neighborhood averaging.
 
-# Apply regridding to both observation averages
-cha_obs_1998_2009_avg_rg = regridder(cha_obs_1998_2009_avg)
-cha_obs_2010_2019_avg_rg = regridder(cha_obs_2010_2019_avg)
+    Returns:
+        xr.DataArray: ROMS values regridded to obs grid.
+    """
 
-diff_1998_2009 = cha_ROMS_1998_2009_avg - cha_obs_1998_2009_avg_rg
-diff_2010_2019 = cha_ROMS_2010_2019_avg - cha_obs_2010_2019_avg_rg
+    # Flatten ROMS lat/lon and values
+    roms_lons = roms_da.lon_rho.values.flatten()
+    roms_lats = roms_da.lat_rho.values.flatten()
+    roms_vals = roms_da.values.flatten()
+
+    # Build KDTree for ROMS points
+    roms_tree = cKDTree(np.column_stack((roms_lons, roms_lats)))
+
+    # Get obs 1D coords
+    lon_obs_1d = obs_da.longitude.values
+    lat_obs_1d = obs_da.latitude.values
+
+    # Create 2D meshgrid and flatten
+    lon_obs_2d, lat_obs_2d = np.meshgrid(lon_obs_1d, lat_obs_1d)
+    obs_points = np.column_stack((lon_obs_2d.ravel(), lat_obs_2d.ravel()))
+
+    # Query neighbors in ROMS grid
+    indices_list = roms_tree.query_ball_point(obs_points, r=radius)
+
+    # Compute mean for each obs point
+    mean_roms_vals = np.full(obs_points.shape[0], np.nan, dtype=np.float32)
+    for i, inds in enumerate(indices_list):
+        if inds:
+            mean_roms_vals[i] = np.nanmean(roms_vals[inds])
+
+    # Reshape back to obs grid shape
+    mean_roms_2d = mean_roms_vals.reshape(len(lat_obs_1d), len(lon_obs_1d))
+
+    # Wrap in DataArray
+    return xr.DataArray(
+        mean_roms_2d,
+        coords={'latitude': lat_obs_1d, 'longitude': lon_obs_1d},
+        dims=['latitude', 'longitude'],
+        name=f"regridded_roms_{roms_da.name}"
+    )
+
+# Regrid ROMS to obs grid (via KDTree)
+roms_on_obs_1998_2009 = regrid_roms_to_obs_kdtree(cha_ROMS_1998_2009_avg, cha_obs_1998_2009_avg)
+roms_on_obs_2010_2019 = regrid_roms_to_obs_kdtree(cha_ROMS_2010_2019_avg, cha_obs_2010_2019_avg)
+
+# Compute differences (ROMS - OBS)
+diff_1998_2009 = roms_on_obs_1998_2009 - cha_obs_1998_2009_avg
+diff_2010_2019 = roms_on_obs_2010_2019 - cha_obs_2010_2019_avg
 
 # %% === Comparison map year per year 
-
 # === Create figure ===
 fig_width = 6.3228348611  # inches = \textwidth
 fig_height = fig_width * 2 / 3  # adjust for 2 rows
-fig = plt.figure(figsize = (fig_width, fig_height)) #(20, 12)
+fig = plt.figure(figsize = (fig_width*2, fig_width)) #(20, 12)
 
 # 2 rows, 3 columns: 
 gs = gridspec.GridSpec(2, 3, wspace=0.1, hspace=0.25)
@@ -219,21 +322,25 @@ def format_ax(ax):
     ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
     ax.coastlines(color='black', linewidth=1)
     ax.set_facecolor('#F6F6F3')
-    # for lon in [-85, 150, 20]:
-    #     ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#495057',
-    #             linestyle='--', linewidth=1)
+    for lon in [-90, 120, 0]:
+        ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#495057',
+                linestyle='--', linewidth=1)
     # Gridlines
     gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.2, linestyle='--', linewidth=0.7)
     gl.xlabels_top = False
     gl.ylabels_right = False
-    gl.xlabel_style = {'size': 6}
-    gl.ylabel_style = {'size': 6}
+    gl.xlabel_style = {'size': 9}
+    gl.ylabel_style = {'size': 9}
     gl.xformatter = LongitudeFormatter()
     gl.yformatter = LatitudeFormatter()
 
 # === Plot data ===
-vmin, vmax = 0, 2.5
-cmap = cmocean.cm.algae
+vmin, vmax = 0, 1
+from matplotlib.colors import LinearSegmentedColormap
+colors = ["#216869", "#73A942", "#FBB02D"]  # Blue, Green, Yellow
+cmap = LinearSegmentedColormap.from_list("blue_green_yellow", colors, N=256)
+
+# cmap = cmocean.cm.algae
 
 # Row 1: 1998–2008
 # Column 1: CMEMS 1998–2008
@@ -255,7 +362,7 @@ format_ax(axes[1])
 diff_vmin, diff_vmax = -1, 1
 diff_cmap = "RdBu_r"
 im2 = diff_1998_2009.plot.pcolormesh(ax=axes[2], transform=ccrs.PlateCarree(),
-                                    x="lon_rho", y="lat_rho",
+                                    x="longitude", y="latitude",
                                     cmap=diff_cmap, vmin=diff_vmin, vmax=diff_vmax,
                                     add_colorbar=False, rasterized=True)
 format_ax(axes[2])
@@ -278,19 +385,19 @@ format_ax(axes[4])
 
 # Column 3: Difference 2009–2019 (CMEMS - ROMS)
 im5 = diff_2010_2019.plot.pcolormesh(ax=axes[5], transform=ccrs.PlateCarree(),
-                                    x="lon_rho", y="lat_rho",
+                                    x="longitude", y="latitude",
                                     cmap=diff_cmap, vmin=diff_vmin, vmax=diff_vmax,
                                     add_colorbar=False, rasterized=True)
 format_ax(axes[5])
 
 # === Horizontal colorbar for chla ===
-cax_avg = fig.add_axes([0.15, 0.08, 0.45, 0.02])  # [left, bottom, width, height]
+cax_avg = fig.add_axes([0.15, 0.03, 0.45, 0.02])  # [left, bottom, width, height]
 norm_avg = mcolors.Normalize(vmin=vmin, vmax=vmax)
 sm_avg = ScalarMappable(cmap=cmap, norm=norm_avg)
 sm_avg.set_array([])
 cbar_avg = fig.colorbar(sm_avg, cax=cax_avg, orientation='horizontal', extend='max')
 # cbar_avg.ax.tick_params(labelsize=9)
-cbar_avg.set_label('Chl-a (mg/m³)')
+cbar_avg.set_label('Chl-a (mg/m³)', fontsize=12)
 
 # === Vertical colorbar for differences ===
 cax_diff = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
@@ -299,76 +406,76 @@ sm_diff = ScalarMappable(cmap=diff_cmap, norm=norm_diff)
 sm_diff.set_array([])
 cbar_diff = fig.colorbar(sm_diff, cax=cax_diff, extend='both')
 # cbar_diff.ax.tick_params(labelsize=9)
-cbar_diff.set_label('$\Delta$ Chl-a (mg/m³)')
+cbar_diff.set_label('$\Delta$ Chl-a (mg/m³)', fontsize=12)
 
 
 # === Add column titles ===
-fig.text(0.25, 0.9, 'CMEMS', ha='center')
-fig.text(0.5, 0.9, 'ROMS', ha='center')
-fig.text(0.8, 0.9, 'Difference$_{(CMEMS - ROMS)}$', ha='center')
+fig.text(0.25, 0.9, 'CMEMS', ha='center', fontsize=13)
+fig.text(0.5, 0.9, 'ROMS', ha='center', fontsize=13)
+fig.text(0.8, 0.9, 'Difference$_{(CMEMS - ROMS)}$', ha='center', fontsize=13)
 
 # === Add row titles ===
-fig.text(0.09, 0.75, '1998–2008 avg', va='center', rotation='vertical')
-fig.text(0.09, 0.3, '2009–2019 avg', va='center', rotation='vertical')
+fig.text(0.09, 0.75, '1998–2008 avg', va='center', rotation='vertical', fontsize=13)
+fig.text(0.09, 0.3, '2009–2019 avg', va='center', rotation='vertical', fontsize=13)
 
-fig.suptitle('Comparison CMEMS and ROMS Chlorophyll-a Concentrations', y=0.99, x=0.57)
+fig.suptitle('Comparison CMEMS and ROMS Chlorophyll-a Concentrations', y=0.99, x=0.57, fontsize=18)
 
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_comparison.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_comparison.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 
 # %% --------------- Difference between decades ---------------
 # Compute differences
-cmems_decadal_diff = cha_obs_2010_2019_avg_rg - cha_obs_1998_2009_avg_rg
-roms_decadal_diff = cha_ROMS_2010_2019_avg - cha_ROMS_1998_2009_avg
+# cmems_decadal_diff = cha_obs_2010_2019_avg_rg - cha_obs_1998_2009_avg_rg
+# roms_decadal_diff = cha_ROMS_2010_2019_avg - cha_ROMS_1998_2009_avg
 
-# === Plot ===
-fig_width = 6.3228348611  # inches = \textwidth
-fig_height = fig_width * 2 / 3  # adjust for 2 rows
-fig = plt.figure(figsize = (fig_width, fig_height)) #(20, 12)
+# # === Plot ===
+# fig_width = 6.3228348611  # inches = \textwidth
+# fig_height = fig_width * 2 / 3  # adjust for 2 rows
+# fig = plt.figure(figsize = (fig_width, fig_height)) #(20, 12)
 
-# 1 rows, 2 columns: 
-gs = gridspec.GridSpec(1, 2, wspace=0.1, hspace=0.25)
-axes = [fig.add_subplot(gs[i, j], projection=ccrs.SouthPolarStereo())
-        for i in range(1) for j in range(2)]
+# # 1 rows, 2 columns: 
+# gs = gridspec.GridSpec(1, 2, wspace=0.1, hspace=0.25)
+# axes = [fig.add_subplot(gs[i, j], projection=ccrs.SouthPolarStereo())
+#         for i in range(1) for j in range(2)]
 
-# Circular boundary
-theta = np.linspace(0, 2 * np.pi, 100)
-circle = mpath.Path(np.vstack([np.sin(theta), np.cos(theta)]).T * 0.5 + 0.5)
+# # Circular boundary
+# theta = np.linspace(0, 2 * np.pi, 100)
+# circle = mpath.Path(np.vstack([np.sin(theta), np.cos(theta)]).T * 0.5 + 0.5)
 
-# Colormap and normalization
-vmin, vmax = -1, 1
-cmap = 'RdBu_r'
-norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+# # Colormap and normalization
+# vmin, vmax = -1, 1
+# cmap = 'RdBu_r'
+# norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
 
-# -- CMEMS subplot
-format_ax(axes[0])
-cmems_decadal_diff.plot(
-    ax=axes[0], x='lon_rho', y='lat_rho',
-    transform=ccrs.PlateCarree(),
-    cmap=cmap, norm=norm, add_colorbar=False,
-    rasterized=True
-)
-axes[0].set_title('CMEMS decadal change\n 2010–2019 minus 1998–2009')
+# # -- CMEMS subplot
+# format_ax(axes[0])
+# cmems_decadal_diff.plot(
+#     ax=axes[0], x='lon_rho', y='lat_rho',
+#     transform=ccrs.PlateCarree(),
+#     cmap=cmap, norm=norm, add_colorbar=False,
+#     rasterized=True
+# )
+# axes[0].set_title('CMEMS decadal change\n 2010–2019 minus 1998–2009')
 
-# -- ROMS subplot
-format_ax(axes[1])
-roms_decadal_diff.plot(
-    ax=axes[1], x='lon_rho', y='lat_rho',
-    transform=ccrs.PlateCarree(),
-    cmap=cmap, norm=norm, add_colorbar=False,
-    rasterized=True
-)
-axes[1].set_title('ROMS decadal change\n 2010–2019 minus 1998–2009')
+# # -- ROMS subplot
+# format_ax(axes[1])
+# roms_decadal_diff.plot(
+#     ax=axes[1], x='lon_rho', y='lat_rho',
+#     transform=ccrs.PlateCarree(),
+#     cmap=cmap, norm=norm, add_colorbar=False,
+#     rasterized=True
+# )
+# axes[1].set_title('ROMS decadal change\n 2010–2019 minus 1998–2009')
 
-# Shared colorbar
-cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
-sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
-cbar = fig.colorbar(sm, cax=cbar_ax, orientation='vertical', extend='both')
-cbar.set_label(r'$\Delta$Chl-a (mg/m³)')
+# # Shared colorbar
+# cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+# sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+# cbar = fig.colorbar(sm, cax=cbar_ax, orientation='vertical', extend='both')
+# cbar.set_label(r'$\Delta$Chl-a (mg/m³)')
 
-plt.tight_layout(rect=[0, 0.12, 1, 1])  # leave space for colorbar
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_decadal_comparison.pdf'), dpi=150, format='pdf', bbox_inches='tight')
+# plt.tight_layout(rect=[0, 0.12, 1, 1])  # leave space for colorbar
+# # plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/inputs/chla_CMEMS_ROMS_decadal_comparison.pdf'), dpi=150, format='pdf', bbox_inches='tight')
 
-# %%
+# # %%
