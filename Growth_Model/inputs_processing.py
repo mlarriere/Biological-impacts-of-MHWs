@@ -24,6 +24,8 @@ import matplotlib.pyplot as plt
 import matplotlib.path as mpath
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
+import matplotlib.gridspec as gridspec
+from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
 
 import time
 from tqdm.contrib.concurrent import process_map
@@ -69,7 +71,10 @@ file_var = 'temp_DC_BC_'
 path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
 path_chla = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/z_TOT_CHL/'
-path_chla_corrected = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/' #files: TOT_CHL_BC_*nc
+path_chla_corrected = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/' #files: TOT_CHL_BC_*nc 
+# /nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/TOT_CHL_surface_daily_corrected.nc
+# /nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/TOT_CHL_surface_monthly_corrected.nc
+
 path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
 path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
 
@@ -82,6 +87,68 @@ ndays = np.size(days)
 nz = 35  # depths levels
 neta = 434
 nxi = 1442
+
+# %% Comparison chla before and after trend correection 
+# Load datasets
+after_chla = xr.open_dataset(os.path.join(path_chla_corrected, 'TOT_CHL_surface_daily_corrected.nc'))
+before_chla = xr.open_dataset(os.path.join(path_chla_corrected, 'TOT_CHL_BC_2017.nc'))
+
+# Extract data
+after_day360 = after_chla['TOT_CHL'].isel(year=37, day=360)
+before_day360 = before_chla['TOT_CHL'].isel(time=360)
+
+# Set figure size
+fig_width = 5  # adjust as needed
+fig_height = fig_width
+fig = plt.figure(figsize=(fig_width*2, fig_height))  # 2 subplots
+gs = gridspec.GridSpec(1, 2, wspace=0.05, hspace=0.2)
+axs = []
+for j in range(2):
+    ax = fig.add_subplot(gs[0, j], projection=ccrs.SouthPolarStereo())
+    axs.append(ax)
+
+data_list = [after_day360, before_day360]
+titles = ["After Correction (2017 - Day 360)", "Before Correction (2017 - Day 360)"]
+
+for i, data in enumerate(data_list):
+    ax = axs[i]
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map features
+    ax.coastlines(color='black', linewidth=1)
+    ax.add_feature(cfeature.LAND, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=1)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7)
+    gl.xlabels_top = gl.ylabels_right = False
+    gl.xlabel_style = gl.ylabel_style = {'size': 8}
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # Plot
+    im = ax.pcolormesh(after_chla.lon_rho, after_chla.lat_rho, data,
+                       transform=ccrs.PlateCarree(),
+                       cmap='viridis', shading='auto', vmin=0, vmax=5, rasterized=True)
+    ax.set_title(titles[i], fontsize=12)
+
+cbar = fig.colorbar(im, ax=axs, orientation='horizontal', fraction=0.06, pad=0.07)
+cbar.set_label('Chl (mg/m³)', fontsize=10)
+plt.tight_layout()
+plt.show()
+
 
 #%% ============================== ROMS chlorophyll in [mg Chla/m3] ==============================
 # -------------------------------- Weighted averaged Chla --------------------------------
@@ -104,25 +171,6 @@ def mean_chla(yr):
     # === Select extent - south of 60°S
     south_mask = ds_chla_mean_yr['lat_rho'] <= -60
     chla_60S_south = ds_chla_mean_yr.where(south_mask, drop=True) #shape (1, 365, 14, 231, 1442)
-
-    # === Select only austral summer and early spring
-    # print('--- Austral Summer ---')
-    # jan_april = chla_60S_south.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
-    # nov_dec = chla_60S_south.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
-    # chla_austral_60S_south = xr.concat([nov_dec, jan_april], dim="days") #181days
-
-    # Check if there is at least 14 layers to compute the mean
-    # valid_depth = ~chla_austral_60S_south.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
-    # ds_chla_mean_valid = chla_austral_60S_south.where(valid_depth)
-
-    # Compute the mean - if not enough vertical layers, mean = Nan
-    # print('--- Computing mean ---')
-    # depth_values = np.abs(ds_chla_mean_valid.depth.values)
-    # depth_thickness = np.diff(depth_values, prepend=0) # Compute the thickness of each depth layer
-    # depth_thickness = depth_thickness[:, np.newaxis, np.newaxis]  # Shape (14, 1, 1)
-    # da_chla_weighted_mean = (ds_chla_mean_valid.raw_chla * depth_thickness).sum(dim='depth') / depth_thickness.sum() # Need to consider that the cell don't have the same height -- WEIGHTING
-    # da_chla_weighted_mean = xr.where(da_chla_weighted_mean < 0, 0, da_chla_weighted_mean) # Set negative values to 0
-    # da_chla_weighted_mean.isel(days=100).plot()
 
     # === Cap the data - max 5mg/m3 ===
     chla_filtered = chla_60S_south.where(chla_60S_south.raw_chla <= 5) #shape (years:1, days:365, eta_rho:231, xi_rho:1442)
@@ -173,74 +221,57 @@ output_file = os.path.join(path_growth_inputs, f"chla_surf_allyears.nc") #chla_a
 if not os.path.exists(output_file):
     chla_mean_all.to_netcdf(output_file, mode='w')  
 
-# %% -------------------------------- Chla at each depth --------------------------------
-# def chla_process(yr):
+# %% -------------------------------- Chla trend corrected --------------------------------
+chla_trend_corrected = xr.open_dataset(os.path.join(path_chla_corrected, 'TOT_CHL_surface_daily_corrected.nc')) #shape (40, 365, 434, 1442)
 
-#     start_time = time.time()
+# === Select extent - south of 60°S
+south_mask = chla_trend_corrected['lat_rho'] <= -60
+chla_trend_corrected_60S_south = chla_trend_corrected.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
+chla_trend_corrected_60S_south = chla_trend_corrected_60S_south.rename({'TOT_CHL':'raw_chla'}) # Rename variable
 
-#     # Read data
-#     # yr=0
-#     ds_chla = xr.open_dataset(os.path.join(path_chla, f"z_SO_d025_avg_daily_{1980+yr}.nc"))
-#     ds_chla_100m = ds_chla.isel(time= slice(0,365), depth=slice(0, 14)) #depth from 0 to 100m depth
+# Investigating data
+max_chla = chla_trend_corrected_60S_south.raw_chla.max() # 189.182336 mg/m3
+min_chla = chla_trend_corrected_60S_south.raw_chla.min() # 4.88155679e-08 mg/m3
 
-#     # Reformating
-#     ds_chla_100m = ds_chla_100m.rename({'TOT_CHL':'raw_chla'}) # Rename variable
-#     ds_chla_100m = ds_chla_100m.rename({'time': 'days'})# Rename dimension
-#     ds_chla_100m = ds_chla_100m.assign_coords(lon_rho = ds_roms.lon_rho , lat_rho=ds_roms.lat_rho, days=np.arange(0, 365)) # Replace cftime with integer day-of-year: 1 to 365, (lat, lon) coordinates from temperature dataset
-#     ds_chla_mean_yr = xr.Dataset({'raw_chla': ds_chla_100m.raw_chla}).expand_dims(year=[1980 + yr]) # To dataset and adding year dimension - shape (year:1, depth:14, eta_rho:434, xi_rho:1442, days:365)
+# === Cap the data - max 5mg/m3 and min 0mg/m3 ===
+chla_trend_corrected_filtered = chla_trend_corrected_60S_south.where(chla_trend_corrected_60S_south.raw_chla <= 5) #shape (years:1, days:365, eta_rho:231, xi_rho:1442)
 
-#     # Write dataset to file
-#     ds_chla_mean_yr.to_netcdf(path=os.path.join(path_growth_inputs, f"chla_daily_{1980+yr}.nc"), mode='w')
+# Investigating data
+max_chla_after = chla_trend_corrected_filtered.raw_chla.max() # 4.9999994 mg/m3
+min_chla_after = chla_trend_corrected_filtered.raw_chla.min() # 4.88155679e-08 mg/m3
 
-#     end_time = time.time()
-#     elapsed_time = end_time - start_time
-#     print(f"Processing time for {1980+yr}: {elapsed_time:.2f} seconds")
+# === PLOT ===
+data = chla_trend_corrected_filtered.isel(year=37)
+fig = plt.figure(figsize=(14, 6))
+gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2])
+# Histogram (left)
+ax0 = fig.add_subplot(gs[0])
+ax0.hist(data.raw_chla.values.flatten(), bins=50, color='teal', alpha=0.75)
+ax0.set_title(f"Histogram of Surface Chlorophyll\n(South of 60°S, {37+1980})")
+ax0.set_xlabel("Chlorophyll-a [mg/m³]")
+ax0.set_ylabel("Frequency")
+ax0.grid(True, alpha=0.3)
+# Map (right)
+ax1 = fig.add_subplot(gs[1], projection=ccrs.SouthPolarStereo())
+ax1.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+ax1.coastlines()
+ax1.add_feature(cfeature.LAND, facecolor='lightgrey')
+ax1.set_facecolor('lightblue')
+p = ax1.pcolormesh(
+    data['lon_rho'], data['lat_rho'],
+    data['raw_chla'].isel(day=360),
+    transform=ccrs.PlateCarree(), shading='auto', cmap='viridis')
+cbar = plt.colorbar(p, orientation='horizontal', pad=0.05, fraction=0.04, aspect=30, ax=ax1)
+cbar.set_label('Chlorophyll-a (mg/m³)')
+ax1.set_title(f'Chlorophyll-a\nDay {330} -- {37+1980}', fontsize=12)
+plt.tight_layout()
+plt.show()
 
-#     return ds_chla_mean_yr 
-    
-# # Calling function
-# process_map(chla_process, range(0, nyears), max_workers=30, desc="Processing file")  #computing time ~1min per file
+# Write dataset to file
+output_file = os.path.join(path_growth_inputs, f"chla_surf_allyears_detrended.nc")
+if not os.path.exists(output_file):
+    chla_trend_corrected_filtered.to_netcdf(output_file, mode='w')  
 
-# # === Select only austral summer and early spring
-# file = path_growth_inputs + '/chla_avg100m_yearly_60S.nc'
-
-# # Read data
-# ds_chla = xr.open_dataset(file) #days ranging from idx0 to idx364 -for chla contain already coord days
-
-# # Combine year per depth
-# import glob
-# chla_files = sorted(glob.glob(os.path.join(path_growth_inputs, "chla_daily_*.nc")))
-
-# for i in range(14):
-#     print(f'Depth {i}')
-    # depth_data = [] # list to store data of different years - same depth
-    # for file in chla_files:
-    #     # Read data
-    #     ds = xr.open_dataset(file)
-    #     da = ds.isel(depth=13)
-
-    #     # === Select extent - south of 60°S
-    #     south_mask = da['lat_rho'] <= -60
-    #     chla_60S_south = da.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
-
-    #     # === Select only austral summer and early spring
-    #     jan_april = chla_60S_south.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
-    #     nov_dec = chla_60S_south.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
-    #     chla_austral_60S_south = xr.concat([nov_dec, jan_april], dim="days") #181days
-
-    #     # Store
-    #     depth_data.append(chla_austral_60S_south)
-    #     ds.close()
-
-    # # Concatenate all years for this depth
-    # ds_depth = xr.concat(depth_data, dim='year')
-
-    # # Save to file
-    # depth_str = str(int(abs(float(ds_depth.depth.values))))
-    # fname = f"chla_daily_depth_{depth_str}m.nc"
-    # ds_depth.to_netcdf(os.path.join(path_growth_inputs, fname))
-
-    
 # %% Temperature from ROMS [°C]
 # -------------------------------- Weighted averaged Temperature --------------------------------
 ds = xr.open_dataset(path_mhw + file_var + 'eta200.nc') #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
@@ -259,11 +290,6 @@ def mean_temp(ieta, yr):
     ds_temp_mean_yr = ds_temp_100m.rename({'day': 'days'})
     ds_temp_mean_yr = ds_temp_mean_yr.rename({'z_rho': 'depth'})
     
-    # === Select only austral summer and early spring
-    # jan_april = ds_temp_mean_yr.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) 
-    # nov_dec = ds_temp_mean_yr.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364)
-    # temp_austral_mean_yr = xr.concat([nov_dec, jan_april], dim="days") #181days
-
     # Check if there is at least 14 layers to compute the mean
     valid_depth = ~ds_temp_mean_yr.isnull().any(dim='depth') # True where all 14 layers are valid, i.e. Non Nan values
     ds_temp_mean_valid = ds_temp_mean_yr.where(valid_depth)
@@ -295,6 +321,10 @@ for yr in range(1, 41):
     da_temp_combined = da_temp_combined.rename({'ieta': 'eta_rho'})
     da_temp_combined_transposed = da_temp_combined.transpose('days', 'eta_rho', 'xi_rho')
 
+    # === Correct coords -- (lat, lon) must be 2 dims (eta_rho, xi_rho)
+    da_temp_combined_transposed = da_temp_combined_transposed.assign_coords({'lon_rho': (('eta_rho', 'xi_rho'), ds_roms['lon_rho'].values),
+                                                                             'lat_rho': (('eta_rho', 'xi_rho'), ds_roms['lat_rho'].values)})
+    
     # === Select extent - south of 60°S
     print('Select extent')
     south_mask = da_temp_combined_transposed['lat_rho'] <= -60
@@ -314,75 +344,6 @@ temp_mean_all = temp_mean_all.rename({'__xarray_dataarray_variable__':'avg_temp'
 output_file = os.path.join(path_growth_inputs, f"temp_avg100m_allyears.nc")
 if not os.path.exists(output_file):
     temp_mean_all.to_netcdf(output_file, mode='w')  
-
-
-# # %% -------------------------------- Temperature at each depth --------------------------------
-# ds = xr.open_dataset(path_mhw + file_var + 'eta200.nc') #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-# all_depths= ds['z_rho'].values
-
-# def extract_year_eta(ieta, depth):
-#     # depth=1
-#     # ieta=200
-
-#     start_time = time.time()
-
-#     # Read data
-#     fn = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/temp_DC_BC_' + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-#     ds_temp_100m = xr.open_dataset(fn)['temp'].isel(year=slice(1,41), z_rho=depth) #Extracts daily data : 40yr, consider 365 days per year and until 100m depth
-
-
-#     end_time = time.time()
-#     elapsed_time = end_time - start_time
-#     print(f"Processing time for eta {ieta}: {elapsed_time:.2f} secs, Memory used: {psutil.virtual_memory().percent}%")
-#     return ieta, ds_temp_100m.values
-
-# from functools import partial
-
-# for idepth in range(14):
-#     # idepth=0
-#     print(f"=== Processing depth {idepth} ===")
-
-#     # Initialization -- Move neta to axis 0 for faster computing
-#     ds_eta_combined = np.empty((neta, nyears, ndays, nxi), dtype=np.float32) 
-
-#     # Extract all eta for the given year and depth and combine them together
-#     extract_year_eta_for_yr = partial(extract_year_eta, depth=idepth)
-#     for ieta, ds_eta_all in process_map(extract_year_eta_for_yr, range(neta), max_workers=30): # ~3min computing
-#         # print(f"Shape of ds_eta_all for eta {ieta}: {ds_eta_all.shape}")  # (40, 365, 1442)
-#         ds_eta_combined[ieta] = ds_eta_all
-    
-#     # Transpose dimension to have eta on 4th position
-#     ds_eta_combined_transposed = ds_eta_combined.transpose(1, 2, 0, 3)
-
-#     # Check 
-#     print(np.allclose(ds_eta_combined[200], ds_eta_combined_transposed[:, :, 200, :], equal_nan=True))# True
-
-#     # To dataset
-#     ds_temp_depth = xr.Dataset(
-#         {"temp": (["years", "days", "eta_rho", "xi_rho"], ds_eta_combined_transposed)},
-#         coords=dict(
-#             lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),
-#             lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),
-#             years=(['years'], np.arange(1980,2020)),
-#             original_days=(["days"],np.arange(0,365))
-#             ),
-#         attrs={"description": f"Temperature of the first 100m [°C] for depth {-all_depths[idepth]}m, i.e. layer {idepth}"}
-#     )
-
-#     # === Select only austral summer and early spring  --- HERE
-#     # Select only austral summer and early spring
-#     jan_april = ds_temp_depth.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 1-120) 
-#     nov_dec = ds_temp_depth.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 305–365)
-#     ds_austral = xr.concat([nov_dec, jan_april], dim="days") #181days
-
-#     # === Select extent - south of 60°S
-#     south_mask = ds_austral['lat_rho'] <= -60
-#     temp_60S_south = ds_austral.where(south_mask, drop=True) #shape (40, 181, 231, 1442)
-
-#     # Write to file
-#     fname = f"temp_daily_depth_{-all_depths[idepth]}m.nc"
-#     ds_depth.to_netcdf(os.path.join(path_growth_inputs, fname))
-
 
 #%% Visualization
 # === Parameters ===
