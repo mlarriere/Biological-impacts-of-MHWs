@@ -29,9 +29,7 @@ import matplotlib.gridspec as gridspec
 
 import time
 from tqdm.contrib.concurrent import process_map
-
 from joblib import Parallel, delayed
-
 
 
 #%% Server 
@@ -111,15 +109,17 @@ temp_avg_100m = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_a
 temp_avg_100m = temp_avg_100m.rename({'year': 'years'})
 # temp_avg_100m.avg_temp.isel(years=30, days=30).plot()
 
-# ==== Chla [mh Chla/m3] -- Weighted averaged chla of the first 100m - Austral summer - 60S
-chla_surf= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears.nc')) 
-chla_surf = chla_surf.rename({'year': 'years'})
-# chla_avg_100m.raw_chla.isel(years=30, days=30).plot()
+# ==== Chla [mh Chla/m3] -- Surface chla (5m) - Austral summer - 60S
+chla_surf_corrected = xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended.nc')) #chla_surf_allyears.nc
+chla_surf_corrected = chla_surf_corrected.drop_dims('time')
+chla_surf_corrected = chla_surf_corrected.rename({'year': 'years'})
+chla_surf_corrected = chla_surf_corrected.rename({'day': 'days'})
+chla_surf = chla_surf_corrected.assign_coords(days=("days", np.arange(365)))  #shape (40, 181, 231, 1442)
+# chla_surf.raw_chla.isel(years=30, days=30).plot()
 
-# Reformating - stacking time dimension #shape (231, 1442, 7240)
+# Reformating - stacking time dimension -- shape (231, 1442, 14600)
 temp_100m_stack = temp_avg_100m.stack(time= ['years', 'days'])
 chla_surf_stack = chla_surf.stack(time= ['years', 'days']) 
-
 
 # %% Prepare data
 temp1 = temp_avg_100m.isel(years=37, days=slice(304,365))
@@ -159,6 +159,9 @@ plt.show()
 
 #%% Plot ROMS outputs
 norm_chla=mcolors.Normalize(vmin=0, vmax=2)
+from matplotlib.colors import LinearSegmentedColormap
+colors = ["#216869", "#73A942", "#FBB02D"]  # Blue, Green, Yellow
+cmap_chla = LinearSegmentedColormap.from_list("blue_green_yellow", colors, N=256)
 
 # ---- Figure and Axes ----
 fig_width, fig_height = 6, 5
@@ -167,13 +170,14 @@ gs = gridspec.GridSpec(1, 2, wspace=0.08, hspace=0.2)
 
 axs = []
 for j in range(2): 
-    ax = fig.add_subplot(gs[0, j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    ax = fig.add_subplot(gs[j], projection=ccrs.SouthPolarStereo())
     axs.append(ax)
 
 # ---- Plot Definitions ----
+temp_jan2017_trimmed = temp_jan2017.isel(xi_rho=slice(0, -1))
 plot_data = [
-    (temp_jan2017.avg_temp, "Mean Temperature (100m)", 'inferno', None),
-    (chla_jan2017.raw_chla, "Chlorophyll-a (5m)", 'YlGn', norm_chla)
+    (temp_jan2017_trimmed.avg_temp, "Mean Temperature (100m)", 'inferno', None),
+    (chla_jan2017.raw_chla, "Chlorophyll-a (5m)", cmap_chla, norm_chla)
 ]
 
 ims = []
@@ -200,16 +204,23 @@ for i, (data, title, cmap, norm) in enumerate(plot_data):
                 color="#080808", linestyle='--', linewidth=1, zorder=5)
 
     # Gridlines
-    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=2)
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=3)
     gl.xlabels_top = False
     gl.ylabels_right = False
     gl.xlabel_style = {'size': 10}
-    gl.ylabel_style = {'size': 10}
+    gl.ylabel_style = {'size': 10}   
+    from matplotlib.ticker import MultipleLocator
+    gl.xlocator = MultipleLocator(60)
+    # gl.ylocator = MultipleLocator(5)  
 
     # Plot data if available
     if data is not None:
         lon_name = [name for name in data.coords if 'lon' in name][0]
         lat_name = [name for name in data.coords if 'lat' in name][0]
+        if data[lon_name].ndim == 1 and data[lat_name].ndim == 1:
+            lon2d, lat2d = np.meshgrid(data[lon_name], data[lat_name])
+        else:
+            lon2d, lat2d = data[lon_name], data[lat_name]
 
         im = ax.pcolormesh(
             data[lon_name], data[lat_name], data,
@@ -236,11 +247,8 @@ cbar_ax2 = fig.add_axes([0.56, 0.01, 0.32, 0.03])
 cbar2 = fig.colorbar(ims[1], cax=cbar_ax2, orientation='horizontal', extend='both')
 cbar2.set_label("mg/m³", fontsize=12)
 
-
 plt.suptitle("ROMS outputs \n January 2017", fontsize=18, y=1.05)
 plt.show()
-
-
 
 # %% ========== Hypothetical Growth ==========
 # Investigate max/min values
@@ -250,12 +258,14 @@ max_obs_temp = temp_100m_stack.avg_temp.max() #7.3°C
 min_obs_temp = temp_100m_stack.avg_temp.min() #-5.03°C
 
 # 2D grid of all combinations
-chla_hyp= np.arange(min_obs_chla, 5.05, 0.01)
-temp_hyp = np.arange(min_obs_temp, max_obs_temp, 0.01)
+# chla_hyp= np.arange(min_obs_chla, 5.05, 0.01)
+# temp_hyp = np.arange(min_obs_temp, max_obs_temp, 0.01)
+chla_hyp= np.arange(0, 2, 0.01)
+temp_hyp = np.arange(-4, 4, 0.01)
 
 # Calcualting growth for all combination
 CHLA, TEMP = np.meshgrid(chla_hyp, temp_hyp)
-growth_hyp = growth_Atkison2006(CHLA, TEMP)#[mm] array of shape: (1234, 505)
+growth_hyp = growth_Atkison2006(CHLA, TEMP) #[mm] array of shape: (1234, 505)
 
 # %% Growth model - Eq. 4 (Atkinson et al. 2006)
 file_growth = os.path.join(path_growth, "growth_Atkison2006_fullyr.nc")
@@ -295,7 +305,7 @@ def defining_season(ds, starting_year):
 
 # %% ======================== Growth in yearly context - 1 plot ========================
 # Target year: start in July 1980 -> so need Jul-Dec 1980 and Jan-Jun 1981
-target_start_year = 2010
+target_start_year = 1980
 target_end_year = target_start_year + 1
 
 # --- Full year data ---
@@ -321,14 +331,45 @@ TEMP_jan_apr = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice
 CHLA_season = np.concatenate([CHLA_nov_dec.values, CHLA_jan_apr.values])
 TEMP_season = np.concatenate([TEMP_nov_dec.values, TEMP_jan_apr.values])
 
-# ============ Plot ============
+# %% ============ Plot ============
 fig, ax = plt.subplots(figsize=(10, 6))
 norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
 
+# Define contour levels every 0.05, including zero exactly
+min_val = np.nanmin(growth_hyp)
+max_val = np.nanmax(growth_hyp)
+levels = np.arange(np.floor(min_val*10)/10, np.ceil(max_val*10)/10 + 0.05, 0.05)
+
+# Separate zero level
+zero_level = [0]
+manual_zero_pos = [(0.0, 2.0)]  # label position for 0 contour (black)
+zero_contour = ax.contour(CHLA, TEMP, growth_hyp, levels=zero_level, colors='black', linewidths=0.8, linestyles='--', zorder=3) # Plot zero contour in black
+ax.clabel(zero_contour, manual=manual_zero_pos, fmt="%.2f", inline=True, fontsize=12, colors='black')
+
+levels_to_plot = [-0.2, -0.1, 0.1, 0.2]
+manual_positions = {
+    -0.2: (0.3, -1.0),
+    -0.1: (0.0, -0.5),
+     0.1: (0.0, 0.0),
+     0.2: (0.8, -0.1),
+}
+for lvl in levels_to_plot:
+    # Plot each level individually to avoid multiple paths per contour object
+    contour = ax.contour(CHLA, TEMP, growth_hyp, levels=[lvl], colors='white',
+                         linewidths=0.8, linestyles='--', zorder=3)
+
+    try:
+        # Use provided manual position
+        manual_pos = [manual_positions[lvl]]
+        ax.clabel(contour, manual=manual_pos, fmt="%.2f",
+                  inline=True, fontsize=12, colors='white')
+        print(f"Labeled level {lvl} at {manual_pos[0]}")
+    except Exception as e:
+        print(f"Failed to label level {lvl}: {e}")
+
+
 # Background color map
 pcm = ax.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto', cmap='coolwarm_r', norm=norm, rasterized= True)
-contours = ax.contour(CHLA, TEMP, growth_hyp, levels=20, colors='white', linewidths=0.5)
-ax.clabel(contours, inline=True, fontsize=12, fmt="%.2f")
 
 # --- Full year growth path -- no need to calcualte the growth just plot the dot (temp, chla) 
 valid_mask_full = ~np.isnan(CHLA_full) & ~np.isnan(TEMP_full) # Mask NaNs for full path
@@ -362,9 +403,9 @@ ax.scatter(CHLA_full_clean[-1], TEMP_full_clean[-1], facecolor='black', edgecolo
 ax.set_title(f'Krill Growth from 1st July {target_start_year} to 30th June {target_end_year}', fontsize=18)
 ax.set_xlabel('Chlorophyll-a [mg/m³]', fontsize=16)
 ax.set_ylabel('Temperature [°C]', fontsize=16)
-ax.set_xlim(0, 2)
-ax.set_ylim(-5, 5)
-ax.set_yticks(np.arange(-5, 6, 1))
+# ax.set_xlim(0, 2)
+# ax.set_ylim(-5, 5)
+# ax.set_yticks(np.arange(-5, 6, 1))
 ax.tick_params(labelsize=13)
 ax.legend(fontsize=13)
 
@@ -374,8 +415,8 @@ cbar.set_label('Growth [mm]', fontsize=16)
 cbar.ax.tick_params(labelsize=13)
 
 plt.tight_layout()
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/temp_chla_diagrams/{target_start_year}_combined.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/temp_chla_diagrams/{target_start_year}_combined.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% ======================== Growth in yearly context - 2 subplots ========================
 norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
@@ -451,53 +492,88 @@ plt.show()
 # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/temp_chla_diagrams/{year_to_plot+1980}.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% Select growth season - all years
-def define_season_all_years(ds):
-    # ds = growth_redimensioned
+def extract_one_season_pair(args):
+    ds_y, ds_y1, y = args
+    try:
+        days_nov_dec = ds_y.sel(days=slice(304, 364))
+        days_jan_apr = ds_y1.sel(days=slice(0, 119))
+
+        combined_days = np.concatenate(
+            [days_nov_dec['days'].values, days_jan_apr['days'].values]
+        )
+        season = xr.concat([days_nov_dec, days_jan_apr],
+                           dim=xr.DataArray(combined_days, dims="days", name="days"))
+        season = season.expand_dims(season_year=[y])
+        return season
+
+    except Exception as e:
+        print(f"Skipping year {y}: {e}")
+        return None
+
+
+def define_season_all_years_parallel(ds, max_workers=6):
+    from tqdm.contrib.concurrent import process_map
+
     all_years = ds['years'].values
-    season_list = []
-    all_years_set = set(all_years)
-    
-    for y in all_years: #about 40s per year
-        print(y)
-        if (y + 1) in all_years_set:  
-        # Verify if next year exist - otherwise incomplete season
-            try: 
-                days_nov_dec = ds.sel(days=slice(304, 364), years=y)
-                days_jan_apr = ds.sel(days=slice(0, 119), years=y + 1)
+    all_years = [int(y) for y in all_years if (y + 1) in all_years]
 
-                # Combine days
-                season = xr.concat(
-                    [days_nov_dec, days_jan_apr],
-                    dim=xr.DataArray(np.concatenate([days_nov_dec['days'].values, 
-                                                     days_jan_apr['days'].values]),
-                                                     dims="days", 
-                                                     name="days"))
+    # Pre-slice only needed years
+    ds_by_year = {int(y): ds.sel(years=y) for y in all_years + [all_years[-1] + 1]}
 
-                season = season.expand_dims(season_year=[y])  # tag with season start year
-                season_list.append(season)
+    args = [(ds_by_year[y], ds_by_year[y + 1], y) for y in all_years]
 
-            except Exception as e: # Skip incomplete seasons
-                print(f"Skipping year {y} due to error: {e}")
-                continue
+    season_list = process_map(extract_one_season_pair, args, max_workers=max_workers, chunksize=1)
 
+    season_list = [s for s in season_list if s is not None]
     if not season_list:
         raise ValueError("No valid seasons found.")
 
-    # Concatenate
-    return xr.concat(season_list, dim="season_year")
+    return xr.concat(season_list, dim="season_year", combine_attrs="override")
 
-growth_seasons = define_season_all_years(growth_redimensioned) 
-growth_seasons = growth_seasons.rename({'season_year': 'years', 'years': 'day_years'})
-growth_seasons.attrs['description'] = ("Krill growth estimates during the growth season (Nov 1 – Apr 30) based on Atkinson et al. (2006), model 4")
-growth_seasons.to_netcdf(path=os.path.join(path_growth, "growth_Atkison2006_seasonal.nc"), mode='w')
 
-chla_filtered_seasons = define_season_all_years(chla_surf)
-chla_filtered_seasons = chla_filtered_seasons.rename({'season_year': 'years', 'years': 'day_years'})
-temp_avg_100m_seasons = define_season_all_years(temp_avg_100m)
-temp_avg_100m_seasons = temp_avg_100m_seasons.rename({'season_year': 'years', 'years': 'day_years'})
+
+growth_season_file = os.path.join(path_growth, "growth_Atkison2006_seasonal.nc")
+if not os.path.exists(growth_season_file):
+    # growth_seasons = define_season_all_years(growth_redimensioned.growth) 
+    season_ds = define_season_all_years_parallel(growth_redimensioned.growth, max_workers=30)
+    # Step 1: Rename season_year to a temp name to avoid conflict
+    season_ds = season_ds.rename({'season_year': 'season_year_temp'})
+    # Step 2: Drop the old 'years' coordinate/dimension if you want to replace it
+    season_ds = season_ds.drop_vars('years')
+    # Step 3: Rename temp name to 'years'
+    season_ds = season_ds.rename({'season_year_temp': 'years'})
+    season_ds.attrs['description'] = ("Krill growth estimates during the growth season (Nov 1 – Apr 30) based on Atkinson et al. (2006), model 4")
+    growth_seasons_ds = season_ds.to_dataset(name="growth") #to dataset
+    growth_seasons_ds.to_netcdf(growth_season_file)
+else:
+    growth_seasons=xr.open_dataset(growth_season_file) 
+
+chla_filtered_seasons_file = os.path.join(path_growth_inputs, "chla_surf_allyears_detrended_seasonal.nc")
+if not os.path.exists(chla_filtered_seasons_file):
+    chla_filtered_seasons = define_season_all_years_parallel(chla_surf.raw_chla, max_workers=6)
+    chla_filtered_seasons = chla_filtered_seasons.rename({'season_year': 'season_year_temp'})
+    chla_filtered_seasons = chla_filtered_seasons.drop_vars('years')
+    chla_filtered_seasons = chla_filtered_seasons.rename({'season_year_temp': 'years'})
+    chla_filtered_seasons.attrs['description'] = ("Surface Chla (detrented) during the growth season (Nov 1 – Apr 30)")
+    chla_filtered_seasons_ds = chla_filtered_seasons.to_dataset(name="chla") #to dataset
+    chla_filtered_seasons_ds.to_netcdf(chla_filtered_seasons_file)
+else:
+    chla_filtered_seasons=xr.open_dataset(chla_filtered_seasons_file) 
+
+temp_avg_100m_seasons_file = os.path.join(path_growth_inputs, "temp_avg100m_allyears_seasonal.nc")
+if not os.path.exists(temp_avg_100m_seasons_file):
+    temp_avg_100m_seasons = define_season_all_years_parallel(temp_avg_100m.avg_temp, max_workers=6)
+    temp_avg_100m_seasons = temp_avg_100m_seasons.rename({'season_year': 'season_year_temp'})
+    temp_avg_100m_seasons = temp_avg_100m_seasons.drop_vars('years')
+    temp_avg_100m_seasons = temp_avg_100m_seasons.rename({'season_year_temp': 'years'})
+    temp_avg_100m_seasons.attrs['description'] = ("Avg temperature (first 100m) during the growth season (Nov 1 – Apr 30)")
+    temp_avg_100m_seasons_ds = temp_avg_100m_seasons.to_dataset(name="avg_temp") #to dataset
+    temp_avg_100m_seasons_ds.to_netcdf(temp_avg_100m_seasons_file)
+else:
+    temp_avg_100m_seasons=xr.open_dataset(temp_avg_100m_seasons_file) 
 
 # %% Plot growth season for 1 year
-growth_seasons2017 = growth_seasons.isel(years=37)
+growth_seasons2017 = growth_seasons.isel(season_year=37)
 
 # Select January
 growth_ROMS_2017_jan = growth_seasons2017.sel(days=slice(0,30)).mean(dim='days') #shape: (eta_rho, xi_rho) : (231, 1442)
@@ -509,12 +585,13 @@ fig = plt.figure(figsize=(fig_width, fig_height))  # Only 1 plot now
 gs = gridspec.GridSpec(1, 1)
 
 axs = []
-ax = fig.add_subplot(gs[0, 0], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+ax = fig.add_subplot(gs[0, 0], projection=ccrs.SouthPolarStereo())
 axs.append(ax)
 
 # Plot configuration
+growth_ROMS_2017_jan_trimmed = growth_ROMS_2017_jan.isel(xi_rho=slice(0, -1))
 plot_data = [
-    (growth_ROMS_2017_jan.growth, "Mean Growth")
+    (growth_ROMS_2017_jan_trimmed.growth, "Mean Growth")
 ]
 
 # Color normalization
@@ -607,7 +684,7 @@ length=35 # mean body length in adult krill (Michael et al. 2021 / Tarling 2020)
 # Food term
 print(f'For maximum chla ({chla_filtered_seasons.raw_chla.max():.2f}mg/m3), in the eq result as {a+(d*chla_filtered_seasons.raw_chla.max())/(e+chla_filtered_seasons.raw_chla.max()):.2f}mm/d')
 print(f'For minimum chla ({chla_filtered_seasons.raw_chla.min():.2f}mg/m3), in the eq result as {a+(d*chla_filtered_seasons.raw_chla.min())/(e+chla_filtered_seasons.raw_chla.min()):.2f}mm/d')
-food_term = a + (d*chla_filtered_seasons.raw_chla)/(e+chla_filtered_seasons.raw_chla)
+food_term = a + (d*chla_filtered_seasons.raw_chla) / (e+chla_filtered_seasons.raw_chla)
 
 # Temperature term 
 print(f'For maximum T°C ({temp_avg_100m_seasons.avg_temp.max():.2f}°C), in the eq result as {f*temp_avg_100m_seasons.avg_temp.max() +g * (temp_avg_100m_seasons.avg_temp.max())**2:.2f}mm/d')
@@ -656,14 +733,14 @@ circle = mpath.Path(verts * radius + center)
 
 # === Titles and data for each subplot ===
 datasets = [
-    # 1980-2009 
-    {'data': growth_1980_2009_avg.growth, 'cmap': 'PuOr_r', 'norm': norm_growth, 'label': '[mm/d]', 'title': 'Growth (1980–2009)'},
-    {'data': food_term_1980_2009_avg, 'cmap': 'RdYlGn', 'norm': norm_chla, 'label': '[mm/d]', 'title': 'Food term (1980–2009)'},
-    {'data': temp_term_1980_2009_avg, 'cmap': cmocean.cm.thermal, 'norm': norm_temp, 'label': '[mm/d]', 'title': 'Temperature term (1980–2009)'},
-    # 2010-2019 
-    {'data': growth_2010_2019_avg.growth, 'cmap': 'PuOr_r', 'norm': norm_growth, 'label': '[mm/d]', 'title': 'Growth (2010–2019)'},
-    {'data': food_term_2010_2019_avg, 'cmap': 'RdYlGn', 'norm': norm_chla, 'label': '[mm/d]', 'title': 'Food term (2010–2019)'},
-    {'data': temp_term_2010_2019_avg, 'cmap': cmocean.cm.thermal, 'norm': norm_temp, 'label': '[mm/d]', 'title': 'Temperature term (2010–2019)'}
+    # 1980-2009 - trimmed
+    {'data': growth_1980_2009_avg.isel(xi_rho=slice(0, -1)), 'cmap': 'PuOr_r', 'norm': norm_growth, 'label': '[mm/d]', 'title': 'Growth (1980–2009)'},
+    {'data': food_term_1980_2009_avg.isel(xi_rho=slice(0, -1)), 'cmap': 'RdYlGn', 'norm': norm_chla, 'label': '[mm/d]', 'title': 'Food term (1980–2009)'},
+    {'data': temp_term_1980_2009_avg.isel(xi_rho=slice(0, -1)), 'cmap': cmocean.cm.thermal, 'norm': norm_temp, 'label': '[mm/d]', 'title': 'Temperature term (1980–2009)'},
+    # 2010-2019 - trimmed
+    {'data': growth_2010_2019_avg.isel(xi_rho=slice(0, -1)), 'cmap': 'PuOr_r', 'norm': norm_growth, 'label': '[mm/d]', 'title': 'Growth (2010–2019)'},
+    {'data': food_term_2010_2019_avg.isel(xi_rho=slice(0, -1)), 'cmap': 'RdYlGn', 'norm': norm_chla, 'label': '[mm/d]', 'title': 'Food term (2010–2019)'},
+    {'data': temp_term_2010_2019_avg.isel(xi_rho=slice(0, -1)), 'cmap': cmocean.cm.thermal, 'norm': norm_temp, 'label': '[mm/d]', 'title': 'Temperature term (2010–2019)'}
 ]
 
 # === Create figure and subplots ===
@@ -860,19 +937,19 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label=''):
 variable = 'growth'  #'growth', 'temp', 'chla'
 
 if variable == 'growth':
-    ds = growth_seasons.growth
+    ds = growth_seasons.isel(xi_rho=slice(0, -1))
     cmap_var = 'PuOr_r'
     label = 'Growth [mm/d]'
     ticks = [-0.2, -0.1, 0, 0.1, 0.2]
 
 elif variable == 'temp':
-    ds = temp_avg_100m_seasons.avg_temp
+    ds = temp_avg_100m_seasons.isel(xi_rho=slice(0, -1)).avg_temp
     cmap_var =  cmocean.cm.thermal  #'inferno'
     label = 'Temperature [°C]'
     ticks = [-6, -4, -2, 0, 2, 4, 6]
 
 elif variable == 'chla':
-    ds = chla_filtered_seasons.raw_chla
+    ds = chla_filtered_seasons.isel(xi_rho=slice(0, -1)).raw_chla
     cmap_var = cmocean.cm.algae 
     label = 'Chla [mg/m³]'
     ticks =  [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5 ,5] 
@@ -898,16 +975,16 @@ def plot_variables_decades(growth_ds, chla_ds, temp_ds):
 
     # Set color maps and norms for each variable
     growth_cmap = 'PuOr_r'
-    growth_norm = mcolors.Normalize(vmin=-0.2, vmax=0.2)
-    growth_ticks = [-0.2, -0.1, 0, 0.1, 0.2]
+    growth_norm = mcolors.Normalize(vmin=-0.1, vmax=0.1)
+    growth_ticks = [-0.1, 0, 0.1]
 
     chla_cmap = cmocean.cm.algae
-    chla_norm = mcolors.Normalize(vmin=0, vmax=5)
-    chla_ticks = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5]
+    chla_norm = mcolors.Normalize(vmin=0, vmax=1)
+    chla_ticks = [0, 0.5, 1]
 
     temp_cmap = cmocean.cm.thermal
-    temp_norm = mcolors.Normalize(vmin=-6, vmax=6)
-    temp_ticks = [-6, -4, -2, 0, 2, 4, 6]
+    temp_norm = mcolors.Normalize(vmin=-4, vmax=4)
+    temp_ticks = [-4, -2, 0, 2, 4]
 
     # Variable info for looping
     vars_info = [
@@ -959,9 +1036,9 @@ def plot_variables_decades(growth_ds, chla_ds, temp_ds):
     plt.show()
 
 
-plot_variables_decades(growth_seasons.growth,
-                       chla_filtered_seasons.raw_chla,
-                       temp_avg_100m_seasons.avg_temp)
+plot_variables_decades(growth_seasons.isel(xi_rho=slice(0, -1)),
+                       chla_filtered_seasons.isel(xi_rho=slice(0, -1)).raw_chla,
+                       temp_avg_100m_seasons.isel(xi_rho=slice(0, -1)).avg_temp)
 
 
 # %% Growth during MHW events
@@ -983,7 +1060,7 @@ if not os.path.exists(growth_mhw_file):
     for mhw_var, growth_name in zip(variables, growth_var_names):
         print(f'------------{mhw_var}------------')
         # testing
-        # var='det_1deg'
+        var='det_1deg'
 
         # MHW mask for current threshold and align MHW years to match growth_seasons (1980-2018)
         duration_mask = mhw_det['duration'].sel(years=growth_seasons.years) >= 30 #bool
@@ -1027,11 +1104,91 @@ growth_no_mhw_file = os.path.join(path_growth, "growth_Atkison2006_nonMHW.nc")
 
 if not os.path.exists(growth_no_mhw_file):
 
-    # Align mask years
-    mhw_mask = mhw_det['det_1deg'].sel(years=growth_seasons.years)
+    # Get mask of MHW detection (duation = 0 - no MHWs occured)
+    # mhw_detected = (mhw_det['duration'].sel(years=growth_seasons.years) == 0) #boolean
 
-    # Invert mask to select growth when no MHWs
-    growth_no_mhw = growth_seasons['growth'].where(mhw_mask == 0)
+    # Any time that is *not* a MHW should be counted as non-MHW
+    # So take inverse: where not MHW → non-MHW
+    # Fill NaNs with True, assuming that if MHW info is missing, we assume it was non-MHW (conservative)
+    # non_mhw_mask = (~mhw_detected).fillna(True)
+    non_mhw_mask = mhw_det['duration'].sel(years=growth_seasons.years) == 0
+    
+    # Align mask years
+    # mhw_mask = mhw_det['det_1deg'].sel(years=growth_seasons.years)
+
+    # # Invert mask to select growth when no MHWs, i.e. no MHWs is when det=0 or is Nan
+    # mhw_mask = mhw_det['det_1deg'].sel(years=growth_seasons.years)
+    # non_mhw_mask = (mhw_mask == 0).fillna(True)
+
+    # Apply to growths
+    growth_no_mhw = growth_seasons['growth'].where(non_mhw_mask)
+    # growth_no_mhw = growth_seasons['growth'].where(mhw_mask == 0)
+
+    # Count how many valid time steps we have per grid cell
+    valid_counts = growth_no_mhw.count(dim=('years', 'days'))
+    max_val = valid_counts.max().item()
+    # total_growth_valid = growth_seasons['growth'].count(dim=('years', 'days'))
+    # mhw_days_count = mhw_detected.sum(dim=('years', 'days'))
+
+    # # Get maximum possible value (should be ~181 days × 39 years = 7059)
+    # max_val = mhw_days_count.max().item()
+
+    # # Create a boolean mask of locations that have the maximum number of MHW days
+    # always_mhw_mask = mhw_days_count == max_val
+
+    # # Optionally: get the coordinates of those grid cells
+    # mhw_locs = mhw_days_count.where(always_mhw_mask, drop=True)
+
+    # print("Total number of always-MHW grid cells:", always_mhw_mask.sum().item())
+
+    # # Get coordinate pairs (lat/lon)
+    # lat_vals = mhw_locs.lat_rho.values
+    # lon_vals = mhw_locs.lon_rho.values
+
+    # # If you want just a few to inspect:
+    # for lat, lon in zip(lat_vals.flat[:5], lon_vals.flat[:5]):
+    #     print(f"Always-MHW cell at lat: {lat:.2f}, lon: {lon:.2f}")
+
+    # import matplotlib.cm as cm
+    # # Create custom colormap: red for 0, viridis for the rest
+    # viridis = cm.get_cmap('viridis', 256)
+    # new_colors = viridis(np.linspace(0, 1, 256))
+    # # Replace first color (corresponding to value 0) with red
+    # new_colors[0] = np.array([1.0, 0.0, 0.0, 1.0])  # RGBA for red
+    # custom_cmap = mcolors.ListedColormap(new_colors)
+    # # Set normalization: ensure 0 is mapped to the first color
+    # norm = mcolors.Normalize(vmin=0, vmax=np.nanmax(mhw_days_count.values))
+    # # Plotting
+    # fig = plt.figure(figsize=(6.5, 6.5))
+    # ax = plt.subplot(1, 1, 1, projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    # # Circular boundary
+    # theta = np.linspace(0, 2 * np.pi, 100)
+    # center, radius = [0.5, 0.5], 0.5
+    # verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    # circle = mpath.Path(verts * radius + center)
+    # ax.set_boundary(circle, transform=ax.transAxes)
+    # # Map features
+    # ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+    # ax.coastlines(color='black', linewidth=1, zorder=4)
+    # ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
+    # ax.set_facecolor('lightgrey')
+    # # Plot
+    # im = ax.pcolormesh(
+    #     mhw_days_count.lon_rho,
+    #     mhw_days_count.lat_rho,
+    #     mhw_days_count,
+    #     transform=ccrs.PlateCarree(),
+    #     cmap=custom_cmap,
+    #     norm=norm,
+    #     shading='auto',
+    #     zorder=1,
+    #     rasterized=True
+    # )
+    # # Colorbar
+    # cbar = plt.colorbar(im, ax=ax, orientation='horizontal', pad=0.08)
+    # cbar.set_label('Valid time steps (1980–2018)', fontsize=12)
+    # plt.tight_layout()
+    # plt.show()
 
     # To Dataset
     growth_no_mhw_ds = xr.Dataset(
@@ -1041,7 +1198,7 @@ if not os.path.exists(growth_no_mhw_file):
             "description": "Krill growth during **non-MHW** periods across the growth season (Nov 1 – Apr 30).",
             "depth": "5m",
             "growth_noMHW": (
-                "Growth when no MHWs are detected (MHWs defined as exceeding extended absolute threshold + 90th percentile)."
+                "Growth when no MHWs are detected, i.e. when mhw duration=0."
             )
         }
     )
@@ -1058,7 +1215,6 @@ else:
 growth_no_mhw_mean = growth_no_mhw_ds.mean(dim=('years','days'))
 growth_mhw_mean = growth_mhw_combined.mean(dim=('years','days'))
 
-
 # %% -------------------- Plot Growth under MHWs --------------------
 # -----------------------------
 # Plot setup
@@ -1070,18 +1226,18 @@ gs = gridspec.GridSpec(1, 5, wspace=0.1, hspace=0.2)
 
 axs = []
 for j in range(5): 
-    ax = fig.add_subplot(gs[0, j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    ax = fig.add_subplot(gs[0, j], projection=ccrs.SouthPolarStereo())
     axs.append(ax)
 
 # -----------------------------
 # Plot data setup
 # -----------------------------
 plot_data = [
-    (growth_mhw_mean.growth_1deg, r"MHWs $>$ 1$^\circ$C"),
-    (growth_mhw_mean.growth_2deg, r"MHWs $>$ 2$^\circ$C"),
-    (growth_mhw_mean.growth_3deg, r"MHWs $>$ 3$^\circ$C"),
-    (growth_mhw_mean.growth_4deg, r"MHWs $>$ 4$^\circ$C"),
-    (growth_no_mhw_mean.growth_noMHW, r"No MHWs")
+    (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_1deg, r"MHWs $>$ 1$^\circ$C"),
+    (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_2deg, r"MHWs $>$ 2$^\circ$C"),
+    (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_3deg, r"MHWs $>$ 3$^\circ$C"),
+    (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_4deg, r"MHWs $>$ 4$^\circ$C"),
+    (growth_no_mhw_mean.isel(xi_rho=slice(0, -1)).growth_noMHW, r"No MHWs")
 
 ]
 
