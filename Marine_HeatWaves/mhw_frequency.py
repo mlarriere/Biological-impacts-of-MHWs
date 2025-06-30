@@ -102,9 +102,16 @@ date_dict = dict(date_list)
 # %% ======================== Load data ========================
 # MHW durations
 mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
-print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+# print(mhw_duration_5m.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+cell = mhw_duration_5m.isel(eta_rho=211, xi_rho=889, years=slice(37, 38),  days=slice(304, 365))
+print("Durations:")
+print(cell.values) #Only 0
+
 det_combined_ds = xr.open_dataset(os.path.join(path_det, 'det5m_extended.nc')) #boolean shape (40, 365, 434, 1442)
-print(det_combined_ds.det_4deg_extended.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+# print(det_combined_ds.det_4deg_extended.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+cell = det_combined_ds.isel(eta_rho=211, xi_rho=889, days=slice(304, 365), years=slice(37, 38))
+print("Detection flag (det_1deg):")
+print(cell.det_1deg_extended.values) #Only TRUE
 
 # -------------------------------------- FULL YEAR --------------------------------------
 # -- Write or load data
@@ -119,10 +126,10 @@ if not os.path.exists(combined_file_FULL):
     det_combined_ds_60S_south = det_combined_ds_60S_south.transpose('years','days','eta_rho','xi_rho')
 
     # === Associate each mhw duration with the event threshold 
-    ds_mhw_duration= xr.Dataset(
+    ds_duration_thresh_FULLyear= xr.Dataset(
         data_vars=dict(
             duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 365, 231, 1442)
-            det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_1deg_extended'].data), #float64 [0, 1]
+            det_1deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_1deg_extended'].data), #float64 [0, 1] -- ONLY ABSOLUTE
             det_2deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_2deg_extended'].data), #float64 [0, 1]
             det_3deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_3deg_extended'].data), #float64 [0, 1]
             det_4deg = (["years", "days", "eta_rho" ,"xi_rho"], det_combined_ds_60S_south['det_4deg_extended'].data) #float64 [0, 1]
@@ -136,40 +143,119 @@ if not os.path.exists(combined_file_FULL):
         attrs = {
                 "depth": "5m",
                 "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
-                "det_ideg": "Detected events where SST > (EXTENDED absolute threshold (i°C) AND 90th percentile) , boolean array"
+                "det_ideg": "Detected events where SST > (EXTENDED absolute threshold (i°C) BUT NOT NECESSARILY 90th percentile) , boolean array"
                 }                
             )
 
     # Write to file
-    ds_mhw_duration.to_netcdf(combined_file_FULL)
+    ds_duration_thresh_FULLyear.to_netcdf(combined_file_FULL)
 
 else: 
     # Load data
-    ds_mhw_duration = xr.open_dataset(combined_file_FULL)
+    ds_duration_thresh_FULLyear = xr.open_dataset(combined_file_FULL)
 
-# -------------------------------------- SEASONAL --------------------------------------
+#%%  -------------------------------------- SEASONAL --------------------------------------
+def extract_one_season_pair(args):
+    ds_y, ds_y1, y = args
+    try:
+        days_nov_dec = ds_y.sel(days=slice(304, 365))
+        days_jan_apr = ds_y1.sel(days=slice(0, 120))
+
+        # Concatenate days and days_of_yr for new season dimension
+        combined_days = np.concatenate([
+            days_nov_dec['days'].values,
+            days_jan_apr['days'].values
+        ])
+        combined_doy = np.concatenate([
+            days_nov_dec['days_of_yr'].values,
+            days_jan_apr['days_of_yr'].values
+        ])
+
+        season = xr.concat([days_nov_dec, days_jan_apr],
+                           dim=xr.DataArray(combined_days, dims="days", name="days"))
+        
+        season = season.assign_coords(days_of_yr=("days", combined_doy))
+
+        season = season.expand_dims(season_year=[y])
+        return season
+
+    except Exception as e:
+        print(f"Skipping year {y}: {e}")
+        return None
+
+def define_season_all_years_parallel(ds, max_workers=6):
+    from tqdm.contrib.concurrent import process_map
+
+    all_years = ds['years'].values
+    all_years = [int(y) for y in all_years if (y + 1) in all_years]
+
+    # Pre-slice only needed years
+    ds_by_year = {int(y): ds.sel(years=y) for y in all_years + [all_years[-1] + 1]}
+
+    args = [(ds_by_year[y], ds_by_year[y + 1], y) for y in all_years]
+
+    season_list = process_map(extract_one_season_pair, args, max_workers=max_workers, chunksize=1)
+
+    season_list = [s for s in season_list if s is not None]
+    if not season_list:
+        raise ValueError("No valid seasons found.")
+
+    return xr.concat(season_list, dim="season_year", combine_attrs="override")
+
 ds_duration_thresh_FULLyear = xr.open_dataset(os.path.join(path_det, 'duration_AND_thresh_5mFULL.nc')) # shape: (40, 365, 231, 1442)
 
 # -- Write or load data
 combined_file = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))
 
 if not os.path.exists(combined_file):
+    seasonal_vars = {}
+    
+    for var in ['duration', 'det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']:
+        print(f"Processing {var}")
+        var='duration'
+        # Step 1: Wrap variable as dataset (this avoids sel errors in your parallel logic)
+        var_ds = ds_duration_thresh_FULLyear[[var]]
 
+        # Step 2: Extract seasonal slice in parallel -- about 10min computing per variable
+        season_ds = define_season_all_years_parallel(var_ds, max_workers=30)
+
+        # Step 3: Clean coordinate naming
+        season_ds = season_ds.rename({'season_year': 'season_year_temp'})
+        if 'years' in season_ds:
+            season_ds = season_ds.drop_vars('years')
+        season_ds = season_ds.rename({'season_year_temp': 'years'})
+
+        # Step 4: Save result
+        seasonal_vars[var] = season_ds[var]  # Extract DataArray again for merge
+
+    # Merge all seasonal DataArrays into one Dataset
+    ds_duration_thresh_SEASON = xr.merge(seasonal_vars.values())
+     
     # === Select only austral summer and early spring
-    jan_april = ds_duration_thresh_FULLyear.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
-    jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
-    jan_april.coords['years'] = 1980+ jan_april.coords['years'] #keep info on day
-    nov_dec = ds_duration_thresh_FULLyear.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
-    nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
-    nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
-    ds_duration_thresh_SEASON = xr.concat([nov_dec, jan_april], dim="days") #181days
+    # jan_april = ds_duration_thresh_FULLyear.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
+    # jan_april.coords['days'] = jan_april.coords['days'] #keep info on day
+    # jan_april.coords['years'] = 1980+ jan_april.coords['years'] #keep info on day
+    # nov_dec = ds_duration_thresh_FULLyear.sel(days=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
+    # nov_dec.coords['days'] = np.arange(304, 365) #keep info on day
+    # nov_dec.coords['years'] = 1980+ nov_dec.coords['years'] #keep info on day
+    # ds_duration_thresh_SEASON = xr.concat([nov_dec, jan_april], dim="days") #181days
 
     # Write to file
+    ds_duration_thresh_SEASON.attrs = ds_duration_thresh_FULLyear.attrs.copy()
+    ds_duration_thresh_SEASON.attrs["note"] = "Seasonal dataset (Nov 1 – Apr 30), derived from full-year MHW metrics."
     ds_duration_thresh_SEASON.to_netcdf(combined_file) #shape: (40, 181, 231, 1442)
 
 else: 
     # Load data
-    ds_mhw_duration = xr.open_dataset(combined_file) #shape: (40, 181, 231, 1442)
+    ds_duration_thresh_SEASON = xr.open_dataset(combined_file) #shape: (40, 181, 231, 1442)
+
+
+cell = ds_duration_thresh_SEASON.isel(eta_rho=211, xi_rho=889, years=slice(37, 38))
+print("Durations:")
+print(cell.duration.values)
+
+print("Detection flag (det_1deg):")
+print(cell.det_1deg.values)
 
 # %% ---- Compute Number of days under MHWs
 # -- Write or load data
@@ -177,17 +263,24 @@ nb_days_file_FULL = os.path.join(os.path.join(path_det, 'nb_days_underMHWs_5mFUL
 
 if not os.path.exists(nb_days_file_FULL):
 
+    # MHWs - UNION between duration (representing "extended" relative threshold) AND absolute extended thresholds
+    mhw1deg = ds_duration_thresh_FULLyear['det_1deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
+    mhw2deg = ds_duration_thresh_FULLyear['det_2deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
+    mhw3deg = ds_duration_thresh_FULLyear['det_3deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
+    mhw4deg = ds_duration_thresh_FULLyear['det_4deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
+
     # Number of MHWs days for each year
-    mhw_days_1deg = ds_mhw_duration['det_1deg'].sum(dim='days') #max: 365 days
-    mhw_days_2deg = ds_mhw_duration['det_2deg'].sum(dim='days') #max: 365 days
-    mhw_days_3deg = ds_mhw_duration['det_3deg'].sum(dim='days') #max: 365 days
-    mhw_days_4deg = ds_mhw_duration['det_4deg'].sum(dim='days') #max: 365 days
+    mhw_days_1deg = mhw1deg.sum(dim='days') #max: 365 days -- mean ~2.91402844days
+    # mhw_days_1deg_BEFORE = ds_mhw_duration['det_1deg'].sum(dim='days') #max: 365 days -- mean ~16.78351751days
+    mhw_days_2deg = mhw2deg.sum(dim='days') #max: 365 days
+    mhw_days_3deg = mhw3deg.sum(dim='days') #max: 360 days
+    mhw_days_4deg = mhw4deg.sum(dim='days') #max: 326 days
 
     # Number of MHWs days per year
-    mhw1deg_days_per_year = mhw_days_1deg.mean(dim='years') #max: 365 days/yr
-    mhw2deg_days_per_year = mhw_days_2deg.mean(dim='years') #max: 365 days/yr
-    mhw3deg_days_per_year = mhw_days_3deg.mean(dim='years') #max: 362.9 days/yr
-    mhw4deg_days_per_year = mhw_days_4deg.mean(dim='years') #max: 253.45 days/yr
+    mhw1deg_days_per_year = mhw_days_1deg.mean(dim='years') #max: 74.125 days/yr
+    mhw2deg_days_per_year = mhw_days_2deg.mean(dim='years') #max: 68.05 days/yr
+    mhw3deg_days_per_year = mhw_days_3deg.mean(dim='years') #max: 68.05 days/yr
+    mhw4deg_days_per_year = mhw_days_4deg.mean(dim='years') #max: 55.75 days/yr
 
     # To dataset
     ds_mhw_daysperyear= xr.Dataset(
@@ -198,8 +291,8 @@ if not os.path.exists(nb_days_file_FULL):
                 nb_days_4deg_per_yr = (["eta_rho" ,"xi_rho"], mhw4deg_days_per_year.data)
                 ),
             coords=dict(
-                lon_rho=(["eta_rho", "xi_rho"], ds_mhw_duration.lon_rho.values), #(434, 1442)
-                lat_rho=(["eta_rho", "xi_rho"], ds_mhw_duration.lat_rho.values), #(434, 1442)
+                lon_rho=(["eta_rho", "xi_rho"], ds_duration_thresh_FULLyear.lon_rho.values), #(434, 1442)
+                lat_rho=(["eta_rho", "xi_rho"], ds_duration_thresh_FULLyear.lat_rho.values), #(434, 1442)
                 ),
             attrs = {
                     "depth": "5m",
@@ -225,11 +318,11 @@ if not os.path.exists(avg_temp_FULL):
     ds_avg_temp_60S_south = ds_avg_temp.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
 
     # Mask -- only cell under MHWs
-    ds_mhw_duration = ds_mhw_duration.assign_coords(years=ds_avg_temp_60S_south['years'])
-    ds_avg_temp_1deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_1deg'].astype(bool)>0)
-    ds_avg_temp_2deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_2deg'].astype(bool)>0)
-    ds_avg_temp_3deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_3deg'].astype(bool)>0)
-    ds_avg_temp_4deg= ds_avg_temp_60S_south.where(ds_mhw_duration['det_4deg'].astype(bool)>0)
+    ds_mhw_duration = ds_duration_thresh_FULLyear.assign_coords(years=ds_avg_temp_60S_south['years'])
+    ds_avg_temp_1deg = ds_avg_temp_60S_south.where((ds_mhw_duration['det_1deg'] > 0) & (ds_mhw_duration['duration'] != 0))
+    ds_avg_temp_2deg = ds_avg_temp_60S_south.where((ds_mhw_duration['det_2deg'] > 0) & (ds_mhw_duration['duration'] != 0))
+    ds_avg_temp_3deg = ds_avg_temp_60S_south.where((ds_mhw_duration['det_3deg'] > 0) & (ds_mhw_duration['duration'] != 0))
+    ds_avg_temp_4deg = ds_avg_temp_60S_south.where((ds_mhw_duration['det_4deg'] > 0) & (ds_mhw_duration['duration'] != 0))
     
     # To dataset
     ds_avg_temp_mhw= xr.Dataset(
@@ -280,7 +373,7 @@ gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)  # 4 columns
 axs = []
 for j in range(4):
     # ax = fig.add_subplot(gs[j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
-    ax = fig.add_subplot(gs[0, j], projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
+    ax = fig.add_subplot(gs[0, j], projection=ccrs.SouthPolarStereo())
     axs.append(ax)
 
 
@@ -347,19 +440,19 @@ import matplotlib.cm as cm
 import matplotlib.colors as colors
 from matplotlib.colors import BoundaryNorm, ListedColormap
 
-bounds = [0, 10, 20, 30, 50, 100, 150, 200, 365]
-labels = ['$<$10', '10-20', '20-30', '30-50', '50-100', '100-150', '150-200', '200-365']
+bounds = [0, 5, 10, 20, 30, 365]
+labels = ['$<$5', '5-10', '10-20', '20-30', '$>$30']
 n_bins = len(bounds) - 1
 colors_list = [
     # '#FFFFFF',      # 0 = white (blank)
-    '#440154',      # <10
-    '#3B528B',      # 10-20
-    '#21908C',      # 20-30
-    '#5DC963',      # 30-50
-    '#FDE725',      # 50-100
-    "#FEC425",      # 100-150
-    "#E99220",      # 150-200
-    "#A32017"       # 250-365
+    '#440154',      # <5
+    # '#3B528B',      
+    '#21908C',      # 5-10
+    # '#5DC963',      
+    # '#FDE725',      
+    "#FEC425",      # 10-20
+    "#E99220",      # 20-30
+    "#A32017"       # >30 (1month)
 ]
 cmap = ListedColormap(colors_list)
 norm = BoundaryNorm(bounds, ncolors=len(colors_list))#, extend='max')
@@ -433,11 +526,11 @@ for i, var in enumerate(variables):
 
 # Common colorbar
 tick_positions = [(bounds[i] + bounds[i+1]) / 2 for i in range(len(bounds)-1)]  # Tick positions at bin centers
-cbar = fig.colorbar(im, ax=axs, orientation='horizontal',  fraction=0.07, ticks=tick_positions)#aspect=10)
+cbar = fig.colorbar(im, ax=axs, orientation='horizontal', extend='max', fraction=0.07, ticks=tick_positions)#aspect=10)
 cbar.set_label('days per year', fontsize=12)
 cbar.ax.set_xticklabels(labels)
 
-plt.suptitle("Number of days per year under MHWs \n1980-2019 period - 5m depth", fontsize=20, y=1.05)
+plt.suptitle("Number of days per year under MHWs \n On average over the 1980-2019 period - 5m depth", fontsize=20, y=1.05)
 
 plt.tight_layout(rect=[0, 0, 1, 0.89])  # [left, bottom, right, top]
 plt.show()
@@ -458,7 +551,7 @@ for var in variables:
     print(f"------- {var} ------- ")
 
     # 1st step -- Selecting events lasting more than 30days and exceeding absolute threshold 
-    valid_mask = (ds_mhw_duration['duration'] > duration_thresh) & (ds_mhw_duration[var] == 1) #boolean
+    valid_mask = (ds_duration_thresh_FULLyear['duration'] > duration_thresh) & (ds_duration_thresh_FULLyear[var] == 1) #boolean
     valid_mask_np = valid_mask.values  
     # print(valid_mask_np[38,:,224,583])
 
@@ -492,9 +585,9 @@ for var in variables:
     event_counts_da = xr.DataArray(
         event_counts,
         coords={
-            'years': ds_mhw_duration['years'],
-            'eta_rho': ds_mhw_duration['eta_rho'],
-            'xi_rho': ds_mhw_duration['xi_rho']
+            'years': ds_duration_thresh_FULLyear['years'],
+            'eta_rho': ds_duration_thresh_FULLyear['eta_rho'],
+            'xi_rho': ds_duration_thresh_FULLyear['xi_rho']
         },
         dims=['years', 'eta_rho', 'xi_rho'],
         name=f'mhw_event_counts_{var}'
@@ -502,22 +595,26 @@ for var in variables:
     # print(event_counts_da.isel(years=38, eta_rho=224, xi_rho=583))
 
     # Annual mean for each grid cell
-    avg_event_counts = event_counts_da.sum(dim='years') #max 1°C: 29yr, max 2°C:  , max 3°C:  , max 4°C:  
+    avg_event_counts = event_counts_da.sum(dim='years') #max 1°C: 29yr, max 2°C: 28yr, max 3°C: 27yr, max 4°C: 24yr  
     avg_event_counts_dict[var] = avg_event_counts
-
     print(f"Maximum frequency for {var}: {np.max(avg_event_counts).values} years") 
 
 # %% Find cell with NO MHWs - for each tresholds 
 no_mhw_cells = {}
-var_no_mhws= ['det_1deg_extended', 'det_2deg_extended','det_3deg_extended', 'det_4deg_extended']
+var_no_mhws= ['det_1deg', 'det_2deg','det_3deg', 'det_4deg']
 
 # -- Write or load data
 no_mhw_file = os.path.join(os.path.join(path_det, 'noMHW_5m.nc'))
 if not os.path.exists(no_mhw_file):
     for var in var_no_mhws:
-        mhw_flags = det_combined_ds[var]  # shape: (years, days, eta_rho, xi_rho)
-        no_mhw_cells[var] = ~mhw_flags.any(dim=('years', 'days'))  # True where no MHW ever occurred
-
+        is_mhw = ds_duration_thresh_FULLyear[var].astype(bool) & (ds_duration_thresh_FULLyear['duration'] != 0)
+        # no_mhws_flag= ds_duration_thresh_FULLyear[var].where(ds_duration_thresh_FULLyear['duration']!=0) # 1 where MHW occurred -- shape: (40, 365, 231, 1442)
+        no_mhw_cells[var] = ~is_mhw.any(dim=('years', 'days')) # True where NO MHW EVER occurred -- shape: (231, 1442)
+        
+        # Check
+        count = no_mhw_cells[var].sum().item()
+        print(f"{var}: {count} cells with no MHWs") #1°C: 210997 cells, 2°C: 269736 cells, 3°C: 307961 cells, 4°C: 320439  cells
+   
     # Write to file
     ds_no_mhw = xr.Dataset(no_mhw_cells)
     ds_no_mhw.to_netcdf(no_mhw_file)
@@ -525,12 +622,6 @@ if not os.path.exists(no_mhw_file):
 else:
     # Load data
     ds_no_mhw = xr.open_dataset(no_mhw_file)
-    ds_no_mhw = ds_no_mhw.rename({
-    'det_1deg_extended': 'det_1deg',
-    'det_2deg_extended': 'det_2deg',
-    'det_3deg_extended': 'det_3deg',
-    'det_4deg_extended': 'det_4deg'})
-
 
 # %% Find cell with  MHWs lasting less than 30days - for each thredhols 
 short_mhw_cells = {}
@@ -541,7 +632,7 @@ short_mhw_file = os.path.join(os.path.join(path_det, 'shortMHW_5m.nc'))
 if not os.path.exists(short_mhw_file):
 
     for var in variables:
-        mhw_flags = ds_mhw_duration[var]  # shape: (years, days, eta_rho, xi_rho): (40, 365, 231, 1442)
+        mhw_flags = ds_duration_thresh_FULLyear[var].where(ds_duration_thresh_FULLyear['duration']!=0)  # shape: (years, days, eta_rho, xi_rho): (40, 365, 231, 1442)
         ever_mhw = mhw_flags.any(dim=('years', 'days'))   # True where MHW occurred
         long_events = avg_event_counts_dict[var] > 0      # True where ≥30d MHW occurred
 
@@ -559,14 +650,14 @@ else:
 from matplotlib.colors import LinearSegmentedColormap
 variables = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
 
-bins = [0, 5, 10, 15, 20, 25, 30]
+bins = [0, 5, 10, 15, 20, 30]
 colors = [
-    "#98df8a",  # 1-5
-    "#2ca02c",  # 5-10
-    "#ecc22a",  # 10-15
-    "#e05050",  # 15-20
-    "#d62728",  # 20-25
-    "#800000",  # more than 25
+    "#8CB369",  # 1-5
+    "#588978",  # 5-10
+    "#E0BE15",  # 10-15
+    # "#e05050",  
+    "#D36A0D",  # 15-20
+    "#800000",  # more than 20
 
 ]
 
@@ -625,16 +716,16 @@ for i, var in enumerate(variables):
     gl.yformatter = LatitudeFormatter()
 
     # Base layer: long events
-    long_mhw = ax.pcolormesh(ds_mhw_duration['lon_rho'], ds_mhw_duration['lat_rho'], avg_event_counts_dict[var], 
+    long_mhw = ax.pcolormesh(ds_duration_thresh_FULLyear['lon_rho'], ds_duration_thresh_FULLyear['lat_rho'], avg_event_counts_dict[var], 
                                 transform=ccrs.PlateCarree(), cmap=cmap, norm=norm, shading='auto', zorder=1)
     if long_mhw_ref is None:
         long_mhw_ref = long_mhw  # Save the first one for colorbar
 
     # 2nd layer - short MHWs in grey
     colors = [(0, 0, 0, 0),  # 0 ->  transparent
-            (0.5, 0.5, 0.5, 1)]  # 1 -> grey
+            (0.75, 0.75, 0.75, 1)]  # 1 -> grey
     cmap_short = mcolors.ListedColormap(colors)
-    short_mhw = ax.pcolormesh(ds_mhw_duration['lon_rho'], ds_mhw_duration['lat_rho'], ds_short_mhw[var].astype(int),
+    short_mhw = ax.pcolormesh(ds_duration_thresh_FULLyear['lon_rho'], ds_duration_thresh_FULLyear['lat_rho'], ds_short_mhw[var].astype(int),
                             cmap=cmap_short, shading='auto', transform=ccrs.PlateCarree(), zorder=2)
 
     # 3rd layer - no mhws 
@@ -667,7 +758,7 @@ cbar = fig.colorbar(
     extend='max'
 )
 
-cbar.ax.set_xticklabels(['1-5', '5-10', '10-15', '15-20', '20-25', '$>$25'], fontsize=14)
+cbar.ax.set_xticklabels(['1-5', '5-10', '10-15', '15-20', '$>$20'], fontsize=14)
 cbar.set_label("Years", fontsize=16)
 
 plt.suptitle("Number of years with events lasting more than 30 days \n1980-2019 period - 5m depth", fontsize=20, y=1.05)
