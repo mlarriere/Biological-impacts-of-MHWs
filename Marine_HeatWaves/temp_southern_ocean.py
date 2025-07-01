@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import matplotlib.path as mpath
 import matplotlib.colors as mcolors
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+from matplotlib.colors import ListedColormap
 
 import time
 from tqdm.contrib.concurrent import process_map
@@ -120,7 +121,7 @@ def extract_temperature(ieta, period):
 
         return ieta, ds_avg
 
-# %% Extract temprature for different period
+# %% Extract temperature for different period
 # Calling function to combine eta -- with process_map
 det_clim1 = np.empty((neta, nz, nxi), dtype=np.float32)
 det_clim2 = np.empty((neta, nz, nxi), dtype=np.float32)
@@ -184,7 +185,8 @@ ds_warm = xr.Dataset(
         lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
         ),
     attrs=dict(description='Mean temperature - period (2010-2019)'),
-        ) 
+        )
+
 #%% === Create Figure with 2 Subplots ===
 # --- Zonal means ---
 # Mean temperature calculation for different latitude bands and datasets
@@ -205,6 +207,7 @@ for name, ds in datasets.items():
     mean_temps_south_60[name] = mean_temp.item()
 
 overall_mean_south_60 = np.mean(list(mean_temps_south_60.values()))
+print(f"Overall mean temperature south of 60°S: {overall_mean_south_60:.1f}°C")
 
 # Between 50°S and 60°S
 mean_temps_50_60 = {}
@@ -215,10 +218,99 @@ for name, ds in datasets.items():
     mean_temps_50_60[name] = mean_temp.item()
 
 overall_mean_50_60 = np.mean(list(mean_temps_50_60.values()))
+print(f"Overall mean temperature between 50°S and 60°S: {overall_mean_50_60:.1f}°C")
 
-print("Overall mean south of 60°S:", overall_mean_south_60)
-print("Overall mean between 50°S and 60°S:", overall_mean_50_60)
+# Hotspots
+mean_temp_hotspot1 = {}
+for name, ds in datasets.items():
+    mask = (ds['lat_rho'] > -65) & (ds['lat_rho'] <= -60) & (ds['lon_rho'] <= 292)  & (ds['lon_rho'] > 240) 
+    temp_masked = ds['temp'].where(mask).isel(depth=slice(0, 14))
+    mean_temp = temp_masked.mean(dim=['eta_rho', 'xi_rho', 'depth'], skipna=True)
+    mean_temp_hotspot1[name] = mean_temp.item()
 
+overall_mean_hotspot1= np.mean(list(mean_temp_hotspot1.values()))
+print(f"Overall mean temperature hotspot1: {overall_mean_hotspot1:.1f} °C")
+
+mean_temp_hotspot2 = {}
+for name, ds in datasets.items():
+    mask = (ds['lat_rho'] > -65) & (ds['lat_rho'] <= -60) & (ds['lon_rho'] <=195)  & (ds['lon_rho'] > 160) 
+    temp_masked = ds['temp'].where(mask).isel(depth=slice(0, 14))
+    mean_temp = temp_masked.mean(dim=['eta_rho', 'xi_rho', 'depth'], skipna=True)
+    mean_temp_hotspot2[name] = mean_temp.item()
+
+overall_mean_hotspot2= np.mean(list(mean_temp_hotspot2.values()))
+print(f"Overall mean temperature hotspot2: {overall_mean_hotspot2:.1f} °C")
+
+
+# %%-- plot hotsot region
+mhw_duration = xr.open_dataset(os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc')))
+lon = mhw_duration['lon_rho'].values % 360
+lat = mhw_duration['lat_rho'].values
+
+# -- Parameters --
+year_idx = 37 
+threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
+variables = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
+titles = ['1°C', '2°C', '3°C', '4°C']
+
+# Hotspot masks
+hotspot_mask1 = (lat > -65) & (lat <= -60) & (lon > 240) & (lon <= 292)
+hotspot_mask2 = (lat > -65) & (lat <= -60) & (lon > 160) & (lon <= 195)
+
+# Plot setup
+fig = plt.figure(figsize=(6.5, 6.5))
+ax = fig.add_subplot(1, 1, 1, projection=ccrs.SouthPolarStereo())
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+# Circular boundary
+theta = np.linspace(0, 2 * np.pi, 100)
+center, radius = [0.5, 0.5], 0.5
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * radius + center)
+ax.set_boundary(circle, transform=ax.transAxes)
+
+# Map base
+ax.coastlines(color='black', linewidth=1, zorder=4)
+ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
+ax.set_facecolor('lightgrey')
+
+for lon_line in [-90, 0, 120]:
+    ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+            color="#080808", linestyle='--', linewidth=1, zorder=5)
+
+# Gridlines
+gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=3)
+gl.xlabels_top = False
+gl.ylabels_right = False
+gl.xlabel_style = {'size': 10}
+gl.ylabel_style = {'size': 10}
+gl.xformatter = LongitudeFormatter()
+gl.yformatter = LatitudeFormatter()
+
+# Plot each threshold detection overlayed
+for i, var in enumerate(variables):
+    data = mhw_duration[var].isel(years=year_idx).mean(dim={'days'})
+    masked_data = np.where(data, 1, np.nan)  # mask False values
+    ax.pcolormesh(lon, lat, masked_data, transform=ccrs.PlateCarree(),
+                  cmap=ListedColormap([threshold_colors[i]]), shading='auto',
+                  zorder=1, rasterized=True)
+
+ax.contour(lon, lat, hotspot_mask1, levels=[0.5], colors='red', linewidths=2, transform=ccrs.PlateCarree(), zorder=5)
+ax.contour(lon, lat, hotspot_mask2, levels=[0.5], colors='blue', linewidths=2, transform=ccrs.PlateCarree(), zorder=5)
+
+# Title
+ax.set_title(f"MHW Detected Events\nOn Average in {1980 + year_idx} (5m depth)", fontsize=16)
+
+# Legend
+from matplotlib.patches import Patch
+legend_patches = [Patch(facecolor=threshold_colors[i], edgecolor='k', label=f'MHWs $>${titles[i]}') for i in range(4)]
+legend_patches.append(Patch(facecolor='none', edgecolor='red', label=f'Hotspot Region 1', linewidth=1))
+legend_patches.append(Patch(facecolor='none', edgecolor='blue', label=f'Hotspot Region 2', linewidth=1))
+ax.legend(handles=legend_patches, loc='lower left', fontsize=9, frameon=True,
+          bbox_to_anchor=(0.01, -0.2), borderaxespad=0)
+
+plt.tight_layout()
+plt.show()
 
 #%%
 zonal1 = ds_clim1.temp.mean(dim='xi_rho')  # 1980–1989
@@ -229,17 +321,24 @@ temp_avg_zonal = (zonal1+zonal2+zonal3+zonal4)/4
 
 # --- Coordinates ---
 lat = ds_clim3.lat_rho.mean(dim='xi_rho').values    # (eta_rho,)
-depth = xr.open_dataset(f"{path_temp}{file_var}eta200.nc")[var][1:, 0:365, :, :].z_rho.values 
+depth = xr.open_dataset(f"{path_temp}{file_var}eta200.nc")['temp'][1:, 0:365, :, :].z_rho.values 
 
 # --- Meshgrid for contourf ---
 LAT, DEPTH = np.meshgrid(lat, depth)
 
 # --- Plot ---
 from matplotlib.colors import BoundaryNorm
+from matplotlib.colors import LinearSegmentedColormap
 
 # --- Define 21 levels between -3 and 3 ---
-bounds = np.linspace(-3, 7, 35)  # 35 depth → 20 color bins
-cmap = plt.get_cmap('coolwarm', len(bounds) - 1)  # Discrete colormap with 20 bins
+vmin, vmax = -3, 7
+color_positions = np.array([vmin, -1.5, 0, 1.5, 3.5, vmax])  # Accelerated warm transition
+normalized_positions = (color_positions - vmin) / (vmax - vmin)
+
+# Ensure white is at 0.3 normalized position
+colors = ["#001219", "#669BBC", "#FFFFFF", "#CA6702", "#AE2012", "#5C0101"]
+cmap = LinearSegmentedColormap.from_list("blue_green_yellow_buffered", list(zip(normalized_positions, colors)), N=256)
+bounds = np.linspace(vmin, vmax, 35)
 norm = BoundaryNorm(boundaries=bounds, ncolors=cmap.N)
 
 # --- Plot ---
@@ -252,24 +351,31 @@ cf = ax.contourf(
     levels=bounds, cmap=cmap, norm=norm)
 
 # ax.set_title("Average Zonal Temperature (1980–2019)", fontsize=18)
-ax.set_xlabel("Latitude (°N)",fontsize=14)
-ax.set_ylabel("Depth (m)",fontsize=14)
+ax.set_xlabel("Latitude [°N]")
+ax.set_ylabel("Depth [m]")
 ax.set_xlim(-78, -50)
 yticks = np.array([-5, -100, -200, -300, -400, -500])
 ax.set_yticks(yticks)
 ax.set_yticklabels([str(t) for t in yticks])  # shows depth as positive numbers
 
-ax.tick_params(labelsize=12)
+ax.set_xlim(-78, -50)
+yticks = np.array([-5, -100, -200, -300, -400, -500])
+ax.set_yticks(yticks)
+ax.set_yticklabels([str(t) for t in yticks])  # shows depth as positive numbers
+
+ax.axvline(x=-60, color='black', linestyle='--', linewidth=0.8, zorder=10)
+# ax.tick_params(labelsize=12)
 
 # --- Colorbar ---
-cbar = fig.colorbar(cf, ax=ax, orientation='vertical', label='Temperature (°C)', extend='both')
-cbar.set_label('Temperature (°C)', fontsize=14)  # bigger label font
-cbar.set_ticks(np.arange(-3, 7+1, 1))
-cbar.ax.tick_params(labelsize=12, which='major', length=2)  # Larger ticks, no minors
+cbar = fig.colorbar(cf, ax=ax, orientation='vertical', label='Temperature [°C]', extend='both')
+cbar.set_label('Temperature [°C]')
+cbar.set_ticks(np.arange(vmin, vmax+1, 1))  # round integer ticks only
+cbar.minorticks_off()
+cbar.ax.tick_params( which='major', length=5)
 
 plt.tight_layout()
 plt.show() 
-# plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/zonal_avg_temperature.pdf'), dpi =150, format='pdf', bbox_inches='tight')
+# plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/zonal_avg_temperature.pdf'), dpi =200, format='pdf', bbox_inches='tight')
 
 
 # %% ======== Averaged temperature ========
