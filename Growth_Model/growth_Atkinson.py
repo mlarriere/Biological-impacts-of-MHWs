@@ -787,7 +787,6 @@ def define_season_all_years_parallel(ds, max_workers=6):
     return xr.concat(season_list, dim="season_year", combine_attrs="override")
 
 
-
 growth_season_file = os.path.join(path_growth, "growth_Atkison2006_seasonal.nc")
 if not os.path.exists(growth_season_file):
     # growth_seasons = define_season_all_years(growth_redimensioned.growth) 
@@ -1121,7 +1120,8 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label=''):
         # vmin = min(data_1980_2009.min(), data_2010_2019.min())
         # vmax = max(data_1980_2009.max(), data_2010_2019.max())
         # abs_max = max(abs(vmin), abs(vmax))
-        norm_main = mcolors.TwoSlopeNorm(vmin=-abs_max, vcenter=0, vmax=abs_max)
+        # norm_main = mcolors.TwoSlopeNorm(vmin=-abs_max, vcenter=0, vmax=abs_max)
+        norm_main = TwoSlopeNorm(vmin=-2, vcenter=0, vmax=2)
         extend_var ='both'
     elif varname == 'chla':
         vmax = data_1980_2009.max()  # Max value for chla colormap
@@ -1199,7 +1199,7 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label=''):
 from matplotlib.colors import LinearSegmentedColormap
 
 # Choose variable to plot
-variable = 'chla'  #'growth', 'temp', 'chla'
+variable = 'temp'  #'growth', 'temp', 'chla'
 
 if variable == 'growth':
     ds = growth_seasons.isel(xi_rho=slice(0, -1)).growth
@@ -1210,13 +1210,12 @@ if variable == 'growth':
 elif variable == 'temp':
     ds = temp_avg_100m_seasons.isel(xi_rho=slice(0, -1)).avg_temp
     vmin, vmax = -4, 4  # Symmetric -- centered at 0
-    colors = ["#005F73", "#94D2BD", "#FCF6E6", "#EE9B00", "#AE2012"] #BB3E03
+    colors = ["#0A3647", "#669BBC", "#FFFFFF", "#EE9B00", "#AE2012"] #BB3E03
     color_positions = np.linspace(vmin, vmax, len(colors))
     normalized_positions = (color_positions - vmin) / (vmax - vmin)  # Normalize to [0, 1]
     cmap_var = LinearSegmentedColormap.from_list("thermal_centered", list(zip(normalized_positions, colors)), N=256)
-    # cmap_var =  cmocean.cm.thermal  #'inferno'
     label = 'Temperature [°C]'
-    ticks = [-4, -2, 0, 2, 4]
+    ticks = [-2, -1, 0, 1, 2]
 
 elif variable == 'chla':
     ds = chla_filtered_seasons.isel(xi_rho=slice(0, -1)).chla    
@@ -1265,7 +1264,7 @@ def plot_variables_decades(growth_ds, chla_ds, temp_ds):
     extend_chla ='max'
 
     vmin, vmax = -4, 4  # Symmetric -- centered at 0
-    colors = ["#005F73", "#94D2BD", "#FCF6E6", "#EE9B00", "#AE2012"] #BB3E03
+    colors = ["#0A3647", "#669BBC", "#FFFFFF", "#EE9B00", "#AE2012"] #BB3E03
     color_positions = np.linspace(vmin, vmax, len(colors))
     normalized_positions = (color_positions - vmin) / (vmax - vmin)  # Normalize to [0, 1]
     temp_cmap = LinearSegmentedColormap.from_list("thermal_centered", list(zip(normalized_positions, colors)), N=256)
