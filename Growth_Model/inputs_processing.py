@@ -272,6 +272,55 @@ output_file = os.path.join(path_growth_inputs, f"chla_surf_allyears_detrended.nc
 if not os.path.exists(output_file):
     chla_trend_corrected_filtered.to_netcdf(output_file, mode='w')  
 
+#%% Monthly
+chla_trend_corrected_monthly = xr.open_dataset(os.path.join(path_chla_corrected, 'TOT_CHL_surface_monthly_corrected.nc')) #shape (40, 12, 434, 1442)
+
+# Reformating
+ds_chla_mean_monthly = chla_trend_corrected_monthly.rename({'TOT_CHL':'raw_chla'}) # min: 6.16463534e-07, max:143.92303515 mg/m3
+
+# === Select extent - south of 60°S
+south_mask = ds_chla_mean_monthly['lat_rho'] <= -60
+chla_60S_south_monthly = ds_chla_mean_monthly.where(south_mask, drop=True) #shape (40, 12, 231, 1442)
+
+# === Cap the data - max 5mg/m3 ===
+chla_trend_corrected_monthly = chla_60S_south_monthly.where(chla_60S_south_monthly.raw_chla <= 5)
+
+# Investigating data
+max_chla_after = chla_trend_corrected_monthly.raw_chla.max() # 4.9998512 mg/m3
+min_chla_after = chla_trend_corrected_monthly.raw_chla.min() # 8.64039176e-05 mg/m3
+
+# === PLOT ===
+data = chla_trend_corrected_monthly.isel(year=37, month=11)
+fig = plt.figure(figsize=(14, 6))
+gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2])
+# Histogram (left)
+ax0 = fig.add_subplot(gs[0])
+ax0.hist(data.raw_chla.values.flatten(), bins=50, color='teal', alpha=0.75)
+ax0.set_title(f"Histogram of Surface Chlorophyll\n(South of 60°S, {37+1980})")
+ax0.set_xlabel("Chlorophyll-a [mg/m³]")
+ax0.set_ylabel("Frequency")
+ax0.grid(True, alpha=0.3)
+# Map (right)
+ax1 = fig.add_subplot(gs[1], projection=ccrs.SouthPolarStereo())
+ax1.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+ax1.coastlines()
+ax1.add_feature(cfeature.LAND, facecolor='lightgrey')
+ax1.set_facecolor('lightblue')
+p = ax1.pcolormesh(
+    data['lon_rho'], data['lat_rho'],
+    data['raw_chla'],
+    transform=ccrs.PlateCarree(), shading='auto', cmap='viridis')
+cbar = plt.colorbar(p, orientation='horizontal', pad=0.05, fraction=0.04, aspect=30, ax=ax1)
+cbar.set_label('Chlorophyll-a (mg/m³)')
+ax1.set_title(f'Chlorophyll-a\nMonth {12} -- {37+1980}', fontsize=12)
+plt.tight_layout()
+plt.show()
+
+# Write dataset to file
+output_file = os.path.join(path_growth_inputs, f"chla_surf_allyears_monthly_detrended.nc")
+if not os.path.exists(output_file):
+    chla_trend_corrected_monthly.to_netcdf(output_file, mode='w')  
+
 # %% Temperature from ROMS [°C]
 # -------------------------------- Weighted averaged Temperature --------------------------------
 ds = xr.open_dataset(path_mhw + file_var + 'eta200.nc') #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
