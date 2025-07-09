@@ -113,7 +113,7 @@ chla_surf_corrected = xr.open_dataset(os.path.join(path_growth_inputs, 'chla_sur
 chla_surf_corrected = chla_surf_corrected.drop_dims('time')
 chla_surf_corrected = chla_surf_corrected.rename({'year': 'years'})
 chla_surf_corrected = chla_surf_corrected.rename({'day': 'days'})
-chla_surf = chla_surf_corrected.assign_coords(days=("days", np.arange(365)))  #shape (40, 181, 231, 1442)
+chla_surf = chla_surf_corrected.assign_coords(days=("days", np.arange(365)))  #shape (40, 365, 231, 1442)
 # chla_surf.raw_chla.isel(years=30, days=30).plot()
 
 # Reformating - stacking time dimension -- shape (231, 1442, 14600)
@@ -1647,68 +1647,6 @@ if not os.path.exists(growth_no_mhw_file):
     # Count how many valid time steps we have per grid cell
     valid_counts = growth_no_mhw.count(dim=('years', 'days'))
     max_val = valid_counts.max().item()
-    # total_growth_valid = growth_seasons['growth'].count(dim=('years', 'days'))
-    # mhw_days_count = mhw_detected.sum(dim=('years', 'days'))
-
-    # # # Get maximum possible value (should be ~181 days × 39 years = 7059)
-    # max_val = valid_counts.max().item()
-
-    # # # Create a boolean mask of locations that have the maximum number of MHW days
-    # always_mhw_mask = valid_counts == max_val
-
-    # # # Optionally: get the coordinates of those grid cells
-    # mhw_locs = valid_counts.where(always_mhw_mask, drop=True)
-
-    # print("Total number of always-MHW grid cells:", always_mhw_mask.sum().item())
-
-    # # Get coordinate pairs (lat/lon)
-    # lat_vals = mhw_locs.lat_rho.values
-    # lon_vals = mhw_locs.lon_rho.values
-
-    # # If you want just a few to inspect:
-    # for lat, lon in zip(lat_vals.flat[:5], lon_vals.flat[:5]):
-    #     print(f"Always-MHW cell at lat: {lat:.2f}, lon: {lon:.2f}")
-
-    # import matplotlib.cm as cm
-    # # Create custom colormap: red for 0, viridis for the rest
-    # viridis = cm.get_cmap('viridis', 256)
-    # new_colors = viridis(np.linspace(0, 1, 256))
-    # # Replace first color (corresponding to value 0) with red
-    # new_colors[0] = np.array([1.0, 0.0, 0.0, 1.0])  # RGBA for red
-    # custom_cmap = mcolors.ListedColormap(new_colors)
-    # # Set normalization: ensure 0 is mapped to the first color
-    # norm = mcolors.Normalize(vmin=0, vmax=np.nanmax(valid_counts.values))
-    # # Plotting
-    # fig = plt.figure(figsize=(6.5, 6.5))
-    # ax = plt.subplot(1, 1, 1, projection=ccrs.Orthographic(central_latitude=-90, central_longitude=0))
-    # # Circular boundary
-    # theta = np.linspace(0, 2 * np.pi, 100)
-    # center, radius = [0.5, 0.5], 0.5
-    # verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-    # circle = mpath.Path(verts * radius + center)
-    # ax.set_boundary(circle, transform=ax.transAxes)
-    # # Map features
-    # ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-    # ax.coastlines(color='black', linewidth=1, zorder=4)
-    # ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
-    # ax.set_facecolor('lightgrey')
-    # # Plot
-    # im = ax.pcolormesh(
-    #     valid_counts.lon_rho,
-    #     valid_counts.lat_rho,
-    #     valid_counts,
-    #     transform=ccrs.PlateCarree(),
-    #     cmap=custom_cmap,
-    #     norm=norm,
-    #     shading='auto',
-    #     zorder=1,
-    #     rasterized=True
-    # )
-    # # Colorbar
-    # cbar = plt.colorbar(im, ax=ax, orientation='horizontal', pad=0.08)
-    # cbar.set_label('Valid time steps (1980–2018)', fontsize=12)
-    # plt.tight_layout()
-    # plt.show()
 
     # To Dataset
     growth_no_mhw_ds = xr.Dataset(
@@ -1875,7 +1813,7 @@ fig.text(0.5, suptitle_y - 0.05, 'Growth season (1Nov–30Apr), 1980–2018', ha
 
 # --- Output handling ---
 if plot == 'report':
-    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/')
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/mhws_VS_non_mhws/')
     outfile = f"growth_mhw_VS_nomhw_{plot}.pdf"
     # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
@@ -1883,4 +1821,184 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/growth_mhw_VS_nomhw_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
     
+# %% -------------------- Quantifying the Avg Chla under MHWs --------------------
+
+# Load data 
+chla_filtered_seasons_file = os.path.join(path_growth_inputs, "chla_surf_allyears_detrended_seasonal.nc")
+chla_filtered_seasons=xr.open_dataset(chla_filtered_seasons_file) # shape (39, 181, 231, 1442)
+mhw_det = xr.open_dataset(os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))) #shape: (39, 181, 231, 1442)
+
+# -- Write or load data
+chla_mhws_file = os.path.join(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_mhws.nc'))
+
+if not os.path.exists(chla_mhws_file):
+    # =========== Chla under MHWs ===========
+
+    variables = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
+    chla_var_names = ['chla_1deg', 'chla_2deg', 'chla_3deg', 'chla_4deg']
+    chla_mhw_dict = {}
+
+    for mhw_var, chla_name in zip(variables, chla_var_names):
+        print(f'------------{mhw_var}------------')
+        # mhw_var='det_1deg'
+
+        # Masks
+        duration_mask = mhw_det['duration'] >= 30 # DataArray bool
+        det_mask = mhw_det[mhw_var] == 1 # DataArray bool
+        mhw_mask = duration_mask & det_mask # shape (39, 181, 231, 1442)
+
+        # Clean and align mask
+        mhw_mask_clean = mhw_mask.drop_vars('days').rename({'days_of_yr': 'days'})
+        mhw_mask_clean = mhw_mask_clean.assign_coords(years=mhw_mask_clean.years + 1980)
+
+        # Mask CHLA with MHWs
+        chla_mhw = chla_filtered_seasons.where(mhw_mask_clean) 
+
+        # Mean across time
+        chla_mhw_mean = chla_mhw.mean(dim=('years', 'days'), skipna=True)
+        chla_mhw_dict[chla_name] = chla_mhw_mean
+
+    # =========== Chla under NON MHWs ===========
+    # Masks
+    non_mhw_mask = mhw_det['duration'] == 0
+        
+    # Clean and align mask
+    non_mhw_mask_clean = non_mhw_mask.drop_vars('days').rename({'days_of_yr': 'days'})
+    non_mhw_mask_clean = non_mhw_mask_clean.assign_coords(years=non_mhw_mask_clean.years + 1980)
+
+    # Mask CHLA with MHWs
+    chla_non_mhw = chla_filtered_seasons.where(non_mhw_mask_clean) 
+
+    # Mean across time
+    chla_non_mhw_mean  = chla_non_mhw.mean(dim=('years', 'days'), skipna=True)
+
+
+    # =========== Combine into DataSet
+    chla_mhws_ds = xr.Dataset({
+        'chla_mhw_1deg': chla_mhw_dict['chla_1deg'].chla,
+        'chla_mhw_2deg': chla_mhw_dict['chla_2deg'].chla,
+        'chla_mhw_3deg': chla_mhw_dict['chla_3deg'].chla,
+        'chla_mhw_4deg': chla_mhw_dict['chla_4deg'].chla,
+        'chla_non_mhw': chla_non_mhw_mean.chla,
+        })
+    chla_mhws_ds.attrs['title'] = 'Mean surface CHLA (detrented) during MHWs and non-MHWs'
+    chla_mhws_ds.attrs['description'] = 'Computed over growth season (1 Nov–30 Apr), 1980–2018'
+    chla_mhws_ds.attrs['units'] = 'mg/m3'
+    chla_mhws_ds.to_netcdf(chla_mhws_file)
+
+else: 
+    # Load data
+    chla_mhws_ds = xr.open_dataset(chla_mhws_file)
+
+
+# %% Plot
+plot = 'slides'  # slides report
+
+# ---- Figure layout ----
+if plot == 'report':
+    fig_width = 6.3228348611
+    fig_height = fig_width
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(4, 3, wspace=0.3, hspace=0.1)
+
+    axs = []
+    axs.append(fig.add_subplot(gs[0:2, 0], projection=ccrs.SouthPolarStereo()))  # 1°C
+    axs.append(fig.add_subplot(gs[0:2, 1], projection=ccrs.SouthPolarStereo()))  # 2°C
+    axs.append(fig.add_subplot(gs[2:4, 0], projection=ccrs.SouthPolarStereo()))  # 3°C
+    axs.append(fig.add_subplot(gs[2:4, 1], projection=ccrs.SouthPolarStereo()))  # 4°C
+    axs.append(fig.add_subplot(gs[1:3, 2], projection=ccrs.SouthPolarStereo()))  # Non MHWs
+
+elif plot == 'slides':
+    fig_width = 6.3228348611
+    fig_height = fig_width
+    fig = plt.figure(figsize=(fig_width * 5, fig_height))  # 5 columns wide
+    gs = gridspec.GridSpec(1, 5, wspace=0.1, hspace=0.2)
+    axs = [fig.add_subplot(gs[0, j], projection=ccrs.SouthPolarStereo()) for j in range(5)]
+
+title_kwargs = {'fontsize': 16} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+# legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 20, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 12, 'fontweight': 'bold'}
+
+chla_plot_data = [(chla_mhws_ds['chla_mhw_1deg'], r"MHWs $>$ 1$^\circ$C"),
+                  (chla_mhws_ds['chla_mhw_2deg'], r"MHWs $>$ 2$^\circ$C"),
+                  (chla_mhws_ds['chla_mhw_3deg'], r"MHWs $>$ 3$^\circ$C"),
+                  (chla_mhws_ds['chla_mhw_4deg'], r"MHWs $>$ 4$^\circ$C"),
+                  (chla_mhws_ds['chla_non_mhw'], r"No MHWs"),]
+
+from matplotlib import colors
+norm = colors.Normalize(vmin=0, vmax=1)
+custom_colors = ["#0E1B11", "#4A8956", "#73A942", "#E7D20D", "#FBB02D"]
+
+# ---- Plot ----
+for i, (data, title) in enumerate(chla_plot_data):
+    ax = axs[i]
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map features
+    ax.coastlines(color='black', linewidth=1, zorder=4)
+    ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=1, zorder=5)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=3)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # CHLA data
+    im = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+                       transform=ccrs.PlateCarree(), cmap=colors.LinearSegmentedColormap.from_list('custom_cmap', custom_colors), norm=norm, 
+                       shading='auto', zorder=1, rasterized=True)
+    
+    ax.set_title(title, **title_kwargs)
+
+# ---- Colorbar ----
+tick_positions = [0, 0.25, 0.5, 0.75, 1.0]
+if plot == 'report':
+    cbar_kwargs = {'fraction': 0.02, 'pad': 0.06, 'aspect': 50}
+else:
+    cbar_kwargs = {'fraction': 0.05, 'pad': 0.07, 'aspect': 40}
+
+cbar = fig.colorbar(im, ax=axs, orientation='horizontal', ticks=tick_positions, extend='max', **cbar_kwargs)
+cbar.set_label("Chla [mg m$^{-3}$]", **label_kwargs)
+cbar.ax.tick_params(**tick_kwargs)
+
+# ---- Title and subtitle ----
+if plot == 'report':
+    suptitle_y = 0.88
+    fig.text(0.5, suptitle_y - 0.05, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
+else:
+    suptitle_y = 1.06
+    fig.text(0.5, suptitle_y - 0.08, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
+
+fig.suptitle('Average surface CHLA under different MHW intensities', y=suptitle_y, **suptitle_kwargs)
+
+# ---- Output handling ----
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/mhws_VS_non_mhws/')
+    outfile = f"chla_mhw_VS_nomhw_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
+else:
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/mhws_VS_non_mhws/chla_mhw_VS_nomhw_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
 # %%
