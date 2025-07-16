@@ -120,100 +120,6 @@ chla_surf = chla_surf_corrected.assign_coords(days=("days", np.arange(365)))  #s
 temp_100m_stack = temp_avg_100m.stack(time= ['years', 'days'])
 chla_surf_stack = chla_surf.stack(time= ['years', 'days']) 
 
-
-#%% Plot ROMS outputs
-# norm_chla=mcolors.Normalize(vmin=0, vmax=2)
-# from matplotlib.colors import LinearSegmentedColormap
-# colors = ["#216869", "#73A942", "#FBB02D"]  # Blue, Green, Yellow
-# cmap_chla = LinearSegmentedColormap.from_list("blue_green_yellow", colors, N=256)
-
-# # ---- Figure and Axes ----
-# fig_width, fig_height = 6, 5
-# fig = plt.figure(figsize=(fig_width *2, fig_height))
-# gs = gridspec.GridSpec(1, 2, wspace=0.08, hspace=0.2)
-
-# axs = []
-# for j in range(2): 
-#     ax = fig.add_subplot(gs[j], projection=ccrs.SouthPolarStereo())
-#     axs.append(ax)
-
-# # ---- Plot Definitions ----
-# temp_jan2017_trimmed = temp_jan2017.isel(xi_rho=slice(0, -1))
-# plot_data = [
-#     (temp_jan2017_trimmed.avg_temp, "Mean Temperature (100m)", 'inferno', None),
-#     (chla_jan2017.raw_chla, "Chlorophyll-a (5m)", cmap_chla, norm_chla)
-# ]
-
-# ims = []
-# for i, (data, title, cmap, norm) in enumerate(plot_data):
-#     ax = axs[i]
-#     ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
-#     # Circular boundary
-#     import matplotlib.path as mpath
-#     theta = np.linspace(0, 2 * np.pi, 100)
-#     center, radius = [0.5, 0.5], 0.5
-#     verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-#     circle = mpath.Path(verts * radius + center)
-#     ax.set_boundary(circle, transform=ax.transAxes)
-
-#     # Coastlines and land
-#     ax.coastlines(color='black', linewidth=1)
-#     ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
-#     ax.set_facecolor('lightgrey')
-
-#     # Sector lines
-#     for lon_line in [-90, 0, 120]:
-#         ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
-#                 color="#080808", linestyle='--', linewidth=1, zorder=5)
-
-#     # Gridlines
-#     gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=3)
-#     gl.xlabels_top = False
-#     gl.ylabels_right = False
-#     gl.xlabel_style = {'size': 10}
-#     gl.ylabel_style = {'size': 10}   
-#     from matplotlib.ticker import MultipleLocator
-#     gl.xlocator = MultipleLocator(60)
-#     # gl.ylocator = MultipleLocator(5)  
-
-#     # Plot data if available
-#     if data is not None:
-#         lon_name = [name for name in data.coords if 'lon' in name][0]
-#         lat_name = [name for name in data.coords if 'lat' in name][0]
-#         if data[lon_name].ndim == 1 and data[lat_name].ndim == 1:
-#             lon2d, lat2d = np.meshgrid(data[lon_name], data[lat_name])
-#         else:
-#             lon2d, lat2d = data[lon_name], data[lat_name]
-
-#         im = ax.pcolormesh(
-#             data[lon_name], data[lat_name], data,
-#             transform=ccrs.PlateCarree(),
-#             cmap=cmap,
-#             norm=norm,
-#             shading='auto',
-#             rasterized=True
-#         )
-#         ims.append(im)
-#     else:
-#         ims.append(None)
-
-#     ax.set_title(title, fontsize=14)
-
-# # ---- Colorbars ----
-# # Temperature colorbar
-# cbar_ax1 = fig.add_axes([0.13, 0.01, 0.32, 0.03])  # [left, bottom, width, height]
-# cbar1 = fig.colorbar(ims[0], cax=cbar_ax1, orientation='horizontal', extend='both')
-# cbar1.set_label("°C", fontsize=12)
-
-# # Chlorophyll colorbar
-# cbar_ax2 = fig.add_axes([0.56, 0.01, 0.32, 0.03])
-# cbar2 = fig.colorbar(ims[1], cax=cbar_ax2, orientation='horizontal', extend='both')
-# cbar2.set_label("mg/m³", fontsize=12)
-
-# plt.suptitle("ROMS outputs \n January 2017", fontsize=18, y=1.05)
-# plt.show()
-
 # %% ================ Hypothetical Growth ================
 # Investigate max/min values
 max_obs_chla = chla_surf_stack.raw_chla.max() #5 mg/m3 Chla
@@ -260,194 +166,6 @@ else:
 target_start_year = 2018  #1980 #2000 #2010 #2018
 target_end_year = target_start_year + 1
 
-# %% Defining seasonal extent for growth (austral summer - early spring)
-# def defining_season(ds, starting_year):
-#     # Get the day-of-year slices
-#     days_nov_dec = ds.sel(days=slice(304, 364), years=starting_year)
-#     days_jan_apr = ds.sel(days=slice(0, 119), years=starting_year + 1)
-
-#     # Combine while keeping doy as coords
-#     ds_season = xr.concat([days_nov_dec, days_jan_apr], dim=xr.DataArray(np.concatenate([days_nov_dec['days'].values, days_jan_apr['days'].values]), dims="days", name="days"))
-
-#     return ds_season
-
-# %% ================ Growth in yearly context ================
-# # Target year: start in July 1980 -> so need Jul-Dec 1980 and Jan-Jun 1981
-# target_start_year = 2018  #1980 #2000 #2010 #2018
-# target_end_year = target_start_year + 1
-
-# # --- Full year data ---
-# # Extract data across July–June (full year across two calendar years)
-# CHLA_jul_dec = chla_surf.raw_chla.sel(years=target_start_year).isel(days=slice(181, 365)).mean(dim=["eta_rho", "xi_rho"])#, eta_rho=200, xi_rho=1000)
-# TEMP_jul_dec = temp_avg_100m.avg_temp.sel(years=target_start_year).isel(days=slice(181, 365)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-
-# CHLA_jan_jun = chla_surf.raw_chla.sel(years=target_end_year).isel(days=slice(0, 181)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-# TEMP_jan_jun = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice(0, 181)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-
-# # Concatenate to get full July–June year
-# CHLA_full = np.concatenate([CHLA_jul_dec, CHLA_jan_jun])
-# TEMP_full = np.concatenate([TEMP_jul_dec, TEMP_jan_jun])
-
-# # --- Growth season data ---
-# # Identify Nov 1 – Apr 30 for the red line (Nov–Dec from current year, Jan–Apr from next year)
-# CHLA_nov_dec = chla_surf.raw_chla.sel(years=target_start_year).isel(days=slice(305, 365)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-# TEMP_nov_dec = temp_avg_100m.avg_temp.sel(years=target_start_year).isel(days=slice(305, 365)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-
-# CHLA_jan_apr = chla_surf.raw_chla.sel(years=target_end_year).isel(days=slice(0, 121)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-# TEMP_jan_apr = temp_avg_100m.avg_temp.sel(years=target_end_year).isel(days=slice(0, 121)).mean(dim=["eta_rho", "xi_rho"]) #, eta_rho=200, xi_rho=1000)
-
-# CHLA_season = np.concatenate([CHLA_nov_dec.values, CHLA_jan_apr.values])
-# TEMP_season = np.concatenate([TEMP_nov_dec.values, TEMP_jan_apr.values])
-
-# #  ============ Plot ============
-# plot='report'
-
-# # Define figure size based on output type
-# if plot == 'report':
-#     fig_width = 6.3228348611
-#     fig_height = fig_width*0.5
-#     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-# else:  # 'slides'
-#     fig, ax = plt.subplots(figsize=(10, 6))
-
-# # Font size settings
-# title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
-# label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
-# tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
-# legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
-
-# # --- Colormap normalization ---
-# norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
-
-# # --- Contour levels ---
-# min_val = np.nanmin(growth_hyp)
-# max_val = np.nanmax(growth_hyp)
-# levels = np.arange(np.floor(min_val * 10) / 10, np.ceil(max_val * 10) / 10 + 0.05, 0.05)
-
-# # --- Plot 0 contour ---
-# zero_level = [0]
-# manual_zero_pos = [(0.5, -0.5)]
-# zero_contour = ax.contour(CHLA, TEMP, growth_hyp, levels=zero_level, colors='black',
-#                           linewidths=0.8, linestyles='--', zorder=3)
-# label_fontsize = 12 if plot == 'slides' else None
-# ax.clabel(zero_contour, manual=manual_zero_pos, fmt="%.2f", inline=True,
-#           fontsize=label_fontsize, colors='black')
-
-# # --- Plot selected labeled contours ---
-# levels_to_plot = [-0.2, -0.1, 0.1, 0.2]
-# if plot == 'report':
-#     manual_positions = {
-#         -0.2: (0.33, -1.4), 
-#         -0.1: (0.4, -0.7),
-#          0.1: (0.7, -0.7),
-#          0.2: (1.5, -0.4),
-#     }
-# else:  # slides
-#     manual_positions = {
-#         -0.2: (0.4, -1.65),
-#         -0.1: (0.45, -0.9),
-#          0.1: (0.7, -0.7),
-#          0.2: (1.5, -0.4),
-#     }
-
-# for lvl in levels_to_plot:
-#     contour = ax.contour(CHLA, TEMP, growth_hyp, levels=[lvl], colors='white',
-#                          linewidths=0.8, linestyles='--', zorder=3)
-#     try:
-#         ax.clabel(contour, manual=[manual_positions[lvl]], fmt="%.2f", inline=True,
-#                 fontsize=label_fontsize, colors='white')
-#     except Exception as e:
-#         print(f"Failed to label level {lvl}: {e}")
-
-# # --- Pseudocolor background ---
-# pcm = ax.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto',
-#                     cmap='coolwarm_r', norm=norm, rasterized=True)
-
-# # --- Full path (winter) ---
-# valid_mask_full = ~np.isnan(CHLA_full) & ~np.isnan(TEMP_full)
-# CHLA_full_clean = CHLA_full[valid_mask_full]
-# TEMP_full_clean = TEMP_full[valid_mask_full]
-# ax.plot(CHLA_full_clean, TEMP_full_clean, color='#4D7C8A', linewidth=2, zorder=4)
-
-# # --- Seasonal path (summer + early spring) ---
-# valid_mask_season = ~np.isnan(CHLA_season) & ~np.isnan(TEMP_season)
-# CHLA_season_clean = CHLA_season[valid_mask_season]
-# TEMP_season_clean = TEMP_season[valid_mask_season]
-# ax.plot(CHLA_season_clean, TEMP_season_clean, color="#643888", linewidth=2.5, zorder=4)
-
-# # --- Start & End markers ---
-# from datetime import datetime, timedelta
-# jul1 = datetime(target_start_year, 7, 1)
-# dates_full = [jul1 + timedelta(days=int(i)) for i in range(len(CHLA_full))]
-# dates_valid = np.array(dates_full)[valid_mask_full]
-# start_date_str = dates_valid[0].strftime('%d %b')
-# end_date_str = dates_valid[-1].strftime('%d %b')
-
-# ax.scatter(CHLA_full_clean[0], TEMP_full_clean[0], facecolor='white', edgecolor='black',
-#            s=90, zorder=5)
-# ax.scatter(CHLA_full_clean[-1], TEMP_full_clean[-1], facecolor='black', edgecolor='white',
-#            s=90, zorder=5)
-
-# # --- Legend ---
-# from matplotlib.lines import Line2D
-
-# # Legend handles
-# custom_lines = [
-#     Line2D([0], [0], linestyle='None', marker='', label='Growth Paths:', color='black'),  # visible label text
-#     Line2D([0], [0], color='#4D7C8A', lw=2, label='Winter'),
-#     Line2D([0], [0], color='#643888', lw=2, label='Summer, Early Spring'),
-# ]
-
-# # Add start/end markers only for slides
-# if plot == 'slides':
-#     custom_lines += [
-#         Line2D([0], [0], marker='o', markersize=7, markerfacecolor='white', markeredgecolor='black',
-#                linestyle='None', label=f'Start ({start_date_str})'),
-#         Line2D([0], [0], marker='o', markersize=7, markerfacecolor='black', markeredgecolor='white',
-#                linestyle='None', label=f'End ({end_date_str})')
-#     ]
-
-# # Create legend
-# legend = ax.legend(
-#     handles=custom_lines,
-#     loc='upper right',
-#     # bbox_to_anchor=(1.02, 0.5) if plot == 'report' else (0.02, 0.98),
-#     frameon=True,              # Enable frame
-#     facecolor='white',         # White background
-#     framealpha=0.9,            # Slight transparency
-#     handlelength=1,        # Length lines
-#     handletextpad=0.8,     # spacing between handle and text (default ~0.8)
-#     borderaxespad=0.5,     # padding between axes and legend box
-#     borderpad=0.4,         # padding inside the legend box
-#     labelspacing=0.6,      # vertical spacing between entries (reduced from 1.2)
-#     **legend_kwargs        # includes fontsize only for 'slides'
-# )
-
-# # --- Axis labels and title ---
-# ax.set_title(f'Krill Growth from 1st July {target_start_year} to 30th June {target_end_year}', **title_kwargs)
-# ax.set_xlabel('Chlorophyll-a [mg/m³]', **label_kwargs)
-# ax.set_ylabel('Temperature [°C]', **label_kwargs)
-# ax.set_yticks(np.arange(-4, 5, 1))
-# ax.tick_params(**tick_kwargs)
-
-# # --- Colorbar ---
-# # Colorbar
-# cbar = fig.colorbar(pcm, ax=ax, pad=0.02)
-# cbar.set_label('Growth [mm]', **label_kwargs)
-# cbar.ax.tick_params(**tick_kwargs)
-
-# # --- Final layout ---
-# plt.tight_layout()
-
-# # --- Output handling ---
-# if plot == 'report':
-#     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/temp_chla_diagrams')
-#     os.makedirs(outdir, exist_ok=True)
-#     outfile = f"{target_start_year}_fullyear_{plot}.pdf"
-#     # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
-#     plt.show()
-# else:
-#     plt.show()
 
 # %% ======================== Climatological growth (1980-2009) for 1 location ========================
 # Seletina location and the climalotogical period
@@ -513,11 +231,9 @@ levels = np.arange(np.floor(min_val * 10) / 10, np.ceil(max_val * 10) / 10 + 0.0
 # --- Plot 0 contour ---
 zero_level = [0]
 manual_zero_pos = [(0.5, -0.5)]
-zero_contour = ax.contour(CHLA, TEMP, growth_hyp, levels=zero_level, colors='black',
-                          linewidths=0.8, linestyles='--', zorder=3)
+zero_contour = ax.contour(CHLA, TEMP, growth_hyp, levels=zero_level, colors='black', linewidths=0.8, linestyles='--', zorder=3)
 label_fontsize = 12 if plot == 'slides' else None
-ax.clabel(zero_contour, manual=manual_zero_pos, fmt="%.2f", inline=True,
-          fontsize=label_fontsize, colors='black')
+ax.clabel(zero_contour, manual=manual_zero_pos, fmt="%.2f", inline=True, fontsize=label_fontsize, colors='black')
 
 # --- Plot selected labeled contours ---
 levels_to_plot = [-0.2, -0.1, 0.1, 0.2]
@@ -1004,8 +720,6 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/temp_chla_diagrams/chla_ts_loc_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
-
-
 # %% Select growth season - all years
 def extract_one_season_pair(args):
     ds_y, ds_y1, y = args
@@ -1082,93 +796,6 @@ if not os.path.exists(temp_avg_100m_seasons_file):
 else:
     temp_avg_100m_seasons=xr.open_dataset(temp_avg_100m_seasons_file) 
 
-#  %% Plot growth season for 1 year
-# growth_seasons2017 = growth_seasons.isel(years=37)
-
-# # Select January
-# growth_ROMS_2017_jan = growth_seasons2017.sel(days=slice(0,30)).mean(dim='days') #shape: (eta_rho, xi_rho) : (231, 1442)
-
-# # Setup figure
-# fig_width = 6.3228348611  # inches = \textwidth
-# fig_height = fig_width
-# fig = plt.figure(figsize=(fig_width, fig_height))  # Only 1 plot now
-# gs = gridspec.GridSpec(1, 1)
-
-# axs = []
-# ax = fig.add_subplot(gs[0, 0], projection=ccrs.SouthPolarStereo())
-# axs.append(ax)
-
-# # Plot configuration
-# growth_ROMS_2017_jan_trimmed = growth_ROMS_2017_jan.isel(xi_rho=slice(0, -1))
-# plot_data = [
-#     (growth_ROMS_2017_jan_trimmed.growth, "Mean Growth")
-# ]
-
-# # Color normalization
-# vmin, vmax = -0.2, 0.2
-# norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0.0, vmax=vmax)
-# cmap = 'PuOr_r'
-
-# # -----------------------------
-# # Plotting
-# # -----------------------------
-# ims = []
-# for data, title in plot_data:
-#     ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
-#     # Circular boundary
-#     theta = np.linspace(0, 2 * np.pi, 100)
-#     center, radius = [0.5, 0.5], 0.5
-#     verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-#     circle = mpath.Path(verts * radius + center)
-#     ax.set_boundary(circle, transform=ax.transAxes)
-
-#     # Map features
-#     ax.coastlines(color='black', linewidth=1, zorder=4)
-#     ax.add_feature(cfeature.LAND, zorder=3, facecolor='#F6F6F3')
-#     ax.set_facecolor('lightgrey')
-
-#     # Sector lines
-#     for lon_line in [-90, 0, 120]:
-#         ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
-#                 color="#080808", linestyle='--', linewidth=1, zorder=5)
-
-#     # Gridlines
-#     gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=2)
-#     gl.xlabels_top = False
-#     gl.ylabels_right = False
-#     gl.xlabel_style = {'size': 10}
-#     gl.ylabel_style = {'size': 10}
-#     gl.xformatter = LongitudeFormatter()
-#     gl.yformatter = LatitudeFormatter()
-
-#     # Plot data
-#     im = ax.pcolormesh(
-#         growth_seasons2017.lon_rho,
-#         growth_seasons2017.lat_rho,
-#         data,
-#         transform=ccrs.PlateCarree(),
-#         cmap=cmap,
-#         norm=norm,
-#         shading='auto',
-#         zorder=1,
-#         rasterized=True
-#     )
-#     ims.append(im)
-#     # ax.set_title(title, fontsize=15)
-
-# # -----------------------------
-# # Colorbar
-# # -----------------------------
-# cbar_ax = fig.add_axes([0.25, 0.01, 0.5, 0.03])  # [left, bottom, width, height]
-# tick_positions = [-0.2, -0.1, 0.0, 0.1, 0.2]
-# cbar = fig.colorbar(ims[0], cax=cbar_ax, orientation='horizontal', ticks=tick_positions, extend='both')
-# cbar.set_label("Growth [mm]", fontsize=14)
-# cbar.ax.tick_params(labelsize=13)
-
-# plt.suptitle("Growth with ROMS - January 2017", fontsize=18, y=0.98)
-# plt.show()
-
 #%% ==== Periods comparison ====
 import matplotlib.colors as mcolors
 def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot='slides'):
@@ -1229,8 +856,6 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
         (data_2010_2019, f"Recent Growth\n{font_size_macro}{{(2010\\,\\textendash\\,2018)}}",norm_main, cmap_var),
         (data_diff, f"Difference\n{font_size_macro}{{(recent\\,\\textendash\\,climatological)}}", norm_diff, cmap_diff),
         ]
-
-
 
     # Plotting data
     scs = []  # List to hold the scatter plot objects for each subplot
