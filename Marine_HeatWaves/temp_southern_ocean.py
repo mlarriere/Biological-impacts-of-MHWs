@@ -97,152 +97,149 @@ date_list = [(doy, (datetime(base_year, 1, 1) + timedelta(days=doy - 1)).strftim
 date_dict = dict(date_list)
 
 
-# %% Exctract Temperature
-def extract_temperature(ieta, period):
+# %% ================== Extract Temperature for different periods ==================
+def extract_temperature_fullcolumn(ieta, period):
     start_time = time.time()
     # ieta =200
     fn = f"{path_temp}{file_var}eta{ieta}.nc"
-    ds = xr.open_dataset(fn)[var][1:, 0:365, :, :]  # Shape: (30, 365, 35, 1442)
-    if period==True: 
-        # Select periods
+    ds = xr.open_dataset(fn)[var][1:, 0:365, 0:35, :]  # Shape: (40, 365, 35, 1442)
+
+    if period == True: 
+        # --- Average over time (full period by 10yrs bin) ---
         ds_clim1 = ds.isel(year=slice(0,10)).mean(dim=('year','day'), skipna=True)
         ds_clim2 = ds.isel(year=slice(10,20)).mean(dim=('year','day'), skipna=True)
         ds_clim3 = ds.isel(year=slice(20,30)).mean(dim=('year','day'), skipna=True)
-        ds_warm = ds.isel(year=slice(30,40)).mean(dim=('year','day'), skipna=True)
+        ds_warm  = ds.isel(year=slice(30,40)).mean(dim=('year','day'), skipna=True)
 
         print(f"Finished eta {ieta} in {time.time() - start_time:.2f}s")
+        return ieta, ds_clim1, ds_clim2, ds_clim3, ds_warm
 
-        return ieta, ds_clim1, ds_clim2, ds_clim3, ds_warm #ds_surf, ds_mid
-    
     else:
-        # Mean temperature in the water column
-        ds_avg = ds.mean(dim='z_rho', skipna=True)
+        # --- Average over time (full period) ---
+        ds_avg = ds.mean(dim=('year', 'day'), skipna=True)
         print(f"Finished eta {ieta} in {time.time() - start_time:.2f}s")
-
         return ieta, ds_avg
 
-# %% Extract temperature for different period
-# Calling function to combine eta -- with process_map
-det_clim1 = np.empty((neta, nz, nxi), dtype=np.float32)
-det_clim2 = np.empty((neta, nz, nxi), dtype=np.float32)
-det_clim3 = np.empty((neta, nz, nxi), dtype=np.float32)
-det_warm = np.empty((neta, nz, nxi), dtype=np.float32)
+
+def create_temp_dataset(data, description):
+    return xr.Dataset(data_vars=dict(temp=(["depth", "eta_rho", "xi_rho"], data)),
+                      coords=dict(
+                          depth=range(nz),
+                          lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),
+                          lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),
+                          ),
+                      attrs=dict(description=description),
+                      )
 
 from functools import partial
-extract_temp_with_period = partial(extract_temperature, period=True)
-for ieta, ds_clim1, ds_clim2, ds_clim3, ds_warm in process_map(extract_temp_with_period, range(neta), max_workers=30, desc="Processing eta"):
-    det_clim1[ieta] = ds_clim1
-    det_clim2[ieta] = ds_clim2
-    det_clim3[ieta] = ds_clim3
-    det_warm[ieta]  = ds_warm
+period = False  # True False
+print(f'Extracting T°C for different periods: {period}')
+extract_temp = partial(extract_temperature_fullcolumn, period=period)
+
+if period:
+    # --- Temperature of the first 100m in the water column (AVERAGE for each 10yrs period) ---
+    det_clim1 = np.empty((neta, nz, nxi), dtype=np.float32)
+    det_clim2 = np.empty((neta, nz, nxi), dtype=np.float32)
+    det_clim3 = np.empty((neta, nz, nxi), dtype=np.float32)
+    det_warm  = np.empty((neta, nz, nxi), dtype=np.float32)
+
+    for ieta, ds_clim1, ds_clim2, ds_clim3, ds_warm in process_map(extract_temp, range(neta), max_workers=30, desc="Processing eta"):
+        det_clim1[ieta] = ds_clim1
+        det_clim2[ieta] = ds_clim2
+        det_clim3[ieta] = ds_clim3
+        det_warm[ieta]  = ds_warm
+        
+    # Flip eta position
+    det_clim1_transposed = det_clim1.transpose(1, 0, 2) #shape (35, 434, 1442)
+    det_clim2_transposed = det_clim2.transpose(1, 0, 2) #shape (35, 434, 1442)
+    det_clim3_transposed = det_clim3.transpose(1, 0, 2) #shape (35, 434, 1442)
+    det_warm_transposed = det_warm.transpose(1, 0, 2)
+
+    # To dataset
+    ds_clim1 = create_temp_dataset(det_clim1_transposed, "Mean temperature - period (1980–1989)")
+    ds_clim2 = create_temp_dataset(det_clim2_transposed, "Mean temperature - period (1990–1999)")
+    ds_clim3 = create_temp_dataset(det_clim3_transposed, "Mean temperature - period (2000–2009)")
+    ds_warm  = create_temp_dataset(det_warm_transposed,  "Mean temperature - period (2010–2019)")
+
+else:
+    # --- Full column average temperature over all years (1980–2019) ---
+    det_avg = np.empty((neta, nz, nxi), dtype=np.float32)
+
+    for ieta, ds_avg in process_map(extract_temp, range(neta), max_workers=30, desc="Processing eta"):
+        det_avg[ieta] = ds_avg # shape (35, 1442)
+
+    # Flip eta dimension
+    det_avg_transposed = det_avg.transpose(1, 0, 2)  # shape: (depth, eta_rho, xi_rho)
+
+    # To dataset
+    ds_avg_temp = create_temp_dataset(det_avg_transposed, "Mean temperature over all years (1980–2019)")
+
+
+# %% ================== Temperature of the first 100m in the water column (NOT TIME AVERAGE) ==================
+def extract_temperature_100m(ieta):
+    start_time = time.time()
+    fn = f"{path_temp}{file_var}eta{ieta}.nc"
+    ds = xr.open_dataset(fn)[var][1:, 0:365, 0:14, :]  # Shape: (40, 365, 14, 1442)
+    
+    # Mean temperature in the first 100m of the water column
+    ds_avg = ds.mean(dim='z_rho', skipna=True)
+    print(f"Finished eta {ieta} in {time.time() - start_time:.2f}s")
+
+    return ieta, ds_avg
+
+det_avg_temp = np.empty((neta, nyears, ndays, nxi), dtype=np.float32)
+for ieta, ds_avg_val in process_map(extract_temperature_100m, range(neta), max_workers=30, desc="Processing eta"):
+    det_avg_temp[ieta] = ds_avg_val #shape (40, 365, 1442)
 
 # Flip eta position
-det_clim1_transposed = det_clim1.transpose(1, 0, 2) #shape (35, 434, 1442)
-det_clim2_transposed = det_clim2.transpose(1, 0, 2) #shape (35, 434, 1442)
-det_clim3_transposed = det_clim3.transpose(1, 0, 2) #shape (35, 434, 1442)
-det_warm_transposed = det_warm.transpose(1, 0, 2)
+det_avg_temp_transposed = det_avg_temp.transpose(1, 2, 0, 3) #shape (40, 365, 434, 1442)
 
 # To dataset
-ds_clim1 = xr.Dataset(
-    data_vars=dict(temp = (["depth", "eta_rho", "xi_rho"], det_clim1_transposed)),
+ds_avg_temp_100m = xr.Dataset(
+    data_vars=dict(temp = (["years", "days", "eta_rho", "xi_rho"], det_avg_temp_transposed)),
     coords=dict(
         years= range(1980, 1980+nyears),
         days= range(0, ndays),
         lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
         lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
         ),
-    attrs=dict(description='Mean temperature - period (1980-1989)'),
+    attrs=dict(description='Averaged temperature over the full water column (5-100m)'),
         ) 
 
-ds_clim2 = xr.Dataset(
-    data_vars=dict(temp = (["depth", "eta_rho", "xi_rho"], det_clim2_transposed)),
-    coords=dict(
-        years= range(1980, 1980+nyears),
-        days= range(0, ndays),
-        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-        ),
-    attrs=dict(description='Mean temperature - period (1990-1999)'),
-        ) 
+# Write to NCDF
+file_path=os.path.join(path_clim, 'avg_temp_watercolumn.nc')
+if not os.path.exists(file_path):
+    ds_avg_temp_100m.to_netcdf(file_path)
+    print(f"Saved: {file_path}")
+else:
+    print(f"File already exists: {file_path}")
 
-ds_clim3 = xr.Dataset(
-    data_vars=dict(temp = (["depth", "eta_rho", "xi_rho"], det_clim3_transposed)),
-    coords=dict(
-        years= range(1980, 1980+nyears),
-        days= range(0, ndays),
-        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-        ),
-    attrs=dict(description='Mean temperature - period (2000-2009)'),
-        ) 
-
-ds_warm = xr.Dataset(
-    data_vars=dict(temp = (["depth", "eta_rho", "xi_rho"], det_warm_transposed)),
-    coords=dict(
-        years= range(1980, 1980+nyears),
-        days= range(0, ndays),
-        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-        ),
-    attrs=dict(description='Mean temperature - period (2010-2019)'),
-        )
-
-#%% === Create Figure with 2 Subplots ===
-# --- Zonal means ---
-# Mean temperature calculation for different latitude bands and datasets
-datasets = {
-    'clim1': ds_clim1,
-    'clim2': ds_clim2,
-    'clim3': ds_clim3,
-    'warm': ds_warm
-}
-
-# Depth levels to select (0 to 13 inclusive)
-# South of 60°S
-mean_temps_south_60 = {}
-for name, ds in datasets.items():
-    mask = ds['lat_rho'] <= -60
-    temp_masked = ds['temp'].where(mask).isel(depth=slice(0, 14))
+#%% ================== Calculate Zonal and Hotspots Mean Temperature ==================
+def compute_zonal_mean(ds, lat_cond, lon_cond=None, depth_range=slice(0, 14)):
+    mask = lat_cond(ds['lat_rho'])
+    if lon_cond is not None:
+        mask = mask & lon_cond(ds['lon_rho'])
+    temp_masked = ds.temp.where(mask).isel(depth=depth_range)
     mean_temp = temp_masked.mean(dim=['eta_rho', 'xi_rho', 'depth'], skipna=True)
-    mean_temps_south_60[name] = mean_temp.item()
+    return mean_temp.item()
 
-overall_mean_south_60 = np.mean(list(mean_temps_south_60.values()))
-print(f"Overall mean temperature south of 60°S: {overall_mean_south_60:.1f}°C")
+if period == False:
+    print("=== Mean temperatures (1980–2019) ===")
 
-# Between 50°S and 60°S
-mean_temps_50_60 = {}
-for name, ds in datasets.items():
-    mask = (ds['lat_rho'] > -60) & (ds['lat_rho'] <= -50)
-    temp_masked = ds['temp'].where(mask).isel(depth=slice(0, 14))
-    mean_temp = temp_masked.mean(dim=['eta_rho', 'xi_rho', 'depth'], skipna=True)
-    mean_temps_50_60[name] = mean_temp.item()
+    temp_south_60 = compute_zonal_mean(ds=ds_avg_temp, lat_cond=lambda lat: lat <= -60)
+    print(f"Southern Ocean - South of 60°S: {temp_south_60:.1f}°C")
 
-overall_mean_50_60 = np.mean(list(mean_temps_50_60.values()))
-print(f"Overall mean temperature between 50°S and 60°S: {overall_mean_50_60:.1f}°C")
+    temp_50_60 = compute_zonal_mean(ds=ds_avg_temp, lat_cond=lambda lat: (lat > -60) & (lat <= -50))
+    print(f"Southern Ocean - Between 50°S and 60°S: {temp_50_60:.1f}°C")
 
-# Hotspots
-mean_temp_hotspot1 = {}
-for name, ds in datasets.items():
-    mask = (ds['lat_rho'] > -65) & (ds['lat_rho'] <= -60) & (ds['lon_rho'] <= 292)  & (ds['lon_rho'] > 240) 
-    temp_masked = ds['temp'].where(mask).isel(depth=slice(0, 14))
-    mean_temp = temp_masked.mean(dim=['eta_rho', 'xi_rho', 'depth'], skipna=True)
-    mean_temp_hotspot1[name] = mean_temp.item()
+    temp_hotspot1 = compute_zonal_mean(ds=ds_avg_temp, lat_cond=lambda lat: (lat > -65) & (lat <= -60), lon_cond=lambda lon: (lon <= 292) & (lon > 240))
+    print(f"Hotspot 1 (60-65°S 240-292°E): {temp_hotspot1:.1f}°C")
 
-overall_mean_hotspot1= np.mean(list(mean_temp_hotspot1.values()))
-print(f"Overall mean temperature hotspot1: {overall_mean_hotspot1:.1f} °C")
-
-mean_temp_hotspot2 = {}
-for name, ds in datasets.items():
-    mask = (ds['lat_rho'] > -65) & (ds['lat_rho'] <= -60) & (ds['lon_rho'] <=195)  & (ds['lon_rho'] > 160) 
-    temp_masked = ds['temp'].where(mask).isel(depth=slice(0, 14))
-    mean_temp = temp_masked.mean(dim=['eta_rho', 'xi_rho', 'depth'], skipna=True)
-    mean_temp_hotspot2[name] = mean_temp.item()
-
-overall_mean_hotspot2= np.mean(list(mean_temp_hotspot2.values()))
-print(f"Overall mean temperature hotspot2: {overall_mean_hotspot2:.1f} °C")
+    temp_hotspot2 = compute_zonal_mean(ds=ds_avg_temp, lat_cond=lambda lat: (lat > -65) & (lat <= -60), lon_cond=lambda lon: (lon <= 195) & (lon > 160))
+    print(f"Hotspot 2 (60-65°S 160-195°E): {temp_hotspot2:.1f}°C")
 
 
-# %%-- plot hotsot region
+# %% ================== Plot Hotspots Regions ==================
 mhw_duration = xr.open_dataset(os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc')))
 lon = mhw_duration['lon_rho'].values % 360
 lat = mhw_duration['lat_rho'].values
@@ -312,15 +309,12 @@ ax.legend(handles=legend_patches, loc='lower left', fontsize=9, frameon=True,
 plt.tight_layout()
 plt.show()
 
-#%%
-zonal1 = ds_clim1.temp.mean(dim='xi_rho')  # 1980–1989
-zonal2 = ds_clim2.temp.mean(dim='xi_rho')  # 1990–1999
-zonal3 = ds_clim3.temp.mean(dim='xi_rho')  # 2000–2009
-zonal4 = ds_warm.temp.mean(dim='xi_rho')   # 2010–2019
-temp_avg_zonal = (zonal1+zonal2+zonal3+zonal4)/4
+#%% ================== Plot Zonal Mean Southern Ocean for introduction ==================
+# --- Load data ---
+temp_avg_zonal = ds_avg_temp.temp.mean(dim='xi_rho')
 
-# --- Coordinates ---
-lat = ds_clim3.lat_rho.mean(dim='xi_rho').values    # (eta_rho,)
+# --- Coordinates for the axis ---
+lat = ds_avg_temp.lat_rho.mean(dim='xi_rho').values    # (eta_rho,)
 depth = xr.open_dataset(f"{path_temp}{file_var}eta200.nc")['temp'][1:, 0:365, :, :].z_rho.values 
 
 # --- Meshgrid for contourf ---
@@ -363,7 +357,8 @@ yticks = np.array([-5, -100, -200, -300, -400, -500])
 ax.set_yticks(yticks)
 ax.set_yticklabels([str(t) for t in yticks])  # shows depth as positive numbers
 
-ax.axvline(x=-60, color='black', linestyle='--', linewidth=0.8, zorder=10)
+ax.axvline(x=-60, color='black', linestyle=':', linewidth=0.8, zorder=10)
+ax.axhline(y=-100, color='black', linestyle=':', linewidth=0.8, zorder=10)
 # ax.tick_params(labelsize=12)
 
 # --- Colorbar ---
@@ -378,28 +373,4 @@ plt.show()
 # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/zonal_avg_temperature.pdf'), dpi =200, format='pdf', bbox_inches='tight')
 
 
-# %% ======== Averaged temperature ========
-# Calling function to combine eta -- with process_map
-det_avg_temp = np.empty((neta, nyears, ndays, nxi), dtype=np.float32)
-
-from functools import partial
-extract_temp_with_period = partial(extract_temperature, period=False)
-for ieta, ds_avg  in process_map(extract_temp_with_period, range(neta), max_workers=30, desc="Processing eta"):
-    det_avg_temp[ieta] = ds_avg
-
-# Flip eta position
-det_avg_temp_transposed = det_avg_temp.transpose(1, 2, 0, 3) #shape (40, 365, 434, 1442)
-
-# To dataset
-ds_avg_temp = xr.Dataset(
-    data_vars=dict(temp = (["years", "days", "eta_rho", "xi_rho"], det_avg_temp_transposed)),
-    coords=dict(
-        years= range(1980, 1980+nyears),
-        days= range(0, ndays),
-        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-        ),
-    attrs=dict(description='Averaged temperature over the full water column (5-100m)'),
-        ) 
-
-ds_avg_temp.to_netcdf(os.path.join(path_clim, 'avg_temp_watercolumn.nc'))
+# %%
