@@ -162,10 +162,79 @@ else:
     # Load data
     growth_redimensioned = xr.open_dataset(file_growth)
 
+# %% ================ Find Temperature associated with maximum Growth ================
+# --- Find maximum growth value
+max_growth_val = growth_redimensioned.growth.max().item()
+
+# --- Get indices of max value
+idx = np.unravel_index(growth_redimensioned.growth.argmax().item(), growth_redimensioned.growth.shape)
+eta_idx, xi_idx, year_idx, day_idx = idx
+
+# --- Extract coordinate values
+year_val = growth_redimensioned.years.values[year_idx]
+day_val  = growth_redimensioned.days.values[day_idx]
+lat = growth_redimensioned.lat_rho[eta_idx, xi_idx].item()
+lon = growth_redimensioned.lon_rho[eta_idx, xi_idx].item()
+
+# --- Associated Temperature and Chla
+associated_temp = temp_avg_100m.avg_temp.sel(years=year_val, days=day_val, eta_rho=eta_idx, xi_rho=xi_idx).item()
+associated_chla = chla_surf.raw_chla.sel(years=year_val, days=day_val, eta_rho=eta_idx, xi_rho=xi_idx).item()
+
+from datetime import datetime, timedelta
+print(f"Max krill growth: {max_growth_val:.4f} mm/day")
+print(f"Temperature at that point: {associated_temp:.4f} °C")
+print(f"Chla at that point: {associated_chla:.4f} mg/m3")
+print(f"🗓️  Date: Year {year_val}, Day {day_val} (≈ {datetime(year_val, 1, 1) + timedelta(days=int(day_val))})")
+print(f"📍 Location: lat {lat:.2f}, lon {lon:.2f}")
+
+
+
+# %% ================ Find Temperature associated with maximum Growth under different Chla scenari ================
+# --- Thresholds for high and low CHLA
+mean_chla = chla_surf.raw_chla.mean(dim=('years', 'days', 'eta_rho', 'xi_rho'), skipna=True) #0.36076314 mg/m3
+high_chla_thresh = 3.5
+low_chla_thresh = 0.15
+
+# --- Create masks - shape (40, 365, 231, 1442)
+mean_chla_mask = (chla_surf.raw_chla >= (mean_chla - 0.01)) & (chla_surf.raw_chla <= (mean_chla + 0.01)) #±0.01 of the mean
+high_chla_mask = chla_surf.raw_chla >= high_chla_thresh #shape (40, 365, 231, 1442)
+low_chla_mask  = chla_surf.raw_chla <= low_chla_thresh
+
+# --- Reshape maks to align with growth - shape (231, 1442, 40, 365)
+high_chla_mask = high_chla_mask.transpose('eta_rho', 'xi_rho', 'years', 'days')
+low_chla_mask = low_chla_mask.transpose('eta_rho', 'xi_rho', 'years', 'days')
+mean_chla_mask = mean_chla_mask.transpose('eta_rho', 'xi_rho', 'years', 'days')
+
+# --- Apply masks to growth
+growth_high_chla = growth_redimensioned.growth.where(high_chla_mask)
+growth_low_chla  = growth_redimensioned.growth.where(low_chla_mask)
+growth_mean_chla  = growth_redimensioned.growth.where(mean_chla_mask)
+
+# --- Max growth in each case
+max_growth_high = growth_high_chla.max().item()
+max_growth_low  = growth_low_chla.max().item()
+max_growth_mean  = growth_mean_chla.max().item()
+
+# --- Retrieve Temperature associated to max growth under such chla conditions
+def extract_info(growth_masked, chla_thresh):
+    idx = np.unravel_index(growth_masked.argmax().item(), growth_masked.shape)
+    eta_idx, xi_idx, year_idx, day_idx = idx
+
+    temp_val = temp_avg_100m.avg_temp.isel(years=year_idx, days=day_idx, eta_rho=eta_idx, xi_rho=xi_idx).item()
+
+    print(f"Under scenario of {chla_thresh:.4f} mg/m3 chla")
+    print(f"Max krill growth {growth_masked.max().item():.4f} mm/day")
+    print(f"Temperature: {temp_val:.4f} °C")
+    print()
+
+extract_info(growth_high_chla, high_chla_thresh)
+extract_info(growth_low_chla, low_chla_thresh)
+extract_info(growth_mean_chla, mean_chla.values.item())
+
+
 #%% ================ Select year of interest ================
 target_start_year = 2018  #1980 #2000 #2010 #2018
 target_end_year = target_start_year + 1
-
 
 # %% ======================== Climatological growth (1980-2009) for 1 location ========================
 # Seletina location and the climalotogical period
@@ -577,9 +646,10 @@ num_days = 365
 start_day = 180  # July 1 (0-based index)
 
 # --- Select year and day ---
+from datetime import date
 year = 2018
 day = 14  # 0-based index → Jan 15
-plot_date = datetime.date(int(year), 1, 15)
+plot_date = date(year, 1, 15)
 
 chla_slice = chla_surf.raw_chla.sel(years=year).isel(days=day) # Extract data
 lon = chla_surf.lon_rho
