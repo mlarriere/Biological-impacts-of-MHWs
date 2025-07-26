@@ -309,10 +309,26 @@ clim_value_center = selected_clim_sst_100m.sel(xi_rho=choice_xi).isel(day=center
 thresh_value_center = xr.open_dataset(output_path_clim +  'thresh_90perc_'+ str(choice_eta)+ '.nc')['relative_threshold'].isel(xi_rho=choice_xi, day=center_day, z_rho=0).values
 
 # --- Plot ---
-fig_width = 6.3228348611  # inches = \textwidth
-fig_height = fig_width / 2  # Or set manually if you prefer
-fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-# fig, ax = plt.subplots(figsize=(10, 5))
+plot = 'slides' # report slides
+# --- Layout Setup ---
+if plot == 'report':
+    fig_width = 6.3228348611  # half textwidth in inches
+    fig_height = fig_width / 2
+    fig = plt.figure(figsize=(fig_width, fig_height))
+else:  # slides
+    fig_width = 10
+    fig_height = 5
+    fig = plt.figure(figsize=(fig_width, fig_height))
+
+ax = fig.add_subplot(1, 1, 1)
+
+# --- Font size settings ---
+maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {}
+subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
+ticklabelsize = 13 if plot == 'slides' else 9
+
 # Plot SST
 for i in range(30):
     ax.plot(selected_temp_surf.isel(year=i)['day'], selected_temp_surf.isel(year=i), color= cmap(norm(i)))
@@ -321,14 +337,20 @@ for i in range(30):
 ax.axvspan(window_start, window_end, color='#98C4D7', alpha=0.3, label='11day window')
 
 # Horizontal lines representing "median" and "90th percentile threshold"
-ax.plot(np.arange(window_start, window_end+1), clim_to_plot, color='#3A6EA5', linestyle='--', linewidth = 1, label='median clim')
-ax.plot(np.arange(window_start, window_end+1), thresh_to_plot, color='black', linestyle='-', linewidth = 1, label='90th perc')
-ax.scatter(center_day, clim_value_center, color='#3A6EA5', edgecolor='white', zorder=5, s=50)#, label='Climatology (median)')
-ax.scatter(center_day, thresh_value_center, color='black', edgecolor='white', zorder=5, s=50)#, label='Rel. Thresh (90th perc)')
+# ax.plot(np.arange(window_start, window_end+1), clim_to_plot, color='#3A6EA5', linestyle='--', linewidth = 1)
+# ax.plot(np.arange(window_start, window_end+1), thresh_to_plot, color='black', linestyle='-', linewidth = 1)
+if plot=='report':
+    label1='Climatology'
+    label2='Rel. Thresh'
+else:
+    label1='Climatology (median)'
+    label2='Rel. Thresh (90th perc)'
+ax.scatter(center_day, clim_value_center, color='#3A6EA5', edgecolor='white', zorder=5, s=50, label=label1)
+ax.scatter(center_day, thresh_value_center, color='black', edgecolor='white', zorder=5, s=50, label=label2)
 
-ax.set_xlabel(r'Day of the Year')
-ax.set_ylabel(r'Temperature [$^\circ$C]')
-ax.set_title('Illustration of 11days moving window calculation')#\nLocation: ({round(lat)}°S, {round(lon)}°E)')
+ax.set_xlabel(r'Day of the Year', **label_kwargs)
+ax.set_ylabel(r'Temperature [$^\circ$C]', **label_kwargs)
+ax.set_title('Illustration of 11days moving window calculation',  **maintitle_kwargs)#\nLocation: ({round(lat)}°S, {round(lon)}°E)')
 ax.set_xlim(center_day - 20, center_day +20)
 ax.set_ylim(-1,5)
 
@@ -357,7 +379,8 @@ for tick in tick_positions:
     else:
         tick_labels.append(str(int(tick)))
 
-ax.set_xticklabels(tick_labels, fontsize=11)  # Set the corresponding labels
+ax.set_xticks(tick_positions)
+ax.set_xticklabels(tick_labels, fontsize=ticklabelsize)
 
 # Highlight the specific ticks in red
 for i, tick in enumerate(tick_positions):
@@ -371,14 +394,110 @@ month_days = {
 }
 month_days_filtered = {month: day for month, day in month_days.items() if center_day - 20 <= day <= center_day + 20}
 for month, day in month_days_filtered.items():
-    ax.axvline(day, color='#014F86', linestyle='--', alpha=0.9)
-    ax.text(day-0.4, ax.get_ylim()[1]-1.05, month, rotation=90, verticalalignment='bottom', horizontalalignment='center', color='#014F86')
+    ax.axvline(day, color='#014F86', linestyle='--', alpha=0.9, linewidth=2 if plot == 'slides' else 1)
+    ax.text(day-0.4, ax.get_ylim()[1]-1.05, month, rotation=90, verticalalignment='bottom', horizontalalignment='center', color='#014F86',   **legend_kwargs)
 
-# ax.legend(loc='lower left', bbox_to_anchor=(0.18, 0.85), ncol=3)
-ax.legend(loc='lower left', bbox_to_anchor=(0.135, 0.03))
-plt.tight_layout()
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/11days_window_illustration.pdf'), format='pdf', bbox_inches='tight') #image vectorielle
+if plot=='report':
+    box_legend = (0.117, 0.03)
+    ncol=1
+else:
+    box_legend = (0.1, -0.25)
+    ncol=3
+
+ax.legend(loc='lower left', bbox_to_anchor=box_legend, ncol=ncol,  **legend_kwargs)
+
+# --- Output handling ---
+if plot == 'report':
+    plt.tight_layout()
+    outdir = os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/climatology and 90th percentile')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"11days_window_illustration_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/climatology and 90th percentile/11days_window_illustration_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+
+# %% Illustrtion 
+# --- Plot ---
+plot = 'report' # report slides
+# --- Layout Setup ---
+if plot == 'report':
+    fig_width = 6.3228348611  # half textwidth in inches
+    fig_height = fig_width / 2
+    fig = plt.figure(figsize=(fig_width, fig_height))
+else:  # slides
+    fig_width = 10
+    fig_height = 5
+    fig = plt.figure(figsize=(fig_width, fig_height))
+
+ax = fig.add_subplot(1, 1, 1)
+
+# --- Font size settings ---
+maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {}
+subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
+ticklabelsize = 13 if plot == 'slides' else 9
+
+# --- Data Setup ---
+np.random.seed(42)
+days = np.arange(1, 70)
+climatology = 2 + np.sin(3 * np.pi * (days - 1) / 365)
+threshold = climatology + 0.75
+
+# Start with climatology + noise
+temperature = climatology + np.random.normal(0, 0.3, size=len(days))
+
+# --- Heat Events ---
+temperature[10:13] = threshold[10:13] + np.random.uniform(0.1, 0.4, size=3) # Short heat spike: 3 days, above threshold
+temperature[40:47] = threshold[40:47] + np.random.uniform(0.1, 0.5, size=7) # MHW: 7 days ≥ threshold with varying values
+
+# Climatology and threshold
+lw = 1 if plot == 'slides' else 1
+ax.plot(days, climatology, color='#3A6EA5', label='Climatology', linewidth=lw)
+ax.plot(days, threshold, color='black', linestyle='--', label='Relative Threshold', linewidth=lw)
+
+# Temperature time series
+ax.plot(days, temperature, color='#DC2F02', linewidth=lw, label='Daily Temperature')
+
+
+# --- Formatting ---
+ax.set_xlabel('Day of Year', **label_kwargs)
+ax.set_ylabel('Temperature [°C]', **label_kwargs)
+ax.set_title('Schematic to define a Marine HeatWave (MHW)', **label_kwargs)
+ax.set_xlim(0, 70)
+ax.set_ylim(1.5, 4.5)
+# ax.tick_params(labelsize=ticklabelsize)
+ax.tick_params(axis='both', direction='in', labelsize=ticklabelsize)
+ax.set_xticklabels([])  # Remove x-axis tick labels
+ax.set_yticklabels([])  # Remove y-axis tick labels
+ax.grid(True, linestyle=':', alpha=0.4)
+if plot == 'report':
+    ax.legend(loc='upper center',
+              bbox_to_anchor=(0.5, -0.15),
+              ncol=3,
+              frameon=True,
+              columnspacing=1.5,
+              handletextpad=0.5,
+              **legend_kwargs)
+else:
+    ax.legend(loc='upper left', frameon=True, **legend_kwargs)
+
+
+# --- Output handling ---
+if plot == 'report':
+    plt.tight_layout()
+    outdir = os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/climatology and 90th percentile')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"MHW_schematic_{plot}.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/climatology and 90th percentile/MHW_schematic_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
 
 
 
@@ -403,11 +522,12 @@ ax.set_xlabel('Day of the Year')
 ax.set_ylabel('SST (°C)')
 ax.set_title(f'Example of SST and relative threshold\nLocation: ({round(ds_yr_example.lat_rho.values.item())}°S, {round(ds_yr_example.lon_rho.values.item())}°E) in {ds_yr_example.year.values}')
 # ax.set_ylim(0, 4.2)
+# ax.set_xlim(250,350)
 ax.legend(loc='upper right', fontsize=10, bbox_to_anchor = (1, 1))
 plt.tight_layout()
-# plt.show()
+plt.show()
 
-plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/climatology and 90th percentile/example_SST_90thperc.pdf'), format='pdf', bbox_inches='tight') #image vectorielle
+# plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/climatology and 90th percentile/example_SST_90thperc.pdf'), format='pdf', bbox_inches='tight') #image vectorielle
 
 # %% --- Climatology map
 fn = output_path_clim +  'climSST_surf.nc' #dim: (days: 365, z_rho: 35, eta_rho: 434, xi_rho: 1442)
@@ -508,5 +628,49 @@ plt.ylim(-505, 1)
 plt.tight_layout()
 # plt.show()
 plt.savefig(os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/climatology and 90th percentile/example_temp_profile.pdf'), format='pdf', bbox_inches='tight') #image vectorielle
+
+# %%
+import pandas as pd
+
+# --- Load temperature data
+temp_daily = xr.open_dataset(path_mhw + file_var + 'eta' + str(200) + '.nc')[var][1:, 0:365, 0, 1000]  # shape: (40, 365)
+
+# Flatten temp to 1D: (14600,)
+temp_flat = temp_daily.values.reshape(-1)
+
+# --- Load threshold: shape (365,) → tile to match temp
+rel_thresh = xr.open_dataset('/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/threshold_90perc_surf.nc')['relative_threshold'][:, 200, 1000].values
+thresh_tiled = np.tile(rel_thresh, 40)  # (365,) → (14600,)
+
+# --- Build datetime index
+start_year = temp_daily['year'].values[0]
+dates = pd.date_range(start=f"{start_year}-01-01", periods=14600, freq='D')
+
+# --- Create mask
+mask_above_thresh = temp_flat > thresh_tiled
+
+# --- Plot
+plt.figure(figsize=(13, 4))
+plt.plot(dates, temp_flat, color='black', linewidth=0.5, label='Daily Temp')
+
+# Highlight temps > threshold in red
+plt.scatter(dates[mask_above_thresh], temp_flat[mask_above_thresh], color='red', s=1, label='Above 90th Percentile')
+
+# Threshold line
+plt.plot(dates, thresh_tiled, color='purple', linestyle='-', linewidth=0.8, label='90th Percentile Threshold')
+
+# Title and axis labels
+plt.title("Daily Temperature Time Series (Surface) at (eta=200, xi=1000)")
+plt.xlabel("Time")
+plt.ylabel("Temperature (°C)")
+
+# Show only 2014–2019
+plt.xlim(pd.Timestamp("2014-01-01"), pd.Timestamp("2019-12-31"))
+
+# Legend and grid
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 # %%
