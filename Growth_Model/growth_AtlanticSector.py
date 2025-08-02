@@ -100,7 +100,6 @@ date_dict = dict(date_list)
 # MHW durations
 mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
 det_combined_ds = xr.open_dataset(os.path.join(path_combined_thesh, 'det_depth5m.nc')) #boolean shape (40, 181, 434, 1442)
-
 mhw_duration_seasonal = xr.open_dataset(os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc')))
 
 #%% ======================== Select extent (Atlantic Sector) ========================
@@ -541,7 +540,7 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
-# %% INPUTS growth calculation
+# %%  ======================== INPUTS growth calculation ========================
 # Year of interest
 yr_chosen=2
 year_index = selected_years_idx[yr_chosen] 
@@ -561,6 +560,49 @@ chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) #select
 chla_surf_study_area_1season = chla_surf_study_area_allyrs.isel(years=year_index) #select temporal extent for 1 year of interest -- shape (181, 231, 360)
 chla_surf_SO_1season = chla_surf_SO_allyrs.isel(years=year_index) #select temporal extent for 1 year of interest for Southern Ocean -- shape (181, 231, 1442)
 chla_surf_study_area_allyrs_mean = chla_surf_study_area_allyrs.mean(dim='years')  #shape (181, 231, 360)
+
+#%% ======================== Filter eta, xi where chla and temp are valid ========================
+# def filter_valid_yearly_pixels(data):
+#     """
+#     Keep only (eta, xi) pixels that are valid for all days in each year.
+#     """
+#     # 1. Mask for all-day validity per year
+#     valid_mask = ~np.isnan(data)                         # shape: (years, days, eta, xi)
+#     valid_etas_xis = valid_mask.all(dim='days')          # shape: (years, eta, xi)
+#     valid_broadcasted = valid_etas_xis.broadcast_like(data)
+#     data_valid = data.where(valid_broadcasted)
+
+#     return data_valid
+
+
+# # --- Atlantic sector only
+# temp_atl_valid= filter_valid_yearly_pixels(temp_avg_100m_study_area_allyrs)
+# chla_atl_valid= filter_valid_yearly_pixels(chla_surf_study_area_allyrs)
+
+
+# # 1: Mask where chla is valid (not NaN)
+# chla_valid_mask = ~np.isnan(chla_surf_study_area_allyrs['chla'])  # shape: (39, 181, 231, 360)
+
+# # 2. For each year, find (eta, xi) where all 181 days are valid 
+# valid_etas_xis = chla_valid_mask.all(dim='days') #shape: (39, 231, 360)
+
+# # 3. 
+# valid_mask_broadcasted = valid_etas_xis.broadcast_like(chla_surf_study_area_allyrs['chla'])
+# chla_atl_valid = chla_surf_study_area_allyrs['chla'].where(valid_mask_broadcasted)
+
+
+# # 1: Mask where chla is valid (not NaN)
+# temp_valid_mask = ~np.isnan(temp_avg_100m_study_area_allyrs['avg_temp'])  # shape: (39, 181, 231, 360)
+
+# # 2. For each year, find (eta, xi) where all 181 days are valid 
+# valid_etas_xis = temp_valid_mask.all(dim='days') #shape: (39, 231, 360)
+
+# # 3. 
+# valid_mask_broadcasted = valid_etas_xis.broadcast_like(temp_avg_100m_study_area_allyrs['avg_temp'])
+# temp_atl_valid = temp_avg_100m_study_area_allyrs['avg_temp'].where(valid_mask_broadcasted)
+
+
+
 
 #%% ============== Equation decomposition ==============
 def decompose_growth(chla, temp, length=35):
@@ -678,7 +720,6 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/Atkison_decomp_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
-
 #%% ============== Plot drivers ============== 
 temp_mean_ts = temp_avg_100m_study_area_1season['avg_temp'].mean(dim=['eta_rho', 'xi_rho'])
 chla_mean_ts = chla_surf_study_area_1season['chla'].mean(dim=['eta_rho', 'xi_rho'])
@@ -761,8 +802,7 @@ if plot == 'report':
 else:    
     outfile = f"drivers_{selected_years[yr_chosen]}_{plot}.png"
     # plt.savefig(os.path.join(outdir, outfile), dpi=500, format='png', bbox_inches='tight')
-    plt.show()
-    
+    plt.show()    
 
 
 # %% ---- Valid Chla data
@@ -798,7 +838,7 @@ ax_all.legend(fontsize=12, loc='upper left')
 plt.show()
 
 #%% ============== Chla and Temperature under MHWs and NON MHWs ==============
-spatial_average = True  # Set to False for gridded output
+spatial_average = False #True  # Set to False for gridded output
 
 # File suffix
 suffix = '_ts' if spatial_average else ''
@@ -831,12 +871,12 @@ if not (os.path.exists(temp_mhw_file) and os.path.exists(temp_non_mhw_file) and
         mhw_mask = duration_mask & det_mask
         mhw_mask_study_area = subset_spatial_domain(mhw_mask)
 
-        print(f"{var} coverage (sum of True pixels):", mhw_mask_study_area.isel(years=year_index).sum().values)
+        # print(f"{var} coverage (sum of True pixels):", mhw_mask_study_area.isel(years=year_index).sum().values)
 
         mhw_mask_year20 = mhw_mask_study_area.isel(years=year_index)
         mhw_days_sum = mhw_mask_year20.sum(dim=['eta_rho', 'xi_rho'])
         mhw_days = mhw_days_sum.where(mhw_days_sum > 0, drop=True)
-        print("Days in Atlantic Sector with MHW in year 2000:", mhw_days['days'].values)
+        # print("Days in Atlantic Sector with MHW in year 2000:", mhw_days['days'].values)
 
         mhw_mask_clean = mhw_mask_study_area.drop_vars('days').rename({'days_of_yr': 'days'})
 
@@ -915,6 +955,13 @@ else:
     temp_non_mhw = xr.open_dataset(temp_non_mhw_file)
     chla_non_mhw = xr.open_dataset(chla_non_mhw_file)
 
+    # --- Filter valid (eta, xi)
+    # temp_mhw_atl_valid= filter_valid_yearly_pixels(temp_mhw)
+    # chla_mhw_atl_valid= filter_valid_yearly_pixels(chla_mhw)
+    # temp_non_mhw_atl_valid= filter_valid_yearly_pixels(temp_non_mhw)
+    # chla_non_mhw_atl_valid= filter_valid_yearly_pixels(chla_non_mhw)
+
+
 # Selecting temporal extent for 1 year of interest -- shape (181, 231, 360)
 temp_mhw_study_area_1season = temp_mhw.isel(years=year_index) 
 chla_mhw_study_area_1season = chla_mhw.isel(years=year_index) 
@@ -925,21 +972,43 @@ chla_non_mhw_study_area_1season = chla_non_mhw.isel(years=year_index)
 # %% ============== Calculating length ==============
 # Funtion to simulate daily growth based on CHLA, temperature, and initial length
 from Growth_Model.growth_model import length_Atkison2006  
+from Growth_Model.growth_model import growth_Atkison2006  
+
 
 # == Length Southern Ocean
 # simulated_length_full_SO = length_Atkison2006(chla=chla_surf_1season_SO.raw_chla, temp=temp_avg_100m_1season_SO.avg_temp, initial_length= 35, intermoult_period=10)
 # mean_length_area_SO = simulated_length_full_SO.mean(dim=["eta_rho", "xi_rho"])
 
-# == Length Atlantic Sector 1980-2019
-simulated_length_study_area_1980_2019 = length_Atkison2006(chla=chla_surf_study_area_allyrs_mean.chla, temp=temp_avg_100m_study_area_allyrs_mean.avg_temp, initial_length= 35, intermoult_period=10)
-mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.mean(dim=["eta_rho", "xi_rho"])
-std_length_mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.std(dim=["eta_rho", "xi_rho"])
+# == Length Atlantic Sector for all years
+lengths_masked = []
+
+for yr in range(39):
+    chla = chla_surf_study_area_allyrs.chla.isel(years=yr)
+    temp = temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr)
+
+    sim = length_Atkison2006(chla=chla, temp=temp, initial_length=35, intermoult_period=10)
+
+    # Compute mask for pixels where length changed during the season
+    growth_mask = sim.max('days') > sim.min('days')
+
+    # Apply mask before appending
+    masked = sim.where(growth_mask)
+    lengths_masked.append(masked)
+
+# Combine and assign years
+simulated_length_study_area_1980_2019 = xr.concat(lengths_masked, dim='years')
+simulated_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.assign_coords(years=chla_surf_study_area_allyrs['years'])
+
+# Now compute stats **only where growth occurred**
+mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.mean(dim=["eta_rho", "xi_rho", "years"], skipna=True)
+std_length_mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.std(dim=["eta_rho", "xi_rho", "years"], skipna=True)
+
 
 # == Length Atlantic Sector for 1 season of interest
-simulated_length_study_area_1season = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, initial_length= 35, intermoult_period=10)
-mean_length_area_study_area_1season = simulated_length_study_area_1season.mean(dim=["eta_rho", "xi_rho"])
+# simulated_length_study_area_1season = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, initial_length= 35, intermoult_period=10)
+# mean_length_area_study_area_1season = simulated_length_study_area_1season.mean(dim=["eta_rho", "xi_rho"])
 
-spatial_average = True  # Set to False for gridded output
+spatial_average = False #True  # Set to False for gridded output
 
 if spatial_average:
     # == Length Non MHWS Atlantic Sector for 1 season of interest
@@ -954,20 +1023,27 @@ if spatial_average:
 else:
     # == Length Non MHWS Atlantic Sector for 1 season of interest
     simulated_length_study_area_non_MHWs = length_Atkison2006(chla=chla_non_mhw_study_area_1season.chla_nonmhw, temp=temp_non_mhw_study_area_1season.temp_nonmhw, initial_length= 35, intermoult_period=10)
-    mean_length_study_area_non_MHWs = simulated_length_study_area_non_MHWs.mean(dim=["eta_rho", "xi_rho"])
+    growth_pixels = simulated_length_study_area_non_MHWs.max(dim='days') > simulated_length_study_area_non_MHWs.min(dim='days') # Only pixel where growth happened, ie. MHWs
+    mean_length_study_area_non_MHWs = simulated_length_study_area_non_MHWs.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
 
     # == Length MHWS Atlantic Sector for 1 season of interest
     simulated_length_study_area_MHWs_1deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_1deg, temp=temp_mhw_study_area_1season.temp_1deg, initial_length= 35, intermoult_period=10)
-    average_length_ts_1deg = simulated_length_study_area_MHWs_1deg.mean(dim={'eta_rho','xi_rho'}, skipna=True)  # mean over cells, result shape: (time,)
+    growth_pixels = simulated_length_study_area_MHWs_1deg.max(dim='days') > simulated_length_study_area_MHWs_1deg.min(dim='days') # Only pixel where growth happened, ie. MHWs
+    average_length_ts_1deg = simulated_length_study_area_MHWs_1deg.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
 
     simulated_length_study_area_MHWs_2deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_2deg, temp=temp_mhw_study_area_1season.temp_2deg, initial_length= 35, intermoult_period=10)
-    average_length_ts_2deg = simulated_length_study_area_MHWs_2deg.mean(dim={'eta_rho','xi_rho'}, skipna=True)  # mean over cells, result shape: (time,)
+    growth_pixels = simulated_length_study_area_MHWs_2deg.max(dim='days') > simulated_length_study_area_MHWs_2deg.min(dim='days') # Only pixel where growth happened, ie. MHWs
+    average_length_ts_2deg = simulated_length_study_area_MHWs_2deg.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
 
     simulated_length_study_area_MHWs_3deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_3deg, temp=temp_mhw_study_area_1season.temp_3deg, initial_length= 35, intermoult_period=10)
-    average_length_ts_3deg = simulated_length_study_area_MHWs_3deg.mean(dim={'eta_rho','xi_rho'}, skipna=True) # mean over cells, result shape: (time,)
+    # average_length_ts_3deg = simulated_length_study_area_MHWs_3deg.mean(dim={'eta_rho','xi_rho'}, skipna=True) # mean over cells, result shape: (time,)
+    growth_pixels = simulated_length_study_area_MHWs_3deg.max(dim='days') > simulated_length_study_area_MHWs_3deg.min(dim='days') # Only pixel where growth happened, ie. MHWs
+    average_length_ts_3deg = simulated_length_study_area_MHWs_3deg.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
 
     simulated_length_study_area_MHWs_4deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_4deg, temp=temp_mhw_study_area_1season.temp_4deg, initial_length= 35, intermoult_period=10)
-    average_length_ts_4deg = simulated_length_study_area_MHWs_4deg.mean(dim={'eta_rho','xi_rho'}, skipna=True)  # mean over cells, result shape: (time,)
+    # average_length_ts_4deg = simulated_length_study_area_MHWs_4deg.mean(dim={'eta_rho','xi_rho'}, skipna=True)  # mean over cells, result shape: (time,)
+    growth_pixels = simulated_length_study_area_MHWs_4deg.max(dim='days') > simulated_length_study_area_MHWs_4deg.min(dim='days') # Only pixel where growth happened, ie. MHWs
+    average_length_ts_4deg = simulated_length_study_area_MHWs_4deg.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
 
 # %% ============== Plotting length over 1 season ==============
 # Define colors and labels
@@ -1051,7 +1127,7 @@ fig.suptitle(
     y=suptitle_y
 )
 
-ax.set_title(f"Austral Summer {selected_years[yr_chosen]}–{selected_years[yr_chosen]+1}", **subtitle_kwargs)
+ax.set_title(f"Growth Season {selected_years[yr_chosen]}–{selected_years[yr_chosen]+1}", **subtitle_kwargs)
 
 
 # --- Output handling ---    
