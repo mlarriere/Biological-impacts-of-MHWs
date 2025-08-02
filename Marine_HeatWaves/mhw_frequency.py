@@ -249,28 +249,122 @@ else:
 
 # %% ======================== Compute Number of days under MHWs ========================
 # -- Write or load data
-nb_days_file_FULL = os.path.join(os.path.join(path_det, 'nb_days_underMHWs_5mFULL.nc'))
+mean_nb_days_file_FULL = os.path.join(os.path.join(path_det, 'mean_nb_days_underMHWs_5mFULL.nc')) #used after
+nb_days_file_FULL = os.path.join(os.path.join(path_det, 'nb_days_underMHWs_5mFULL.nc')) #used for the weighting of length trajectories
 
 if not os.path.exists(nb_days_file_FULL):
 
     # MHWs - UNION between duration (representing "extended" relative threshold) AND absolute extended thresholds
-    mhw1deg = ds_duration_thresh_FULLyear['det_1deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
+    mhw1deg = ds_duration_thresh_FULLyear['det_1deg'].where(ds_duration_thresh_FULLyear['duration']!=0) # shape - (years, days, eta, xi)
     mhw2deg = ds_duration_thresh_FULLyear['det_2deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
     mhw3deg = ds_duration_thresh_FULLyear['det_3deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
     mhw4deg = ds_duration_thresh_FULLyear['det_4deg'].where(ds_duration_thresh_FULLyear['duration']!=0)
+    non_mhw = ds_duration_thresh_FULLyear['det_1deg'].where(ds_duration_thresh_FULLyear['duration']==0)
 
-    # Number of MHWs days for each year
-    mhw_days_1deg = mhw1deg.sum(dim='days') #max: 365 days -- mean ~2.91402844days
-    # mhw_days_1deg_BEFORE = ds_mhw_duration['det_1deg'].sum(dim='days') #max: 365 days -- mean ~16.78351751days
-    mhw_days_2deg = mhw2deg.sum(dim='days') #max: 365 days
-    mhw_days_3deg = mhw3deg.sum(dim='days') #max: 360 days
-    mhw_days_4deg = mhw4deg.sum(dim='days') #max: 326 days
+    # -- Selecting Growth Season
+    def extract_one_season_pair(args):
+        ds_y, ds_y1, y = args
+        try:
+            # Slice data
+            days_nov_dec = ds_y.sel(days=slice(304, 365))
+            days_jan_apr = ds_y1.sel(days=slice(0, 120))
+            # Combine into 1 season
+            combined_days = np.concatenate([days_nov_dec['days'].values, days_jan_apr['days'].values])
+            season = xr.concat([days_nov_dec, days_jan_apr], dim=xr.DataArray(combined_days, dims="days", name="days"))
+            season = season.expand_dims(season_year=[y])
+            return season
+        except Exception as e:
+            print(f"Skipping year {y}: {e}")
+            return None
+    
+    def define_season_all_years_parallel(ds, max_workers=10):
+        # Keep only years where both y and y+1 exist --  exclude 2019 (nov-dec) 
+        all_years = ds['years'].values
+        all_years = [int(y) for y in all_years if (y + 1) in all_years]
 
-    # Number of MHWs days per year
+        # Pre-slice only needed years
+        ds_by_year = {int(y): ds.sel(years=y) for y in all_years + [all_years[-1] + 1]}
+
+        # Extract / Define season by calling previous function
+        args = [(ds_by_year[y], ds_by_year[y + 1], y) for y in all_years]
+        season_list = process_map(extract_one_season_pair, args, max_workers=max_workers, chunksize=1)
+
+        # Store results
+        season_list = [s for s in season_list if s is not None]
+        if not season_list:
+            raise ValueError("No valid seasons found.")
+        return xr.concat(season_list, dim="season_year", combine_attrs="override")
+
+   
+    mhw1deg_season = define_season_all_years_parallel(mhw1deg) #shape: (39, 181, 231, 1442)
+    mhw1deg_season = mhw1deg_season.rename({'season_year': 'season_year_2'})
+    mhw1deg_season = mhw1deg_season.drop_vars('years')
+    mhw1deg_season = mhw1deg_season.rename({'season_year_2': 'years'})
+    mhw1deg_season['years'] = np.arange(1980, 2019)  
+    
+    mhw2deg_season = define_season_all_years_parallel(mhw2deg) 
+    mhw2deg_season = mhw2deg_season.rename({'season_year': 'season_year_2'})
+    mhw2deg_season = mhw2deg_season.drop_vars('years')
+    mhw2deg_season = mhw2deg_season.rename({'season_year_2': 'years'})
+    mhw2deg_season['years'] = np.arange(1980, 2019)  
+    
+    mhw3deg_season = define_season_all_years_parallel(mhw3deg) 
+    mhw3deg_season = mhw3deg_season.rename({'season_year': 'season_year_2'})
+    mhw3deg_season = mhw3deg_season.drop_vars('years')
+    mhw3deg_season = mhw3deg_season.rename({'season_year_2': 'years'})
+    mhw3deg_season['years'] = np.arange(1980, 2019)  
+    
+    mhw4deg_season = define_season_all_years_parallel(mhw4deg) 
+    mhw4deg_season = mhw4deg_season.rename({'season_year': 'season_year_2'})
+    mhw4deg_season = mhw4deg_season.drop_vars('years')
+    mhw4deg_season = mhw4deg_season.rename({'season_year_2': 'years'})
+    mhw4deg_season['years'] = np.arange(1980, 2019)  
+    
+    non_mhw_season = define_season_all_years_parallel(non_mhw) 
+    non_mhw_season = non_mhw_season.rename({'season_year': 'season_year_2'})
+    non_mhw_season = non_mhw_season.drop_vars('years')
+    non_mhw_season = non_mhw_season.rename({'season_year_2': 'years'})
+    non_mhw_season['years'] = np.arange(1980, 2019)  
+    
+    # --- Number of MHWs days for each year -- shape (years, eta, xi)
+    mhw_days_1deg_season = mhw1deg_season.sum(dim='days', skipna=True)  #max: 181 days -- mean ~2.08 days
+    mhw_days_2deg_season = mhw2deg_season.sum(dim='days', skipna=True)  #max: 181 days -- mean ~0.97 days
+    mhw_days_3deg_season = mhw3deg_season.sum(dim='days', skipna=True)  #max: 181 days -- mean ~0.507 days
+    mhw_days_4deg_season = mhw4deg_season.sum(dim='days', skipna=True)  #max: 181 days -- mean ~0.258 days
+    non_mhw_days_season = non_mhw_season.sum(dim='days', skipna=True)  #max: 181 days -- mean ~9.91 days
+
+    # To dataset
+    ds_mhw_nb_days_season = xr.Dataset(
+            data_vars=dict(nb_days_1deg = (["years", "eta_rho" ,"xi_rho"], mhw_days_1deg_season.data), #shape (39, 231, 1442)
+                           nb_days_2deg = (["years", "eta_rho" ,"xi_rho"], mhw_days_2deg_season.data),
+                           nb_days_3deg = (["years", "eta_rho" ,"xi_rho"], mhw_days_3deg_season.data),
+                           nb_days_4deg = (["years", "eta_rho" ,"xi_rho"], mhw_days_4deg_season.data),
+                           nb_days_non_mhw = (["years", "eta_rho" ,"xi_rho"], non_mhw_days_season.data)),
+            coords=dict(
+                lon_rho=(["eta_rho", "xi_rho"], ds_duration_thresh_FULLyear.lon_rho.values), #(434, 1442)
+                lat_rho=(["eta_rho", "xi_rho"], ds_duration_thresh_FULLyear.lat_rho.values), #(434, 1442)
+                years = np.arange(1980, 2019)
+                ),
+            attrs = {"depth": "5m",
+                     "nb_days_ideg":"Number of days under MHW exposure of intensity i°C",
+                     "nb_days_non_mhw": "Number of days under no MHWs",
+                     "time window" : "Growth season (181 days)"
+                     }                
+                )
+    
+    # --- Number of MHWs days for each year -- shape (years, eta, xi)
+    mhw_days_1deg = mhw1deg.sum(dim='days') #max: 365 days -- mean ~2.9 days
+    mhw_days_2deg = mhw2deg.sum(dim='days') #max: 365 days -- mean ~1.46 days
+    mhw_days_3deg = mhw3deg.sum(dim='days') #max: 360 days -- mean ~0.74 days
+    mhw_days_4deg = mhw4deg.sum(dim='days') #max: 326 days -- mean ~ days
+    non_mhw_days = non_mhw.sum(dim='days') #max: 365 days -- mean ~ days
+
+    # --- Mean number of MHWs days per year
     mhw1deg_days_per_year = mhw_days_1deg.mean(dim='years') #max: 74.125 days/yr
     mhw2deg_days_per_year = mhw_days_2deg.mean(dim='years') #max: 68.05 days/yr
     mhw3deg_days_per_year = mhw_days_3deg.mean(dim='years') #max: 68.05 days/yr
     mhw4deg_days_per_year = mhw_days_4deg.mean(dim='years') #max: 55.75 days/yr
+    non_mhw_days_per_year = non_mhw_days.mean(dim='years') #max: 340.85 days/yr
 
     # To dataset
     ds_mhw_daysperyear= xr.Dataset(
@@ -278,7 +372,8 @@ if not os.path.exists(nb_days_file_FULL):
                 nb_days_1deg_per_yr = (["eta_rho" ,"xi_rho"], mhw1deg_days_per_year.data), #shape (231, 1442)
                 nb_days_2deg_per_yr = (["eta_rho" ,"xi_rho"], mhw2deg_days_per_year.data),
                 nb_days_3deg_per_yr = (["eta_rho" ,"xi_rho"], mhw3deg_days_per_year.data),
-                nb_days_4deg_per_yr = (["eta_rho" ,"xi_rho"], mhw4deg_days_per_year.data)
+                nb_days_4deg_per_yr = (["eta_rho" ,"xi_rho"], mhw4deg_days_per_year.data),
+                nb_days_nonmhw_per_yr = (["eta_rho" ,"xi_rho"], non_mhw_days_per_year.data)
                 ),
             coords=dict(
                 lon_rho=(["eta_rho", "xi_rho"], ds_duration_thresh_FULLyear.lon_rho.values), #(434, 1442)
@@ -286,12 +381,15 @@ if not os.path.exists(nb_days_file_FULL):
                 ),
             attrs = {
                     "depth": "5m",
-                    "nb_days_ideg_per_yr":"Number of days per year being under MHW of i°C"
+                    "nb_days_ideg_per_yr":"Number of days per year being under MHW of i°C",
+                    "time window": "full year (365days)"
                     }                
                 )
     
     # Write to file
-    ds_mhw_daysperyear.to_netcdf(nb_days_file_FULL)
+    ds_mhw_daysperyear.to_netcdf(mean_nb_days_file_FULL)
+    ds_mhw_nb_days_season.to_netcdf(nb_days_file_FULL)
+    
 else: 
     # Load data
     ds_mhw_daysperyear = xr.open_dataset(nb_days_file_FULL)
