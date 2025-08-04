@@ -896,24 +896,38 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
     data_2010_2019 = ds.isel(years=slice(30, 40)).mean(dim=('years', 'days'))
     data_diff = data_2010_2019 - data_1980_2009
 
-    # Set normalization
+    # --- Dynamic title setup ---
     if varname == 'growth':
+        var_bigtitle = 'Antarctic Krill Growth - Southern Ocean'
+        var_title = 'Growth'
+        units_label = '[mm/d]'
         norm_main = mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2)
         extend_var ='both'
     elif varname == 'temp':
+        var_bigtitle = 'Temperature - 100m depth average'
+        var_title = 'Temperature'
+        units_label = '[°C]'
         norm_main = mcolors.TwoSlopeNorm(vmin=-2, vcenter=0, vmax=2)
         extend_var ='both'
     elif varname == 'chla':
+        var_bigtitle = 'Chlorophyll-a Concentration'
+        var_title = 'Chl-a'
+        units_label = '[mg/m³]'
         vmax = data_1980_2009.max()  # Max value for chla colormap
         norm_main = mcolors.Normalize(vmin=0, vmax=1)
         extend_var ='max'
     else:
+        var_title = varname
+        subtitle = ''
+        units_label = ''
         norm_main = None
 
     # Difference normalization (centered at zero for difference)
     abs_diff_max = np.max(np.abs(data_diff))
     norm_diff = mcolors.TwoSlopeNorm(vmin=-abs_diff_max, vcenter=0, vmax=abs_diff_max)
     cmap_diff = plt.cm.RdBu_r
+    print('Max diff: ', np.max(data_diff).values)
+    print('Min diff: ', np.min(data_diff).values)
 
     # Titles and datasets
     if plot == 'report':
@@ -922,8 +936,8 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
         font_size_macro = r'\large'
 
     plot_data = [
-        (data_1980_2009, f"Climatological Growth\n{font_size_macro}{{(1980\\,\\textendash\\,2009)}}", norm_main, cmap_var),
-        (data_2010_2019, f"Recent Growth\n{font_size_macro}{{(2010\\,\\textendash\\,2018)}}",norm_main, cmap_var),
+        (data_1980_2009, f"Climatological {var_title}\n{font_size_macro}{{(1980\\,\\textendash\\,2009)}}", norm_main, cmap_var),
+        (data_2010_2019, f"Recent {var_title}\n{font_size_macro}{{(2010\\,\\textendash\\,2018)}}",norm_main, cmap_var),
         (data_diff, f"Difference\n{font_size_macro}{{(recent\\,\\textendash\\,climatological)}}", norm_diff, cmap_diff),
         ]
 
@@ -971,6 +985,7 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
     # Colorbar for the first and second subplots
     if varname in ['chla', 'growth', 'temp']:
         ticks = ticks
+
     else:
         ticks = np.arange(np.floor(norm.vmin)-1, np.ceil(norm.vmax) + 1, 1)
     
@@ -988,7 +1003,7 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
         pos3 = axs[2].get_position()
         cbar_ax2 = fig.add_axes([pos3.x1 + 0.05, pos3.y0, 0.015, pos3.height ])
         cbar2 = fig.colorbar(scs[2], cax=cbar_ax2, cmap=cmap_diff, extend='both')
-        cbar2.set_label("$\Delta$ Growth [mm/d]", **label_kwargs)
+        cbar2.set_label(f"$\Delta$ {var_title} {units_label}", **label_kwargs)
         cbar2.ax.tick_params(**tick_kwargs)
     else:
         pos1 = axs[1].get_position()
@@ -1001,18 +1016,18 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
         pos2 = axs[2].get_position()
         cbar_ax2 = fig.add_axes([pos2.x1 + 0.045, pos2.y0, 0.01, pos2.height])
         cbar2 = fig.colorbar(scs[2], cax=cbar_ax2, cmap=cmap_diff, extend='both')
-        cbar2.set_label("$\Delta$ Growth [mm/d]", **label_kwargs)
+        cbar2.set_label(f"$\Delta$ {var_title} {units_label}", **label_kwargs)
         cbar2.ax.tick_params(**tick_kwargs)
 
     # --- Axis labels and title ---
     if plot == 'report':
         suptitle_y = 1
-        fig.suptitle('Antarctic Krill Growth - Southern Ocean', x=0.55, y=suptitle_y, **suptitle_kwargs)
+        fig.suptitle(f'{var_bigtitle}', y=suptitle_y, x=0.55, **suptitle_kwargs)
         fig.text(0.55, suptitle_y - 0.03, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
 
     else:
         suptitle_y = 0.9
-        fig.suptitle(f'Antarctic Krill Growth - Southern Ocean', y=suptitle_y, **suptitle_kwargs)
+        fig.suptitle(f'{var_bigtitle}', y=suptitle_y, x=0.55, **suptitle_kwargs)
         fig.text(0.5, suptitle_y - 0.055, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
 
     # --- Output handling ---
