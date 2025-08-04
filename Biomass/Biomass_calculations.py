@@ -89,16 +89,14 @@ area_atl_sect = 5707378 * 10**6 # Area in m2
 area_SO = 20265858.00* 10**6 # Area in m2
 N = 17.85 # Abundance ind/m2
 
-mhw_thresholds = [1, 2, 3, 4]
-mhw_thresholds_str = [f"{t}deg" for t in mhw_thresholds]
 
 
 # %% ======================== Load data ========================
 # Load mass data for each maturity stage
-mass_juvenile = xr.open_dataset(os.path.join(path_mass, 'mass_mean_juvenile.nc'))
-mass_immature = xr.open_dataset(os.path.join(path_mass, 'mass_mean_immature.nc'))
-mass_mature = xr.open_dataset(os.path.join(path_mass, 'mass_mean_mature.nc'))
-mass_gravid = xr.open_dataset(os.path.join(path_mass, 'mass_mean_gravid.nc'))
+mass_juvenile = xr.open_dataset(os.path.join(path_mass, 'mass_juvenile.nc'))
+mass_immature = xr.open_dataset(os.path.join(path_mass, 'mass_immature.nc'))
+mass_mature = xr.open_dataset(os.path.join(path_mass, 'mass_mature.nc'))
+mass_gravid = xr.open_dataset(os.path.join(path_mass, 'mass_gravid.nc'))
 
 
 # Extract final mass for each maturity stage, MHW conditions and year
@@ -120,15 +118,13 @@ for stage, ds in zip(['juvenile', 'immature', 'mature', 'gravid'],
 # %% ======================== Biomass Calculation ========================
 # Calculate total biomass (mg) for each year
 biomass_total = {}
-for var in ['non_mhw', 'mhw_1deg', 'mhw_2deg', 'mhw_3deg', 'mhw_4deg']:
+for var in ['mass_cat0', 'mass_cat1', 'mass_cat2', 'mass_cat3', 'mass_cat4']:
     B_j = area_atl_sect * sum(proportion[stage] * N * mass_final[stage][var] for stage in proportion)
     B_j_Mt = B_j * 1e-15  # Convert from mg to Mt
     biomass_total[var] = B_j_Mt
 
 
-
 # %% ======================== PLOT ========================
-
 years_to_plot = [1989, 2000, 2016]
 year_indices = [year - 1980 for year in years_to_plot]
 
