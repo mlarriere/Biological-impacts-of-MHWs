@@ -90,164 +90,157 @@ def subset_spatial_domain(ds, lat_range=(-80, -60), lon_range=(270, 360)): #, (0
 
     return ds.where(lat_mask & lon_mask, drop=True)
 
-# === Data with MHW scenarios masks
-# Output file paths
-spatial_average = False  # Set to False for gridded output
-suffix = '_ts' if spatial_average else ''
-temp_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/temp_avg100m_daily_mhw{suffix}.nc")
-chla_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/chla_surf_daily_mhw{suffix}.nc")
-temp_non_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/temp_avg100m_daily_nomhw{suffix}.nc")
-chla_non_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/chla_surf_daily_nomhw{suffix}.nc")
-
-# Open files
-temp_mhw = xr.open_dataset(temp_mhw_file)
-chla_mhw = xr.open_dataset(chla_mhw_file)
-temp_non_mhw = xr.open_dataset(temp_non_mhw_file)
-chla_non_mhw = xr.open_dataset(chla_non_mhw_file)
-
 # === Data without MHW scenarios masks
 temp_avg_100m_SO_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_allyears_seasonal.nc')) 
 temp_avg_100m_study_area_allyrs = subset_spatial_domain(temp_avg_100m_SO_allyrs) 
+
 chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
 chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) 
 
-# %% ============== Length evolution for all years ==============
-from Growth_Model.growth_model import length_Atkison2006  
-
-# Function to select pixels where growth happened, i.e. MHWs are detected and returning mean time serie
-def compute_mean_ts(length_array):
-    growth_pixels = length_array.max(dim='days') > length_array.min(dim='days')
-    return length_array.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
+#%% ============== Calculating length for each maturity stage ==============
+# Atlantic Sector for 1 season of interest
+from Growth_Model.growth_model import length_Atkison2006 
 
 # --- Parameters
 stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
 stage_IMP = {'juvenile': 12, 'immature': 24, 'mature': 13, 'gravid': 13} # IMP accorindg to Tarling et al 2006 - graph under 0°C
-mhw_thresholds = [1, 2, 3, 4]
-mhw_thresholds_str = [f"{t}deg" for t in mhw_thresholds]
 years = np.arange(1980, 2019)
 year_indices = years - 1980  # 0 to 38
 
+temp_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/temp_avg100m_daily_mhw.nc")
+temp_mhw = xr.open_dataset(temp_mhw_file)
 
-# --- Initialize dictionnaries
-length_unmasked_all = {stage: [] for stage in stage_lengths}
-mean_length_unmasked_all = {stage: [] for stage in stage_lengths}
-length_non_MHWs_all = {stage: [] for stage in stage_lengths}
-mean_length_non_MHWs_all = {stage: [] for stage in stage_lengths}
-length_MHWs_all = {stage: {f"{thresh}deg": [] for thresh in [1, 2, 3, 4]} for stage in stage_lengths}
-mean_length_MHWs_all = {stage: {f"{thresh}deg": [] for thresh in [1, 2, 3, 4]} for stage in stage_lengths}
+# ==== Calculate mean length trajectories
+length_daily_trajectories_all = {}
+stage_daily_growths_all = {}
+growth_by_stage_and_mhw_all = {}
+length_by_stage_and_mhw_all={}
 
-for year_index in year_indices:
-    print(f'---Processing {year_index+1980}')
-    # === NON MHW FILTERING ===
-    # Extract data
-    temp_unmasked_1yr = temp_avg_100m_study_area_allyrs.isel(years=year_index)
-    chla_unmasked_1yr = chla_surf_study_area_allyrs.isel(years=year_index)
+for yr_index in year_indices: 
+    # yr_index = 0
+    print(f'Processing {yr_index+1980}') 
+    # -- Select drivers
+    temp = temp_avg_100m_study_area_allyrs.isel(years=yr_index)
+    chla = chla_surf_study_area_allyrs.isel(years=yr_index)
 
+    # Initalize dictionnaries
+    length_daily_trajectories = {}
+    stage_daily_growths = {}
+    growth_by_stage_and_mhw = {}
+
+    # -- Calculate length Daily and associated growth increments
     for stage in stage_lengths:
-        length_unmasked = length_Atkison2006(chla=chla_unmasked_1yr['chla'], temp=temp_unmasked_1yr['avg_temp'],
-                                             initial_length=stage_lengths[stage], intermoult_period=stage_IMP[stage],
-                                             maturity_stage=stage)
-        length_unmasked_all[stage].append(length_unmasked)
+        length_stage_daily = length_Atkison2006(chla=chla.chla, temp=temp.avg_temp, 
+                                                initial_length=stage_lengths[stage], 
+                                                intermoult_period=1, 
+                                                maturity_stage=stage) #shape (181, 231, 360)
+        growth = length_stage_daily.diff(dim='days') #shape (180, 231, 360)
 
-        # --- Mean Time Series
-        mean_length_unmasked_all[stage].append(compute_mean_ts(length_unmasked))
+        # Store results
+        length_daily_trajectories[stage] = length_stage_daily
+        stage_daily_growths[stage] = growth
 
-    # === NON-MHW events ===
-    # --- Select temporal extent
-    temp_non_1yr = temp_non_mhw.isel(years=year_index)
-    chla_non_1yr = chla_non_mhw.isel(years=year_index)
+    # -- Defining MHWs scenarios
+    mhw_1 = xr.where(~np.isnan(temp_mhw.temp_1deg.isel(years=yr_index)), 1, 0)
+    mhw_2 = xr.where(~np.isnan(temp_mhw.temp_2deg.isel(years=yr_index)), 1, 0)
+    mhw_3 = xr.where(~np.isnan(temp_mhw.temp_3deg.isel(years=yr_index)), 1, 0)
+    mhw_4 = xr.where(~np.isnan(temp_mhw.temp_4deg.isel(years=yr_index)), 1, 0)
 
-    # --- Compute Length 
-    for stage in stage_lengths:
-        length_non_mhw = length_Atkison2006(chla=chla_non_1yr[f'chla_nonmhw'], temp=temp_non_1yr[f'temp_nonmhw'],
-                                    initial_length=stage_lengths[stage],
-                                    intermoult_period=stage_IMP[stage],
-                                    maturity_stage=stage)
+    for stage, daily_growth in stage_daily_growths.items():
+        growth_by_mhw = {1: daily_growth.where(mhw_1 == 1),
+                         2: daily_growth.where(mhw_2 == 1),
+                         3: daily_growth.where(mhw_3 == 1),
+                         4: daily_growth.where(mhw_4 == 1),
+                         0: daily_growth.where((mhw_1 + mhw_2 + mhw_3 + mhw_4) == 0)}
         
-        length_non_MHWs_all[stage].append(length_non_mhw)
+        # Store results 
+        growth_by_stage_and_mhw[stage] = growth_by_mhw #shape (180, 231, 360)
 
-        # --- Mean Time Series
-        mean_length_non_MHWs_all[stage].append(compute_mean_ts(length_non_mhw))
+    # Store per year
+    length_daily_trajectories_all[yr_index+1980] = length_daily_trajectories
+    stage_daily_growths_all[yr_index+1980] = stage_daily_growths
+    growth_by_stage_and_mhw_all[yr_index+1980] = growth_by_stage_and_mhw
 
-    # === MHW events ===
-    # --- Select temporal extent
-    temp_mhw_1yr = temp_mhw.isel(years=year_index)
-    chla_mhw_1yr = chla_mhw.isel(years=year_index)
+    # -- Length trajectories under the different scenarios
+    n_days = 181
+    length_by_stage_and_mhw = {}
+    
+    for stage in stage_lengths:
+        initial_length = stage_lengths[stage]
+        intermoult_period = stage_IMP[stage]
+        length_by_mhw_level = {}
 
-    # --- Compute Length (for each intensity)
-    for thresh in mhw_thresholds:
-        chla_data = chla_mhw_1yr[f'chla_{thresh}deg']
-        temp_data = temp_mhw_1yr[f'temp_{thresh}deg']
-        for stage in stage_lengths:
-            length_mhw = length_Atkison2006(chla=chla_data, temp=temp_data,
-                                        initial_length=stage_lengths[stage],
-                                        intermoult_period=stage_IMP[stage],
-                                        maturity_stage=stage)
-            length_MHWs_all[stage][f'{thresh}deg'].append(length_mhw)
-            
-            # --- Mean Time Series
-            mean_length_MHWs_all[stage][f'{thresh}deg'].append(compute_mean_ts(length_mhw))
+        for level in range(5):
+            growth = growth_by_stage_and_mhw[stage][level]  # (days, eta_rho, xi_rho)
+
+            # 1. Mean growth across space for each day
+            daily_mean_growth = growth.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+
+            # 2. Intermoult-block logic with last valid step growth
+            growth_blocks = []
+            for i in range(0, n_days, intermoult_period):
+                block = daily_mean_growth.isel(days=slice(i, min(i + intermoult_period, n_days)))
+                
+                # Take last valid growth value in the block, or 0 if none
+                valid_growth = block.dropna(dim='days')
+                if valid_growth.size > 0:
+                    block_growth = valid_growth[-1].item()
+                else:
+                    block_growth = 0.0
+                growth_blocks.extend([block_growth] * len(block))
+
+            # 3. Length trajectory
+            length_series = [initial_length]
+            current_length = initial_length
+            for i in range(1, n_days):
+                if i % intermoult_period == 0:
+                    current_length += growth_blocks[i - 1]
+                length_series.append(current_length)
+
+            # 4. Store as DataArray
+            length_by_mhw_level[level] = xr.DataArray(data=length_series,
+                                                      dims=["days"],
+                                                      coords={"days": np.arange(181)}) 
+
+        # Save all MHW levels for this stage
+        length_by_stage_and_mhw[stage] = length_by_mhw_level
+
+    length_by_stage_and_mhw_all[yr_index+1980] = length_by_stage_and_mhw
 
 
-# %% ======================= Write To DataSet =======================
-# --- Initialize dictionnaries
-datasets_full_by_stage = {}
+# %% ===== Save to Dataset =====
+# --- Initialize dictionaries
 datasets_mean_by_stage = {}
 
-for stage in stage_lengths:
-    # --------- Spatial-length data
-    data_vars_full = {'reference': xr.concat(length_non_MHWs_all[stage], dim='years')}
-    data_vars_full = {'non_mhw': xr.concat(length_non_MHWs_all[stage], dim='years')}
-    for thresh in mhw_thresholds_str:
-        data_vars_full[f'mhw_{thresh}'] = xr.concat(length_MHWs_all[stage][f"{thresh}"], dim='years')
-    
-    ds_full = xr.Dataset(data_vars_full)
-    ds_full = ds_full.assign_coords(years=years)
-    ds_full = ds_full.assign_coords(
-        lon_rho=(["eta_rho", "xi_rho"], temp_mhw.lon_rho.values),
-        lat_rho=(["eta_rho", "xi_rho"], temp_mhw.lat_rho.values),
-    )
-    ds_full.attrs.update({
-        'description': ('Krill length during MHW, non-MHW, and unmasked periods (full spatial data). '
-                        'Includes intensity-specific MHW scenarios (1–4°C thresholds), non-MHW growth, '
-                        'and a reference dataset without any MHW masking.'),
-        'maturity_stage': stage,
-        'temporal_window': 'Growth season'})
+for stage in stage_lengths: # 1 dataset for each maturity stage    
+    data_vars = {}
+    for level in range(5):
+        values = []
+        for yr in years:
+            da = length_by_stage_and_mhw_all[yr][stage][level]
+            values.append(da.values)  # shape: (181,)
+        stacked = np.stack(values, axis=0)  # shape: (n_years, 181)
+        data_vars[f"length_cat{level}"] = (("years", "days"), stacked)
 
-    datasets_full_by_stage[stage] = ds_full
-
-    # --------- Mean time series data
-    data_vars_mean = {
-        'non_mhw': xr.concat(mean_length_non_MHWs_all[stage], dim='years')
-    }
-    for thresh in mhw_thresholds_str:
-        data_vars_mean[f'mhw_{thresh}'] = xr.concat(mean_length_MHWs_all[stage][f"{thresh}"], dim='years')
-    
-    ds_mean = xr.Dataset(data_vars_mean)
-    ds_mean = ds_mean.assign_coords(years=years)
-    ds_mean.attrs.update({
-        'description': ('Mean krill length time series during MHW, non-MHW, and unmasked periods (full spatial data). '
-                        'Includes intensity-specific MHW scenarios (1–4°C thresholds), non-MHW growth, '
-                        'and a reference dataset without any MHW masking.'),
+    # Create dataset
+    ds = xr.Dataset(data_vars=data_vars,
+                    coords={"years": years, "days": np.arange(181)})    
+    ds.attrs.update({
+        'description': 'Mean krill length time series during MHW and non-MHW.',
         'maturity_stage': stage,
-        'temporal_window': 'Growth season'
+        'temporal_window': 'Growth season (daily steps)',
+        'category': '0: Non MHWs, 1: 1°C MHW, 2: 2°C MHW, ...',
+        'units': 'mm',
     })
     
-    datasets_mean_by_stage[stage] = ds_mean
-
+    datasets_mean_by_stage[stage] = ds
 
 # --- Save to file
-# Save full spatial datasets
-for stage, ds_full in datasets_full_by_stage.items():
-    fname = f"length_full_{stage}.nc"
-    ds_full.to_netcdf(os.path.join(path_length, fname))
-    print(f"Saved full dataset: {fname}")
-
-# Save mean time series datasets
 for stage, ds_mean in datasets_mean_by_stage.items():
-    fname = f"length_mean_{stage}.nc"
+    fname = f"length_{stage}.nc"
     ds_mean.to_netcdf(os.path.join(path_length, fname))
     print(f"Saved mean dataset: {fname}")
+
 
 # %% ============== Mass evolution for all years ==============
 def length_to_mass(p, length_array, r):
@@ -258,92 +251,58 @@ def length_to_mass(p, length_array, r):
 p = 10**(-4.19)
 r = 3.89
 
-# --- Parameters
-stages = ['juvenile', 'immature', 'mature', 'gravid']
-mhw_thresholds = ['1deg', '2deg', '3deg', '4deg']
+datasets_mass_by_stage = {}
+for stage in stage_lengths:
+    ds_length = datasets_mean_by_stage[stage]
+    data_vars_mass = {}
 
-# --- Initialize dictionaries
-mass_full_by_stage = {}
-mass_mean_by_stage = {}
+    for level in range(5):
+        length_data = ds_length[f"length_cat{level}"].values  # shape: (n_years, 181)
+        mass_data = length_to_mass(p, length_data, r)         # same shape
+        data_vars_mass[f"mass_cat{level}"] = (("years", "days"), mass_data)
 
-for stage in stages:
-    # stage='juvenile'
-    print(f'Processing stage: {stage}')
-    
-    # === Load full length dataset ===
-    ds_length = xr.open_dataset(os.path.join(path_length, f"length_full_{stage}.nc"))
+    # Create dataset
+    ds_mass = xr.Dataset(data_vars=data_vars_mass,
+                         coords={"years": years, "days": np.arange(181)})
+    ds_mass.attrs.update({
+        'description': 'Mean krill mass time series during MHW and non-MHW.',
+        'maturity_stage': stage,
+        'temporal_window': 'Growth season (daily steps)',
+        'category': '0: Non MHWs, 1: 1°C MHW, 2: 2°C MHW, ...',
+        'units': 'mg dry mass',
+        'conversion_equation': 'mass = p * length^r',
+        'p': p,
+        'r': r,
+    })
 
-    # === Create dicts for mass datasets
-    mass_vars_full = {}
-    mass_vars_mean = {}
+    datasets_mass_by_stage[stage] = ds_mass
 
-    for var in ds_length.data_vars:
-        length_data = ds_length[var]
-
-        # -- Full spatial mass
-        mass_data = length_to_mass(p, length_data, r)
-        var_mass_name = var.replace('length', 'mass')
-        mass_vars_full[var_mass_name] = mass_data
-
-        # -- Compute spatial mean time series (only where growth occurs)
-        growth_pixels = mass_data.max(dim='days') > mass_data.min(dim='days')
-        mean_ts = mass_data.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
-        mass_vars_mean[var_mass_name] = mean_ts
-
-    # === Create and save full mass dataset
-    ds_mass_full = xr.Dataset(mass_vars_full, attrs=ds_length.attrs)
-    ds_mass_full.attrs['description'] = ds_mass_full.attrs.get('description', '').replace('length', 'mass')
-    fname_full = f"mass_full_{stage}.nc"
-    ds_mass_full.to_netcdf(os.path.join(path_mass, fname_full))
-    print(f"Saved full mass dataset: {fname_full}")
-    mass_full_by_stage[stage] = ds_mass_full
-
-    # === Create and save mean mass time series
-    ds_mass_mean = xr.Dataset(mass_vars_mean, attrs=ds_length.attrs)
-    ds_mass_mean.attrs['description'] = 'Mean krill mass time series during MHW and non-MHW periods'
-    fname_mean = f"mass_mean_{stage}.nc"
-    ds_mass_mean.to_netcdf(os.path.join(path_mass, fname_mean))
-    print(f"Saved mean mass dataset: {fname_mean}")
-    mass_mean_by_stage[stage] = ds_mass_mean
+# -- Save to file
+for stage, ds_mass in datasets_mass_by_stage.items():
+    fname = f"mass_{stage}.nc"
+    ds_mass.to_netcdf(os.path.join(path_mass, fname))
+    print(f"Saved mass dataset: {fname}")
 
 
-# %% =========== Print final values ===========
-year_index = 36
-year = 1980 + year_index
 
-print(f"--- Final day length and mass for {year} ---")
+# %% =========== Print final values for selected years ===========
+selected_years = [2016]
+selected_indices = [yr - 1980 for yr in selected_years]
+
+print(f"--- Final day krill length and mass for years: {selected_years} ---")
 
 for stage in stage_lengths:
     print(f"\nStage: {stage.capitalize()}")
-    
-    # Load full length data for the stage
-    ds = xr.open_dataset(os.path.join(path_length, f"length_full_{stage}.nc"))
-    
-    # Initial values
-    init_len = stage_lengths[stage]
-    init_mass = length_to_mass(p, init_len, r)
-    print(f"  Initial length: {init_len:.1f} mm")
-    print(f"  Initial mass:   {init_mass:.4f} mg")
-    
-    # Non-MHW scenario
-    length_nonmhw = ds['non_mhw'].isel(years=year_index)
-    length_final_nonmhw = length_nonmhw.isel(days=-1)
-    growth_pixels_nonmhw = length_nonmhw.max(dim='days') > length_nonmhw.min(dim='days')
-    final_length_mean_nonmhw = length_final_nonmhw.where(growth_pixels_nonmhw).mean().item()
-    mass_final_nonmhw = length_to_mass(p, length_final_nonmhw, r)
-    final_mass_mean_nonmhw = mass_final_nonmhw.where(growth_pixels_nonmhw).mean().item()
-    print(f"  Non-MHW final length: {final_length_mean_nonmhw:.2f} mm")
-    print(f"  Non-MHW final mass:   {final_mass_mean_nonmhw:.4f} mg")
-    
-    # Loop over MHW thresholds
-    for thresh in mhw_thresholds:
-        length_mhw = ds[f'mhw_{thresh}'].isel(years=year_index)
-        length_final_mhw = length_mhw.isel(days=-1)
-        growth_pixels_mhw = length_mhw.max(dim='days') > length_mhw.min(dim='days')
-        final_length_mean_mhw = length_final_mhw.where(growth_pixels_mhw).mean().item()
-        mass_final_mhw = length_to_mass(p, length_final_mhw, r)
-        final_mass_mean_mhw = mass_final_mhw.where(growth_pixels_mhw).mean().item()
-        
-        print(f"  MHW {thresh} final length: {final_length_mean_mhw:.2f} mm")
-        print(f"  MHW {thresh} final mass:   {final_mass_mean_mhw:.4f} mg")
 
+    # Load saved datasets
+    ds_length = xr.open_dataset(os.path.join(path_length, f"length_{stage}.nc"))
+    ds_mass = xr.open_dataset(os.path.join(path_mass, f"mass_{stage}.nc"))
+
+    for yr, yr_idx in zip(selected_years, selected_indices):
+        print(f"\n  Year: {yr}")
+        for level in range(5):
+            length_final = ds_length[f"length_cat{level}"].isel(years=yr_idx, days=-1).item()
+            mass_final = ds_mass[f"mass_cat{level}"].isel(years=yr_idx, days=-1).item()
+            print(f"    MHW {level}: Final length = {length_final:.2f} mm, Final mass = {mass_final:.4f} mg")
+
+# %%
