@@ -920,47 +920,19 @@ for yr in range(39):
 simulated_length_study_area_1980_2019 = xr.concat(lengths_allyears, dim='years')
 simulated_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.assign_coords(years=chla_surf_study_area_allyrs['years'])
 
-# == Length Atlantic Sector for 1 season of interest
-# simulated_length_study_area_1season = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
-                                                        #  initial_length= 35, intermoult_period=10)
-
-# == Length Non MHWS Atlantic Sector for 1 season of interest
-# simulated_length_study_area_non_MHWs = length_Atkison2006(chla=chla_non_mhw_study_area_1season.chla_nonmhw, temp=temp_non_mhw_study_area_1season.temp_nonmhw, initial_length= 35, intermoult_period=10)
-
-# # == Length MHWS Atlantic Sector for 1 season of interest
-# simulated_length_study_area_MHWs_1deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_1deg, temp=temp_mhw_study_area_1season.temp_1deg, initial_length= 35, intermoult_period=10)
-# simulated_length_study_area_MHWs_2deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_2deg, temp=temp_mhw_study_area_1season.temp_2deg, initial_length= 35, intermoult_period=10)
-# simulated_length_study_area_MHWs_3deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_3deg, temp=temp_mhw_study_area_1season.temp_3deg, initial_length= 35, intermoult_period=10)
-# simulated_length_study_area_MHWs_4deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_4deg, temp=temp_mhw_study_area_1season.temp_4deg, initial_length= 35, intermoult_period=10)
-
-
 # %% ======================== Extracting the growth rate ========================
 # Calculate length on a daily basis
 simulated_length_1season_daily = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
                                                          initial_length= 35, intermoult_period=1)
 
-print(simulated_length_1season_daily.isel(eta_rho=98, xi_rho=136).values)
-
 # One step back - extracting growth rate (mm/d) between each days
 daily_growth = simulated_length_1season_daily.diff(dim='days') #shape (180, 231, 360)
-print(daily_growth.isel(eta_rho=98, xi_rho=136).values)
 
 # -- Create masks for the different MHW scenarios (Use Temp Mask - Boolean: where MHW occurred)
 mhw_1 = xr.where(~np.isnan(temp_mhw.temp_1deg.isel(years=year_index)), 1, 0)
 mhw_2 = xr.where(~np.isnan(temp_mhw.temp_2deg.isel(years=year_index)), 1, 0)
 mhw_3 = xr.where(~np.isnan(temp_mhw.temp_3deg.isel(years=year_index)), 1, 0)
 mhw_4 = xr.where(~np.isnan(temp_mhw.temp_4deg.isel(years=year_index)), 1, 0)
-
-# Give priority to MHW -- assign highest MHW level if overlapping -- to avoid counting cell twice
-# mhw_mask = xr.where(mhw_4 == 1, 4,
-#             xr.where(mhw_3 == 1, 3,
-#             xr.where(mhw_2 == 1, 2,
-#             xr.where(mhw_1 == 1, 1, 0))))  # 0 = no MHW
-# valid_mask = (~np.isnan(daily_growth)) & (mhw_mask.notnull())
-# growth_by_mhw_level = {
-#     level: daily_growth.where((mhw_mask == level) & valid_mask)
-#     for level in range(5)
-# }
 
 # Non non-exclusive masks, i.e. a 4°C MHW also counted as a 1°C
 growth_by_mhw_level = {
@@ -1007,48 +979,26 @@ for level in range(5):
     )
 
 # -- Do the same but mean avg over full period - disregarding mhws 
-# Mean daily growth per day
-daily_mean_growth_full_extent = daily_growth.where((~np.isnan(daily_growth))).mean(dim=["eta_rho", "xi_rho"], skipna=True)
+simulated_length_1season_daily_imp = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
+                                                         initial_length= 35, intermoult_period=10)
 
-# Average over 10-day blocks
-growth_blocks_full_extent = []
-for i in range(0, n_days, intermoult_period):
-    block = daily_mean_growth_full_extent.isel(days=slice(i, min(i + intermoult_period, n_days)))
-    avg_block_growth = block.mean().item()
-    growth_blocks_full_extent.extend([avg_block_growth] * len(block))
-
-# Length
-length_full_extent = [initial_length]
-current_length_full_extent = initial_length
-for i in range(1, n_days):  # Start from 1 because day 0 is initial
-    if i % intermoult_period == 0:
-        current_length_full_extent += growth_blocks_full_extent[i - 1]  # Apply growth from previous full day
-    length_full_extent.append(current_length_full_extent)
-
-length = np.array(length_full_extent)
-
-
-print(f"Final krill length (no MHW distinction): {length[-1]:.2f} mm")
-print("Final krill length at day 180 under each MHW category:")
-for level in range(5):
-    final_length = length_by_mhw_level[level].isel(days=-1).item()
-    print(f"  MHW Level {level}: {final_length:.2f} mm")
-
+mean_length_full_area = simulated_length_1season_daily_imp.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+std_length_full_area = simulated_length_1season_daily_imp.std(dim=["eta_rho", "xi_rho"], skipna=True)
 
 # Rename
-weighted_mean_length_1season = xr.DataArray(data=length, dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="weighted_mean_length_1season")
+mean_length_full_area = xr.DataArray(data=mean_length_full_area, dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_full_area")
 mean_length_study_area_non_MHWs = xr.DataArray(data=length_by_mhw_level[0], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_study_area_non_MHWs")
 average_length_ts_1deg = xr.DataArray(data=length_by_mhw_level[1], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_1deg")
 average_length_ts_2deg = xr.DataArray(data=length_by_mhw_level[2], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_2deg")
 average_length_ts_3deg = xr.DataArray(data=length_by_mhw_level[3], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_3deg")
 average_length_ts_4deg = xr.DataArray(data=length_by_mhw_level[4], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_4deg")
 
-print(f"Full seasonal mean length (weighted): {weighted_mean_length_1season[-1].values:.2f} mm")
-print(f"Non MHW mean length:                  {mean_length_study_area_non_MHWs[-1].values:.2f} mm")
-print(f"MHW 1°C mean length:                  {average_length_ts_1deg[-1].values:.2f} mm")
-print(f"MHW 2°C mean length:                  {average_length_ts_2deg[-1].values:.2f} mm")
-print(f"MHW 3°C mean length:                  {average_length_ts_3deg[-1].values:.2f} mm")
-print(f"MHW 4°C mean length:                  {average_length_ts_4deg[-1].values:.2f} mm")
+print(f"Full seasonal mean length: {mean_length_full_area[-1].values:.2f} mm")
+print(f"Non MHW mean length: {mean_length_study_area_non_MHWs[-1].values:.2f} mm")
+print(f"MHW 1°C mean length: {average_length_ts_1deg[-1].values:.2f} mm")
+print(f"MHW 2°C mean length: {average_length_ts_2deg[-1].values:.2f} mm")
+print(f"MHW 3°C mean length: {average_length_ts_3deg[-1].values:.2f} mm")
+print(f"MHW 4°C mean length: {average_length_ts_4deg[-1].values:.2f} mm")
 
 
 # %% ======================== Spatial Average - weighted by exposure time ========================
@@ -1264,13 +1214,13 @@ ax.plot(days_xaxis, mean_length_study_area_non_MHWs, label=f"Non-MHWs", color="b
 
 # mean_values_1980_2018 = mean_length_study_area_1980_2019.values
 # std_values = std_length_mean_length_study_area_1980_2019.values
-# mean_values_season = weighted_mean_length_1season.values
-# std_values_season  = weighted_std_length_1season.values
-# ax.plot(days_xaxis, mean_values_season, label="Mean (1980-2018)", color="grey", linestyle='--', linewidth=lw)
-# ax.fill_between(days_xaxis,
-#                 mean_values_season - std_values_season,
-#                 mean_values_season + std_values_season,
-#                 color="gray", alpha=0.2, label="±1 $\sigma _{1980-2018}$")
+mean_values_season = mean_length_full_area.values
+std_values_season  = std_length_full_area.values
+ax.plot(days_xaxis, mean_values_season, label="$\mu$", color="grey", linestyle='--', linewidth=lw)
+ax.fill_between(days_xaxis,
+                mean_values_season - std_values_season,
+                mean_values_season + std_values_season,
+                color="gray", alpha=0.2, label="$\mu$±1$\sigma$")
 
 # Define labels to keep
 wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
@@ -1316,6 +1266,41 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_mhw_{selected_years[yr_chosen]}_{plot}.png'), dpi =500, format='png', bbox_inches='tight')
     plt.show()
 
+
+
+# %% ======================== Extracting the growth rate ========================
+# == Length Atlantic Sector for all years
+lengths_allyears = []
+
+for yr in range(39):
+    print(f' -- Processing {1980+yr}')
+    chla = chla_surf_study_area_allyrs.chla.isel(years=yr)
+    temp = temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr)
+
+    # Calculate length
+    simulated_length_yr = length_Atkison2006(chla=chla, temp=temp, initial_length=35, intermoult_period=10)
+    mean_length_yr = simulated_length_yr.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+
+    lengths_allyears.append(mean_length_yr)
+
+# Back to DataArray
+length_stacked = np.stack(lengths_allyears, axis=0)
+
+# Create DataArray
+krill_length_timeseries = xr.DataArray(
+    data=length_stacked,
+    coords={"years": np.arange(1980, 2019), "days": np.arange(0, 181)},
+    dims=["years", "days"],
+    name="krill_length"
+)
+krill_length_timeseries.attrs["units"] = "mm"
+krill_length_timeseries.attrs["description"] = "Mean krill length over season (0–180 days), spatially averaged, per year"
+krill_length_timeseries.attrs["initial_length"] = 35
+krill_length_timeseries.attrs["intermoult_period"] = 10
+
+#
+mean_length_study_area_1980_2019 = krill_length_timeseries.mean(dim=['years'])
+
 # %% ============== Plot evolution of the area ==============
 from datetime import datetime, timedelta
 
@@ -1333,7 +1318,7 @@ norm = mpl.colors.Normalize(vmin=1980, vmax=2019)
 sm = mpl.cm.ScalarMappable(cmap=custom_cmap, norm=norm)
 sm.set_array([])
 
-plot = 'slides'  # 'report' or 'slides'
+plot = 'report'  # 'report' or 'slides'
 
 if plot == 'report':
     fig_width = 6.3228348611  # text width in inches
@@ -1359,6 +1344,7 @@ for yr in range(38):
                                        initial_length= 35, intermoult_period=10)
     annual_length_mean = annual_length.mean(dim=('eta_rho', 'xi_rho'))
     ax_len.plot(days_xaxis, annual_length_mean, color=custom_cmap(norm(yr+1980)), linewidth=1)
+    # ax_len.plot(days_xaxis, krill_length_timeseries.isel(years=yr), color=custom_cmap(norm(yr+1980)), linewidth=1)
 
 # Plot mean 
 ax_len.plot(days_xaxis, mean_length_study_area_1980_2019.values, linestyle='--', color='black',
@@ -1373,6 +1359,7 @@ ax_len.set_xticklabels(tick_labels, rotation=45, fontsize=tick_kwargs.get('label
 # Labels and title
 ax_len.set_xlabel("Date", **label_kwargs)
 ax_len.set_ylabel("Length (mm)", **label_kwargs)
+ax_len.set_ylim(34.8, 36)
 ax_len.tick_params(axis='both', **tick_kwargs)
 ax_len.legend(loc='upper left', handlelength=2.5, **legend_kwargs)
 
