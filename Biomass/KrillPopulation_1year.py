@@ -100,27 +100,6 @@ selected_years_idx = np.array(selected_years) - 1980  # [9, 20, 36]
 yr_chosen=2
 year_index = selected_years_idx[yr_chosen] 
 
-# File suffix
-# spatial_average = False  # Set to False for gridded output
-# suffix = '_ts' if spatial_average else ''
-
-# # File paths driver under MHWs
-# chla_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/chla_surf_daily_mhw.nc")
-# temp_non_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/temp_avg100m_daily_nomhw{suffix}.nc")
-# chla_non_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/chla_surf_daily_nomhw{suffix}.nc")
-
-# # Open files
-
-# chla_mhw = xr.open_dataset(chla_mhw_file)
-# temp_non_mhw = xr.open_dataset(temp_non_mhw_file)
-# chla_non_mhw = xr.open_dataset(chla_non_mhw_file)
-
-# # Selecting temporal extent for 1 year of interest -- shape (181, 231, 360)
-# temp_mhw_study_area_1season = temp_mhw.isel(years=year_index) 
-# chla_mhw_study_area_1season = chla_mhw.isel(years=year_index) 
-# temp_non_mhw_study_area_1season = temp_non_mhw.isel(years=year_index)
-# chla_non_mhw_study_area_1season = chla_non_mhw.isel(years=year_index)
-
 def subset_spatial_domain(ds, lat_range=(-80, -60), lon_range=(270, 360)): #, (0, 30)
     lat_min, lat_max = lat_range
     lon_range1, lon_range2 = lon_range
@@ -145,11 +124,6 @@ chla_surf_study_area_1season = chla_surf_study_area_allyrs.isel(years=year_index
 #%% ============== Calculating length for each maturity stage ==============
 # Atlantic Sector for 1 season of interest
 from Growth_Model.growth_model import length_Atkison2006 
-
-# Function to select pixels where growth happened, i.e. MHWs are detected and returning mean time serie
-# def compute_mean_ts(length_array):
-#     growth_pixels = length_array.max(dim='days') > length_array.min(dim='days')
-#     return length_array.where(growth_pixels).mean(dim=('eta_rho', 'xi_rho'))
 
 # -- Parameters
 stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
@@ -241,54 +215,24 @@ for stage in stage_lengths:
             data=length_series,
             dims=["days"],
             coords={"days": length_gra_daily["days"]}
-        )
+        ) #shape: (181,)
 
     # Save all MHW levels for this stage
     length_by_stage_and_mhw[stage] = length_by_mhw_level
 
 # ==== Averaged Length trajectory of the study area
-mean_length_by_stage = {}
-std_length_by_stage = {}
-for stage in stage_lengths:
-    simulated_length = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
-                                                         initial_length=stage_lengths[stage], intermoult_period=stage_IMP[stage], maturity_stage=stage)
+# mean_length_by_stage = {}
+# std_length_by_stage = {}
+# for stage in stage_lengths:
+#     simulated_length = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
+#                                                          initial_length=stage_lengths[stage], intermoult_period=stage_IMP[stage], maturity_stage=stage)
 
-    mean_length_full_area = simulated_length.mean(dim=["eta_rho", "xi_rho"], skipna=True)
-    std_length_full_area = simulated_length.std(dim=["eta_rho", "xi_rho"], skipna=True)
+#     mean_length_full_area = simulated_length.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+#     std_length_full_area = simulated_length.std(dim=["eta_rho", "xi_rho"], skipna=True)
     
-    # Store results by stage
-    mean_length_by_stage[stage] = mean_length_full_area
-    std_length_by_stage[stage] = std_length_full_area
-
-# # Mean length time series
-# mean_length_ts_non_MHWs = {}
-# mean_length_ts_non_MHWs['juvenile'] = compute_mean_ts(length_non_MHWs_juv)
-# mean_length_ts_non_MHWs['immature'] = compute_mean_ts(length_non_MHWs_imm)
-# mean_length_ts_non_MHWs['mature']   = compute_mean_ts(length_non_MHWs_mat)
-# mean_length_ts_non_MHWs['gravid']   = compute_mean_ts(length_non_MHWs_gra)
-
-
-# ======== Length MHWs
-# mhw_thresholds = [1, 2, 3, 4]
-
-# # To store results by stage and threshold
-# length_MHWs = {stage: {} for stage in ['juvenile', 'immature', 'mature', 'gravid']}
-# mean_length_ts_MHWs = {stage: {} for stage in ['juvenile', 'immature', 'mature', 'gravid']}
-
-# # Loop through MHW thresholds and compute lengths for each stage
-# for thresh in mhw_thresholds:
-#     chla_data = getattr(chla_mhw_study_area_1season, f'chla_{thresh}deg')
-#     temp_data = getattr(temp_mhw_study_area_1season, f'temp_{thresh}deg')
-
-#     for stage in ['juvenile', 'immature', 'mature', 'gravid']:
-#         length_MHWs[stage][f'{thresh}deg'] = length_Atkison2006(chla=chla_data, temp=temp_data,
-#                                               initial_length=stage_lengths[stage],
-#                                               intermoult_period=stage_IMP[stage],
-#                                               maturity_stage=stage)
-
-#         # Compute mean time series
-#         mean_ts = compute_mean_ts(length_MHWs[stage][f'{thresh}deg'])
-#         mean_length_ts_MHWs[stage][f'{thresh}deg'] = mean_ts # Store results
+#     # Store results by stage
+#     mean_length_by_stage[stage] = mean_length_full_area
+#     std_length_by_stage[stage] = std_length_full_area
 
 
 
@@ -301,38 +245,22 @@ def length_to_mass(p, length_array, r):
 # Accroding to mass length coefficient of Atkison et al (2006)
 p = 10**(-4.19)
 r = 3.89
-# p = np.array([0.00076, 0.00105 , 0.00019, 0.00025, 0.00036, 0.00075, 0.00009, 0.00031, 0.00007, 0.00010, 0.00238, 0.00024, 0.00139, 0.00199, 0.00106]).mean()
-# r = np.array([3.071, 2.965, 3.435, 3.357, 3.277, 3.066, 3.694, 3.306, 3.760, 3.799, 2.930, 3.550, 3.0737, 3.0438, 3.1500]).mean()
 print(f'Coefficients: p={p:.5f}, r={r:.3f}')
 
-# ======== Mass Non MHWs
-mass_non_MHWs = {
-    'juvenile': length_to_mass(p, length_non_MHWs_juv, r),
-    'immature': length_to_mass(p, length_non_MHWs_imm, r),
-    'mature'  : length_to_mass(p, length_non_MHWs_mat, r),
-    'gravid'  : length_to_mass(p, length_non_MHWs_gra, r)
-}
+# ==== Mean mass trajectories from avg length trajectories
+mass_trajectories_by_stage_and_mhw = {}
+for stage, length_trajectory_dict in length_by_stage_and_mhw.items():    
+    mass_trajectories_by_mhw = {}
 
-# Mean mass time series
-mean_mass_ts_non_MHWs = {}
-mean_mass_ts_non_MHWs['juvenile'] = compute_mean_ts(mass_non_MHWs['juvenile'])
-mean_mass_ts_non_MHWs['immature'] = compute_mean_ts(mass_non_MHWs['immature'])
-mean_mass_ts_non_MHWs['mature']   = compute_mean_ts(mass_non_MHWs['mature'])
-mean_mass_ts_non_MHWs['gravid']   = compute_mean_ts(mass_non_MHWs['gravid'])
+    for level, length_da in length_trajectory_dict.items():
+        # Convert length trajectory to mass trajectory directly
+        mass_da = length_to_mass(p, length_da, r)
 
+        mass_trajectories_by_mhw[level] = mass_da
 
-# ======== Mass MHWs
-mass_MHWs = {stage: {} for stage in ['juvenile', 'immature', 'mature', 'gravid']}
-mean_mass_ts_MHWs = {stage: {} for stage in ['juvenile', 'immature', 'mature', 'gravid']}
+    mass_trajectories_by_stage_and_mhw[stage] = mass_trajectories_by_mhw
 
-for stage in ['juvenile', 'immature', 'mature', 'gravid']:
-    for thresh in mhw_thresholds:
-        mass_MHWs[stage][f'{thresh}deg'] = length_to_mass(p, length_MHWs[stage][f'{thresh}deg'], r)
-        
-        # Compute mean time series
-        mean_ts = compute_mean_ts(mass_MHWs[stage][f'{thresh}deg'])
-        mean_mass_ts_MHWs[stage][f'{thresh}deg'] = mean_ts # Store results
-
+# cannot apply the same method as before as the IMP is applied to length and not to mass and the relationship between the 2 is not linear
 
 # %% ============== Plot length and mass ==============
 # --- Setup ---
@@ -371,7 +299,7 @@ fig, axs = plt.subplots(4, 2, figsize=(fig_width, fig_height),
                         gridspec_kw={'wspace': 0.6, 'hspace': 0.25}, sharex=True)
 axs = axs.reshape(4, 2)
 
-scenarios = ['non-MHWs', '1deg', '2deg', '3deg', '4deg']
+scenarios = [0, 1, 2, 3, 4]
 scenario_labels = ['Non-MHWs', '1°C and 90th perc', '2°C and 90th perc', '3°C and 90th perc', '4°C and 90th perc']
 scenario_colors = [non_mhw_color] + threshold_colors
 
@@ -392,13 +320,9 @@ for row, stage in enumerate(stages):
 
     for scen, label, color in zip(scenarios, scenario_labels, scenario_colors):
         # Get mean length and mass time series for each scenario
-        if scen == 'non-MHWs':
-            y_len = mean_length_ts_non_MHWs[stage]
-            y_mass = mean_mass_ts_non_MHWs[stage]
-        else:
-            y_len = mean_length_ts_MHWs[stage][scen]
-            y_mass = mean_mass_ts_MHWs[stage][scen]
-
+        y_len = length_by_stage_and_mhw[stage][scen]
+        y_mass = mass_trajectories_by_stage_and_mhw[stage][scen]
+       
         # Convert to numpy arrays if necessary
         if hasattr(y_len, 'values'):
             y_len = y_len.values
@@ -421,10 +345,10 @@ for row, stage in enumerate(stages):
         
     # --- Labels
     ax_len.set_ylabel("Length [mm]", **label_kwargs)
-    ax_len.grid(True, linestyle=':', alpha=0.4)
+    # ax_len.grid(True, linestyle=':', alpha=0.4)
 
     ax_mass.set_ylabel("Mass [mg]", **label_kwargs)
-    ax_mass.grid(True, linestyle=':', alpha=0.4)
+    # ax_mass.grid(True, linestyle=':', alpha=0.4)
     if row == 3:
         # X-axis ticks and labels for bottom row only
         ax_len.set_xlabel("Date", **label_kwargs)
