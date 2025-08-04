@@ -146,7 +146,6 @@ length_mat_daily = length_Atkison2006(chla=chla_surf_study_area_1season.chla, te
 length_gra_daily = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp,
                                          initial_length=stage_lengths['gravid'], intermoult_period=1, maturity_stage='gravid')
 
-
 # ==== One step back - extracting growth rate (mm/d) between each days
 daily_growth_juv = length_juv_daily.diff(dim='days') #shape (180, 231, 360)
 daily_growth_imm = length_imm_daily.diff(dim='days')
@@ -192,6 +191,12 @@ for stage in stage_lengths:
     for level in range(5):
         growth = growth_by_stage_and_mhw[stage][level]  # (days, eta_rho, xi_rho)
 
+        # Calculate seasonal mean growth per spatial cell (to fill NaNs)
+        seasonal_mean_growth = growth.mean(dim="days", skipna=True)
+
+        # Fill missing growth increments with seasonal mean growth per cell
+        growth_filled = growth.where(~np.isnan(growth), other=seasonal_mean_growth)
+
         # 1. Mean growth across space for each day
         daily_mean_growth = growth.mean(dim=["eta_rho", "xi_rho"], skipna=True)
 
@@ -199,8 +204,9 @@ for stage in stage_lengths:
         growth_blocks = []
         for i in range(0, n_days, intermoult_period):
             block = daily_mean_growth.isel(days=slice(i, min(i + intermoult_period, n_days)))
-            avg_block_growth = block.mean().item() if block.size > 0 else 0.0
+            avg_block_growth = block.mean().item()
             growth_blocks.extend([avg_block_growth] * len(block))
+
 
         # 3. Length trajectory
         length_series = [initial_length]
@@ -219,21 +225,6 @@ for stage in stage_lengths:
 
     # Save all MHW levels for this stage
     length_by_stage_and_mhw[stage] = length_by_mhw_level
-
-# ==== Averaged Length trajectory of the study area
-# mean_length_by_stage = {}
-# std_length_by_stage = {}
-# for stage in stage_lengths:
-#     simulated_length = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
-#                                                          initial_length=stage_lengths[stage], intermoult_period=stage_IMP[stage], maturity_stage=stage)
-
-#     mean_length_full_area = simulated_length.mean(dim=["eta_rho", "xi_rho"], skipna=True)
-#     std_length_full_area = simulated_length.std(dim=["eta_rho", "xi_rho"], skipna=True)
-    
-#     # Store results by stage
-#     mean_length_by_stage[stage] = mean_length_full_area
-#     std_length_by_stage[stage] = std_length_full_area
-
 
 
 # %% ============== Converting length to mass ==============
