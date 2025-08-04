@@ -373,4 +373,110 @@ plt.show()
 # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/zonal_avg_temperature.pdf'), dpi =200, format='pdf', bbox_inches='tight')
 
 
+# %% --------------------------- PLOT SECTORS  ---------------------------
+from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
+
+# === Layout config ===
+plot = 'report'
+if plot == 'report':
+    fig_width = 6.3228348611
+    fig_height = fig_width/2
+else:
+    fig_width = 16
+    fig_height = 8
+
+fig = plt.figure(figsize=(fig_width, fig_height))
+ax = plt.subplot(1, 1, 1, projection=ccrs.SouthPolarStereo())
+
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {}
+gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+
+# Set circular boundary
+theta = np.linspace(0, 2 * np.pi, 100)
+center, radius = [0.5, 0.5], 0.5
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * radius + center)
+ax.set_boundary(circle, transform=ax.transAxes)
+
+# Set map extent
+lw = 1 if plot == 'slides' else 0.5
+ax.set_extent([-180, 180, -90, -40], ccrs.PlateCarree())  # or -25/-20 as needed
+ax.set_facecolor("#D6D6D6")
+ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
+ax.coastlines(color='black', linewidth=lw)
+
+
+# --- Fill Pacific Sector (wraps around date line) ---
+# 120°E to 180°
+lons1 = np.linspace(120, 180, 100)
+lats1 = np.full_like(lons1, -60)
+ax.fill(np.concatenate(([180], lons1[::-1], [120])), np.concatenate(([-90], lats1, [-90])), transform=ccrs.PlateCarree(), color='#CA6702', alpha=0.75, zorder=0)
+
+# -180° to -90°
+lons2 = np.linspace(-180, -90, 100)
+lats2 = np.full_like(lons2, -60)
+ax.fill(np.concatenate(([-90], lons2[::-1], [-180])), np.concatenate(([-90], lats2, [-90])), transform=ccrs.PlateCarree(), color='#CA6702', alpha=0.75, zorder=0)
+
+# --- Fill Atlantic Sector: -90° to 0°
+lons = np.linspace(-90, 0, 100)
+lats = np.full_like(lons, -60)
+ax.fill(np.concatenate(([0], lons[::-1], [-90])), np.concatenate(([-90], lats, [-90])), transform=ccrs.PlateCarree(), color='#057985', alpha=0.75, zorder=0)
+
+# --- Fill Indian Sector: 0° to 120°
+lons = np.linspace(0, 120, 100)
+lats = np.full_like(lons, -60)
+ax.fill(np.concatenate(([120], lons[::-1], [0])), np.concatenate(([-90], lats, [-90])), transform=ccrs.PlateCarree(), color='#9B2226', alpha=0.75, zorder=0)
+
+# --- Sector boundaries ---
+lw_sector = 1.2 if plot == 'slides' else 0.8
+# Draw circle at 60°S
+circle_lat = -60
+circle_lons = np.linspace(-180, 180, 500)
+circle_lats = np.full_like(circle_lons, circle_lat)
+
+ax.plot(circle_lons, circle_lats, transform=ccrs.PlateCarree(),
+        color='black', linestyle='--', linewidth=lw_sector, zorder=3)
+
+sector_lons = [-90, 0, 120]
+for lon in sector_lons:
+    ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(),
+            color='#080808', linestyle='--', linewidth=lw_sector)
+
+# --- Sector labels ---
+label_kwargs = suptitle_kwargs.copy()
+label_kwargs.update({
+    'ha': 'center',
+    'va': 'center',
+    'bbox': dict(facecolor='white', edgecolor='black', boxstyle='round,pad=0.3')
+})
+ax.text(-135, -60, r'{Pacific Sector}', transform=ccrs.PlateCarree(), **label_kwargs)
+ax.text(-45, -60, r'{Atlantic Sector}', transform=ccrs.PlateCarree(), **label_kwargs)
+ax.text(50, -55, r'{Indian Sector}', transform=ccrs.PlateCarree(), **label_kwargs)
+
+# --- Gridlines ---
+gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.3, linestyle='--', linewidth=0.5)
+gl.xlabels_top = False
+gl.ylabels_right = False
+gl.xlabel_style = gridlabel_kwargs
+gl.ylabel_style = gridlabel_kwargs
+gl.xformatter = LONGITUDE_FORMATTER
+gl.yformatter = LATITUDE_FORMATTER
+
+# --- Output handling ---
+outdir = os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/')
+os.makedirs(outdir, exist_ok=True)
+
+if plot == 'report':
+    outfile = "sectors_report.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:
+    outfile = "sectors_slides.png"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+
 # %%
