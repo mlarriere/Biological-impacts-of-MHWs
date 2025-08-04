@@ -921,68 +921,304 @@ simulated_length_study_area_1980_2019 = xr.concat(lengths_allyears, dim='years')
 simulated_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.assign_coords(years=chla_surf_study_area_allyrs['years'])
 
 # == Length Atlantic Sector for 1 season of interest
-simulated_length_study_area_1season = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, initial_length= 35, intermoult_period=10)
+# simulated_length_study_area_1season = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
+                                                        #  initial_length= 35, intermoult_period=10)
 
 # == Length Non MHWS Atlantic Sector for 1 season of interest
-simulated_length_study_area_non_MHWs = length_Atkison2006(chla=chla_non_mhw_study_area_1season.chla_nonmhw, temp=temp_non_mhw_study_area_1season.temp_nonmhw, initial_length= 35, intermoult_period=10)
+# simulated_length_study_area_non_MHWs = length_Atkison2006(chla=chla_non_mhw_study_area_1season.chla_nonmhw, temp=temp_non_mhw_study_area_1season.temp_nonmhw, initial_length= 35, intermoult_period=10)
 
-# == Length MHWS Atlantic Sector for 1 season of interest
-simulated_length_study_area_MHWs_1deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_1deg, temp=temp_mhw_study_area_1season.temp_1deg, initial_length= 35, intermoult_period=10)
-simulated_length_study_area_MHWs_2deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_2deg, temp=temp_mhw_study_area_1season.temp_2deg, initial_length= 35, intermoult_period=10)
-simulated_length_study_area_MHWs_3deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_3deg, temp=temp_mhw_study_area_1season.temp_3deg, initial_length= 35, intermoult_period=10)
-simulated_length_study_area_MHWs_4deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_4deg, temp=temp_mhw_study_area_1season.temp_4deg, initial_length= 35, intermoult_period=10)
+# # == Length MHWS Atlantic Sector for 1 season of interest
+# simulated_length_study_area_MHWs_1deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_1deg, temp=temp_mhw_study_area_1season.temp_1deg, initial_length= 35, intermoult_period=10)
+# simulated_length_study_area_MHWs_2deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_2deg, temp=temp_mhw_study_area_1season.temp_2deg, initial_length= 35, intermoult_period=10)
+# simulated_length_study_area_MHWs_3deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_3deg, temp=temp_mhw_study_area_1season.temp_3deg, initial_length= 35, intermoult_period=10)
+# simulated_length_study_area_MHWs_4deg = length_Atkison2006(chla=chla_mhw_study_area_1season.chla_4deg, temp=temp_mhw_study_area_1season.temp_4deg, initial_length= 35, intermoult_period=10)
+
+
+# %% ======================== Extracting the growth rate ========================
+# Calculate length on a daily basis
+simulated_length_1season_daily = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
+                                                         initial_length= 35, intermoult_period=1)
+
+print(simulated_length_1season_daily.isel(eta_rho=98, xi_rho=136).values)
+
+# One step back - extracting growth rate (mm/d) between each days
+daily_growth = simulated_length_1season_daily.diff(dim='days') #shape (180, 231, 360)
+print(daily_growth.isel(eta_rho=98, xi_rho=136).values)
+
+# -- Create masks for the different MHW scenarios (Use Temp Mask - Boolean: where MHW occurred)
+mhw_1 = xr.where(~np.isnan(temp_mhw.temp_1deg.isel(years=year_index)), 1, 0)
+mhw_2 = xr.where(~np.isnan(temp_mhw.temp_2deg.isel(years=year_index)), 1, 0)
+mhw_3 = xr.where(~np.isnan(temp_mhw.temp_3deg.isel(years=year_index)), 1, 0)
+mhw_4 = xr.where(~np.isnan(temp_mhw.temp_4deg.isel(years=year_index)), 1, 0)
+
+# Give priority to MHW -- assign highest MHW level if overlapping -- to avoid counting cell twice
+# mhw_mask = xr.where(mhw_4 == 1, 4,
+#             xr.where(mhw_3 == 1, 3,
+#             xr.where(mhw_2 == 1, 2,
+#             xr.where(mhw_1 == 1, 1, 0))))  # 0 = no MHW
+# valid_mask = (~np.isnan(daily_growth)) & (mhw_mask.notnull())
+# growth_by_mhw_level = {
+#     level: daily_growth.where((mhw_mask == level) & valid_mask)
+#     for level in range(5)
+# }
+
+# Non non-exclusive masks, i.e. a 4°C MHW also counted as a 1°C
+growth_by_mhw_level = {
+    1: daily_growth.where(mhw_1 == 1),
+    2: daily_growth.where(mhw_2 == 1),
+    3: daily_growth.where(mhw_3 == 1),
+    4: daily_growth.where(mhw_4 == 1),
+    0: daily_growth.where((mhw_1 + mhw_2 + mhw_3 + mhw_4) == 0)  # explicitly outside any MHW
+}
+
+# -- Compute length under the different scenarios
+initial_length = 35
+intermoult_period = 10
+n_days = daily_growth.sizes["days"]+1
+
+length_by_mhw_level = {}
+for level in range(5):
+    growth = growth_by_mhw_level[level]  # shape: (days, eta_rho, xi_rho)
+
+    # 1. Mean growth over space for each day (daily)
+    daily_mean_growth = growth.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+
+    # 2. Calculate length under the different scenarios -- with IMP=10days
+    # Average over 10-day blocks 
+    growth_blocks = []
+    for i in range(0, n_days, intermoult_period):
+        block = daily_mean_growth.isel(days=slice(i, min(i + intermoult_period, n_days)))
+        avg_block_growth = block.mean().item()  # scalar growth per day in this block
+        growth_blocks.extend([avg_block_growth] * len(block))  # same growth each day in block
+    
+    # Length
+    length_series = [initial_length]
+    current_length = initial_length
+    for i in range(1, n_days):  # Start from 1 because day 0 is initial
+        if i % intermoult_period == 0:
+            current_length += growth_blocks[i - 1]  # Apply growth from previous full day
+        length_series.append(current_length)
+
+    # Convert to DataArray
+    length_by_mhw_level[level] = xr.DataArray(
+        data=length_series,
+        dims=["days"],
+        coords={"days": simulated_length_1season_daily.days}
+    )
+
+# -- Do the same but mean avg over full period - disregarding mhws 
+# Mean daily growth per day
+daily_mean_growth_full_extent = daily_growth.where((~np.isnan(daily_growth))).mean(dim=["eta_rho", "xi_rho"], skipna=True)
+
+# Average over 10-day blocks
+growth_blocks_full_extent = []
+for i in range(0, n_days, intermoult_period):
+    block = daily_mean_growth_full_extent.isel(days=slice(i, min(i + intermoult_period, n_days)))
+    avg_block_growth = block.mean().item()
+    growth_blocks_full_extent.extend([avg_block_growth] * len(block))
+
+# Length
+length_full_extent = [initial_length]
+current_length_full_extent = initial_length
+for i in range(1, n_days):  # Start from 1 because day 0 is initial
+    if i % intermoult_period == 0:
+        current_length_full_extent += growth_blocks_full_extent[i - 1]  # Apply growth from previous full day
+    length_full_extent.append(current_length_full_extent)
+
+length = np.array(length_full_extent)
+
+
+print(f"Final krill length (no MHW distinction): {length[-1]:.2f} mm")
+print("Final krill length at day 180 under each MHW category:")
+for level in range(5):
+    final_length = length_by_mhw_level[level].isel(days=-1).item()
+    print(f"  MHW Level {level}: {final_length:.2f} mm")
+
+
+# Rename
+weighted_mean_length_1season = xr.DataArray(data=length, dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="weighted_mean_length_1season")
+mean_length_study_area_non_MHWs = xr.DataArray(data=length_by_mhw_level[0], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_study_area_non_MHWs")
+average_length_ts_1deg = xr.DataArray(data=length_by_mhw_level[1], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_1deg")
+average_length_ts_2deg = xr.DataArray(data=length_by_mhw_level[2], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_2deg")
+average_length_ts_3deg = xr.DataArray(data=length_by_mhw_level[3], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_3deg")
+average_length_ts_4deg = xr.DataArray(data=length_by_mhw_level[4], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_4deg")
+
+print(f"Full seasonal mean length (weighted): {weighted_mean_length_1season[-1].values:.2f} mm")
+print(f"Non MHW mean length:                  {mean_length_study_area_non_MHWs[-1].values:.2f} mm")
+print(f"MHW 1°C mean length:                  {average_length_ts_1deg[-1].values:.2f} mm")
+print(f"MHW 2°C mean length:                  {average_length_ts_2deg[-1].values:.2f} mm")
+print(f"MHW 3°C mean length:                  {average_length_ts_3deg[-1].values:.2f} mm")
+print(f"MHW 4°C mean length:                  {average_length_ts_4deg[-1].values:.2f} mm")
+
 
 # %% ======================== Spatial Average - weighted by exposure time ========================
-# -- Number of days under MHWs per cell
-mhws_exposure_days = xr.open_dataset(os.path.join(path_det, 'nb_days_underMHWs_5mFULL.nc')) #shape: (39, 231, 1442)
-mhws_exposure_days_Atl = subset_spatial_domain(mhws_exposure_days) #shape: (39, 231, 360)
-mhws_exposure_days_Atl_1yr = mhws_exposure_days_Atl.isel(years=year_index)
+# # -- Number of days under MHWs per cell
+# mhws_exposure_days = xr.open_dataset(os.path.join(path_det, 'nb_days_underMHWs_5mFULL.nc')) #shape: (39, 231, 1442)
+# mhws_exposure_days_Atl = subset_spatial_domain(mhws_exposure_days) #shape: (39, 231, 360)
+# mhws_exposure_days_Atl_1yr = mhws_exposure_days_Atl.isel(years=year_index)
 
-def valid_cells(length_ds, exposure_ds, initial_value=35):
+# # -- Assigning cells to only 1 scenarios 
+# # i.e. cell that have been exposed in a 4°C mhw are only conisdered in a 4°C and not in 1 2 3 and non_mhw. Avoiding counting cells multiple times
+# deg1_mask = mhws_exposure_days_Atl_1yr.nb_days_1deg > 0
+# deg2_mask = mhws_exposure_days_Atl_1yr.nb_days_2deg > 0
+# deg3_mask = mhws_exposure_days_Atl_1yr.nb_days_3deg > 0
+# deg4_mask = mhws_exposure_days_Atl_1yr.nb_days_4deg > 0
+# any_mhw_mask = (deg1_mask | deg2_mask | deg3_mask | deg4_mask)
+# non_mhw_mask = ~any_mhw_mask
+
+# # Priority assignment of scenarios to avoid multiple counting
+# scenario_mask = np.full(deg1_mask.shape, np.nan) #shape: (eta, xi)
+# scenario_mask[deg4_mask.values] = 4
+# scenario_mask[np.isnan(scenario_mask) & deg3_mask.values] = 3
+# scenario_mask[np.isnan(scenario_mask) & deg2_mask.values] = 2
+# scenario_mask[np.isnan(scenario_mask) & deg1_mask.values] = 1
+# scenario_mask[np.isnan(scenario_mask) & non_mhw_mask.values] = 0
+# # Convert to DataArray
+# scenario_mask = xr.DataArray(scenario_mask, coords=deg1_mask.coords, dims=deg1_mask.dims)
+
+# # --- Valid environmental cells (cells where both chla and temperature data are valid)
+# def get_valid_environmental_mask(chla, temp):
+#     return chla.notnull() & temp.notnull()
+
+# # Apply mask (valid if any day has valid data) - valid over time
+# env_mask = get_valid_environmental_mask(chla_surf_study_area_1season.chla, temp_avg_100m_study_area_1season.avg_temp)
+# env_static_mask = env_mask.any(dim="days") # valid cells - shape (231, 360)
+
+# # Apply the environmental validity mask to scenario (keep only valid cells for scenarios)
+# scenario_mask = scenario_mask.where(env_static_mask) # valid cells for scenarios - shape (231, 360)
+
+# # Count valid environmental cells per scenario (drivers!=Nans) -- should be equal to the sum of the valid cells at each scenarios
+# scenario_counts = {}
+# total_scenario_cells = 0
+# for cat in range(5):
+#     count = (scenario_mask == cat).sum().item()
+#     scenario_counts[cat] = count
+#     total_scenario_cells += count
+#     # print(f"Category {cat}: {count} valid environmental cells")
+
+# print(f"\nSum of all scenario-assigned cells: {total_scenario_cells}")
+# print(f"Total valid environmental cells:     {env_static_mask.sum().item()}")
+
+# def valid_cells(length_ds, exposure_ds, valid_env_mask, scenario_mask, scenario_value):
+#     # Mask length and exposure by:
+#     # - Valid environmental mask (valid_env_mask)
+#     # - Scenario mask equal to scenario_value (e.g. 0 for non-MHW, 1 for 1deg, etc)
+#     scenario_specific_mask = (scenario_mask == scenario_value)
     
-    # Identify where length has changed from the initial value - else it mean that temp and chla wee nan so should not be considered 
-    growth_occurred = ~np.isclose(length_ds.isel(days=-1), initial_value)
-    growth_mask = growth_occurred & length_ds.isel(days=-1).notnull()
+#     # Combine masks
+#     combined_mask = valid_env_mask & scenario_specific_mask
     
-    # Mask simulated length to keep only cell where krill have growth 
-    length_masked = length_ds.where(growth_mask)
-    exposure_masked = exposure_ds.where(growth_mask)
+#     # Apply combined mask to length and exposure
+#     length_masked = length_ds.where(combined_mask)
+#     exposure_masked = exposure_ds.where(combined_mask) if exposure_ds is not None else None
     
-    return length_masked, exposure_masked
+#     if exposure_masked is not None:
+#         # Number of valid cells per day
+#         n_valid_cells_per_day = (~length_masked.isnull()).sum(dim=["eta_rho", "xi_rho"])
+#         normalized_exposure = exposure_masked / n_valid_cells_per_day
+#         return length_masked, normalized_exposure
+#     else:
+#         return length_masked, None
 
-# # Identify where length has changed from the initial value - else it mean that temp and chla wee nan so should not be considered 
-# initial_value = 35
-# growth_occurred = ~np.isclose(simulated_length_study_area_MHWs_1deg[-1], initial_value)
-# growth_mask = growth_occurred & simulated_length_study_area_MHWs_1deg.isel(days=-1).notnull()
+# # -- Mean time series -- Spatial average with weight on mhw exposure -- 1 season
+# # Non MHWs
+# length_masked_nonmhw, exposure_masked_nonmhw = valid_cells(simulated_length_study_area_non_MHWs, mhws_exposure_days_Atl_1yr.nb_days_non_mhw,
+#                                                            env_static_mask, scenario_mask, scenario_value=0)
+# mean_length_study_area_non_MHWs = ((length_masked_nonmhw * exposure_masked_nonmhw).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_nonmhw.sum(dim=['eta_rho', 'xi_rho']))
 
-# # Mask simulated length to keep only cell where krill have growth 
-# length_masked = simulated_length_study_area_MHWs_1deg.where(growth_mask)
-# exposure_masked = mhws_exposure_days_Atl_1yr.nb_days_1deg.where(growth_mask)
+# # MHWs Scenarios - 1 season
+# length_masked_1deg, exposure_masked_1deg = valid_cells(simulated_length_study_area_MHWs_1deg, mhws_exposure_days_Atl_1yr.nb_days_1deg,
+#                                                            env_static_mask, scenario_mask, scenario_value=1)
+# average_length_ts_1deg = ((length_masked_1deg * exposure_masked_1deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_1deg.sum(dim=['eta_rho', 'xi_rho']))
 
+# length_masked_2deg, exposure_masked_2deg = valid_cells(simulated_length_study_area_MHWs_2deg, mhws_exposure_days_Atl_1yr.nb_days_2deg,
+#                                                            env_static_mask, scenario_mask, scenario_value=2)
+# average_length_ts_2deg = ((length_masked_2deg * exposure_masked_2deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_2deg.sum(dim=['eta_rho', 'xi_rho']))
 
-# -- Mean time series -- Spatial average with weight on mhw exposure 
-# Non MHWs - 1 season
-length_masked_nonmhw, exposure_masked_nonmhw = valid_cells(simulated_length_study_area_non_MHWs, mhws_exposure_days_Atl_1yr.nb_days_non_mhw)
-mean_length_study_area_non_MHWs = ((length_masked_nonmhw * exposure_masked_nonmhw).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_nonmhw.sum(dim=['eta_rho', 'xi_rho']))
+# length_masked_3deg, exposure_masked_3deg = valid_cells(simulated_length_study_area_MHWs_3deg, mhws_exposure_days_Atl_1yr.nb_days_3deg,
+#                                                            env_static_mask, scenario_mask, scenario_value=3)
+# average_length_ts_3deg = ((length_masked_3deg * exposure_masked_3deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_3deg.sum(dim=['eta_rho', 'xi_rho']))
 
-# MHWs Scenarios - 1 season
-length_masked_1deg, exposure_masked_1deg = valid_cells(simulated_length_study_area_MHWs_1deg, mhws_exposure_days_Atl_1yr.nb_days_1deg)
-average_length_ts_1deg = ((length_masked_1deg * exposure_masked_1deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_1deg.sum(dim=['eta_rho', 'xi_rho']))
-
-length_masked_2deg, exposure_masked_2deg = valid_cells(simulated_length_study_area_MHWs_2deg, mhws_exposure_days_Atl_1yr.nb_days_2deg)
-average_length_ts_2deg = ((length_masked_2deg * exposure_masked_2deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_2deg.sum(dim=['eta_rho', 'xi_rho']))
-
-length_masked_3deg, exposure_masked_3deg = valid_cells(simulated_length_study_area_MHWs_3deg, mhws_exposure_days_Atl_1yr.nb_days_3deg)
-average_length_ts_3deg = ((length_masked_3deg * exposure_masked_3deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_3deg.sum(dim=['eta_rho', 'xi_rho']))
-
-length_masked_4deg, exposure_masked_4deg = valid_cells(simulated_length_study_area_MHWs_4deg, mhws_exposure_days_Atl_1yr.nb_days_4deg)
-average_length_ts_4deg = ((length_masked_4deg * exposure_masked_4deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_4deg.sum(dim=['eta_rho', 'xi_rho']))
+# length_masked_4deg, exposure_masked_4deg = valid_cells(simulated_length_study_area_MHWs_4deg, mhws_exposure_days_Atl_1yr.nb_days_4deg,
+#                                                            env_static_mask, scenario_mask, scenario_value=4)
+# average_length_ts_4deg = ((length_masked_4deg * exposure_masked_4deg).sum(dim=['eta_rho', 'xi_rho']) / exposure_masked_4deg.sum(dim=['eta_rho', 'xi_rho']))
 
 
 # -- Mean time series for the full period, i.e. diseagrding the mhws scenarios
-# All years and no mhw filtering
-mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.mean(dim=["eta_rho", "xi_rho", "years"], skipna=True)
-std_length_mean_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.std(dim=["eta_rho", "xi_rho", "years"], skipna=True)
+# length_masked_yr, _ = valid_cells(simulated_length_study_area_1season, None, env_static_mask, None, None) #shape: (181, 231, 360)
+# mean_length_study_area_yr = length_masked_yr.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+# std_length_mean_length_study_area_yr = length_masked_yr.std(dim=["eta_rho", "xi_rho"], skipna=True)
+
+# Total exposuree days (weights) in 1 season
+# w_nonmhw = non_mhw_mask.sum(dim=["eta_rho", "xi_rho"])
+# w_1deg = deg1_mask.sum(dim=["eta_rho", "xi_rho"])
+# w_2deg = deg2_mask.sum(dim=["eta_rho", "xi_rho"])
+# w_3deg = deg3_mask.sum(dim=["eta_rho", "xi_rho"])
+# w_4deg = deg4_mask.sum(dim=["eta_rho", "xi_rho"])
+
+# # Weighted mean
+# weighted_sum = mean_length_study_area_non_MHWs * w_nonmhw + average_length_ts_1deg * w_1deg + average_length_ts_2deg * w_2deg + average_length_ts_3deg * w_3deg + average_length_ts_4deg * w_4deg
+# total_weight = w_nonmhw + w_1deg + w_2deg + w_3deg + w_4deg
+# weighted_mean_length_1season = weighted_sum / total_weight
+# weighted_std_length_1season = np.sqrt((w_nonmhw * (mean_length_study_area_non_MHWs - weighted_mean_length_1season)**2 +
+#                                       w_1deg * (average_length_ts_1deg - weighted_mean_length_1season)**2 +
+#                                       w_2deg * (average_length_ts_2deg - weighted_mean_length_1season)**2 +
+#                                       w_3deg * (average_length_ts_3deg - weighted_mean_length_1season)**2 +
+#                                       w_4deg * (average_length_ts_4deg - weighted_mean_length_1season)**2) / total_weight)
+
+# print(f"Full seasonal mean length (weighted): {weighted_mean_length_1season[-1].values:.2f} mm")
+# print(f"Non MHW mean length:                  {mean_length_study_area_non_MHWs[-1].values:.2f} mm")
+# print(f"MHW 1°C mean length:                  {average_length_ts_1deg[-1].values:.2f} mm")
+# print(f"MHW 2°C mean length:                  {average_length_ts_2deg[-1].values:.2f} mm")
+# print(f"MHW 3°C mean length:                  {average_lngth_ts_3deg[-1].values:.2f} mm")
+# print(f"MHW 4°C mean length:                  {average_length_ts_4deg[-1].values:.2f} mm")
+
+# %% --- soft assignment
+
+# # Total exposure days per cell across all categories
+# # Prepare an empty array to hold the total days per cell according to assigned scenario
+# total_days_corrected = xr.full_like(mhws_exposure_days_Atl_1yr.nb_days_non_mhw, fill_value=0)
+
+# # Assign days based on scenario_mask
+# total_days_corrected = total_days_corrected.where(scenario_mask != 0, mhws_exposure_days_Atl_1yr.nb_days_non_mhw)
+# total_days_corrected = total_days_corrected.where(scenario_mask != 1, mhws_exposure_days_Atl_1yr.nb_days_1deg)
+# total_days_corrected = total_days_corrected.where(scenario_mask != 2, mhws_exposure_days_Atl_1yr.nb_days_2deg)
+# total_days_corrected = total_days_corrected.where(scenario_mask != 3, mhws_exposure_days_Atl_1yr.nb_days_3deg)
+# total_days_corrected = total_days_corrected.where(scenario_mask != 4, mhws_exposure_days_Atl_1yr.nb_days_4deg)
+# # print(f"Max number of days under MHWs: {total_days_corrected.max().values}") #181
+
+# # Normalize -- fractions per cell
+# frac_non_mhw = mhws_exposure_days_Atl_1yr.nb_days_non_mhw / total_days_corrected
+# frac_1deg = mhws_exposure_days_Atl_1yr.nb_days_1deg / total_days_corrected
+# frac_2deg = mhws_exposure_days_Atl_1yr.nb_days_2deg / total_days_corrected
+# frac_3deg = mhws_exposure_days_Atl_1yr.nb_days_3deg / total_days_corrected
+# frac_4deg = mhws_exposure_days_Atl_1yr.nb_days_4deg / total_days_corrected
+
+# print(f"Max fraction for cells under 4°C MHWs: {frac_4deg.max().values}") #0.24
+# print(f"Max fraction for cells under 1°C MHWs: {frac_1deg.max().values}") #1.0
+
+# def weighted_mean_length(length_ds, frac_weights):
+#     # Multiply length by fractional weights, sum spatially, divide by sum of weights
+#     numerator = (length_ds * frac_weights).sum(dim=["eta_rho", "xi_rho"])
+#     denominator = frac_weights.sum(dim=["eta_rho", "xi_rho"])
+#     return numerator / denominator
+
+# mean_length_nonmhw = weighted_mean_length(simulated_length_study_area_1season, frac_non_mhw)
+# mean_length_1deg = weighted_mean_length(simulated_length_study_area_1season, frac_1deg)
+# mean_length_2deg = weighted_mean_length(simulated_length_study_area_1season, frac_2deg)
+# mean_length_3deg = weighted_mean_length(simulated_length_study_area_1season, frac_3deg)
+# mean_length_4deg = weighted_mean_length(simulated_length_study_area_1season, frac_4deg)
+
+# # Total weighted mean (all scenarios combined) should match full spatial mean
+# total_weighted_mean = (
+#     mean_length_nonmhw * frac_non_mhw.sum(["eta_rho", "xi_rho"]) +
+#     mean_length_1deg * frac_1deg.sum(["eta_rho", "xi_rho"]) +
+#     mean_length_2deg * frac_2deg.sum(["eta_rho", "xi_rho"]) +
+#     mean_length_3deg * frac_3deg.sum(["eta_rho", "xi_rho"]) +
+#     mean_length_4deg * frac_4deg.sum(["eta_rho", "xi_rho"])
+# ) / total_days_corrected.sum(["eta_rho", "xi_rho"])
+
+# print(f"Full spatial mean length: {simulated_length_study_area_1season.mean(['eta_rho', 'xi_rho'])[-1].values:.2f} mm")
 
 
 # %% ============== Plotting length over 1 season ==============
@@ -1026,13 +1262,15 @@ ax.plot(days_xaxis, average_length_ts_3deg, color='#E07800', linewidth=lw, label
 ax.plot(days_xaxis, average_length_ts_4deg, color='#9B2808', linewidth=lw, label='4°C and 90th perc')
 ax.plot(days_xaxis, mean_length_study_area_non_MHWs, label=f"Non-MHWs", color="black", linestyle='-', linewidth=lw)
 
-mean_values_1980_2018 = mean_length_study_area_1980_2019.values
-std_values = std_length_mean_length_study_area_1980_2019.values
-ax.plot(days_xaxis, mean_values_1980_2018, label="Mean (1980-2018)", color="grey", linestyle='--', linewidth=lw)
-ax.fill_between(days_xaxis,
-                mean_values_1980_2018 - std_values,
-                mean_values_1980_2018 + std_values,
-                color="gray", alpha=0.2, label="±1 $\sigma _{1980-2018}$")
+# mean_values_1980_2018 = mean_length_study_area_1980_2019.values
+# std_values = std_length_mean_length_study_area_1980_2019.values
+# mean_values_season = weighted_mean_length_1season.values
+# std_values_season  = weighted_std_length_1season.values
+# ax.plot(days_xaxis, mean_values_season, label="Mean (1980-2018)", color="grey", linestyle='--', linewidth=lw)
+# ax.fill_between(days_xaxis,
+#                 mean_values_season - std_values_season,
+#                 mean_values_season + std_values_season,
+#                 color="gray", alpha=0.2, label="±1 $\sigma _{1980-2018}$")
 
 # Define labels to keep
 wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
@@ -1094,7 +1332,6 @@ custom_cmap = mcolors.LinearSegmentedColormap.from_list("GreenYellowRed", colors
 norm = mpl.colors.Normalize(vmin=1980, vmax=2019)
 sm = mpl.cm.ScalarMappable(cmap=custom_cmap, norm=norm)
 sm.set_array([])
-
 
 plot = 'slides'  # 'report' or 'slides'
 
