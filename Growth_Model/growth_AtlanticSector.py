@@ -145,7 +145,7 @@ if plot == 'report':
     fig_width = 6.3228348611
     fig_height = 9.3656988889
     fig, axs = plt.subplots(3, 1, figsize=(fig_width, fig_height), subplot_kw={'projection': ccrs.SouthPolarStereo()})
-    fig.subplots_adjust(hspace=-0.2) 
+    fig.subplots_adjust(hspace=-0.2)
 else:
     fig_width = 16
     fig_height = 8
@@ -382,7 +382,7 @@ for threshold_deg, top5_years, top5_extent in results:
 
 # Top 5 years with biggest 1°C MHW extent: 2016, 1989, 1988, 2018, 2000
 # Top 5 years with biggest 2°C MHW extent: 2016, 1989, 1988, 2018, 2000
-# Top 5 years with biggest 3°C MHW extent:1989, 2016, 2000, 1984, 2002
+# Top 5 years with biggest 3°C MHW extent: 1989, 2016, 2000, 1984, 2002
 # Top 5 years with biggest 4°C MHW extent: 1989, 1984, 2000, 2002, 2009
 
 # %% ======================== Selected years ========================
@@ -540,22 +540,16 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
-# %%  ======================== INPUTS growth calculation ========================
-# Year of interest
-yr_chosen=2
-year_index = selected_years_idx[yr_chosen] 
-
+# %%  ======================== Drivers ========================
 # ==== Temperature [°C] 
 # Weighted averaged temperature of the first 100m - Austral summer - 60S - years = seasonal (i.e. ranging from 1980 to 2018 with days 304-119)
 temp_avg_100m_SO_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_allyears_seasonal.nc')) #shape (39, 181, 231, 1442)
 temp_avg_100m_study_area_allyrs = subset_spatial_domain(temp_avg_100m_SO_allyrs) #select spatial extent -- shape (39, 181, 231, 360)
-temp_avg_100m_study_area_1season = temp_avg_100m_study_area_allyrs.isel(years=year_index) #select temporal extent for 1 year of interest -- shape (181, 231, 360)
 
 # ==== Chla [mh Chla/m3] 
 # Weighted averaged chla of the first 100m - Austral summer - 60S - years = seasonal (i.e. ranging from 1980 to 2018 with days 304-119)
 chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
 chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) #select spatial extent
-chla_surf_study_area_1season = chla_surf_study_area_allyrs.isel(years=year_index) #select temporal extent for 1 year of interest -- shape (181, 231, 360)
 
 #%% ============== Equation decomposition ==============
 def decompose_growth(chla, temp, length=35):
@@ -897,28 +891,214 @@ temp_non_mhw_study_area_1season = temp_non_mhw.isel(years=year_index)
 chla_non_mhw_study_area_1season = chla_non_mhw.isel(years=year_index)
 
 
-# %% ============== Calculating length ==============
+# %% ============== Calculating length Differences ==============
 from Growth_Model.growth_model import length_Atkison2006  
 
-# == Length Southern Ocean
-# simulated_length_full_SO = length_Atkison2006(chla=chla_surf_1season_SO.raw_chla, temp=temp_avg_100m_1season_SO.avg_temp, initial_length= 35, intermoult_period=10)
-# mean_length_area_SO = simulated_length_full_SO.mean(dim=["eta_rho", "xi_rho"])
+# == Climatological Drivers -> Mean Chla and T°C  (days, eta, xi)
+temp_clim_atl = temp_avg_100m_study_area_allyrs.isel(years=slice(0,30)) #shape: (30, 181, 231, 360)
+temp_clim_atl_mean = temp_clim_atl.mean(dim=['years']) #shape: (181, 231, 360)
+chla_clim_atl = chla_surf_study_area_allyrs.isel(years=slice(0,30))
+chla_clim_atl_mean = chla_clim_atl.mean(dim=['years'])
 
-# == Length Atlantic Sector for all years
-lengths_allyears = []
+# == Climatological Length
+climatological_length = length_Atkison2006(chla=chla_clim_atl_mean.chla, temp=temp_clim_atl_mean.avg_temp, initial_length=35, intermoult_period=10)
 
-for yr in range(39):
-    print(f' -- Processing {1980+yr}')
-    chla = chla_surf_study_area_allyrs.chla.isel(years=yr)
-    temp = temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr)
+# == Length for 1 year (3years with most MHWs)
+length_mhw_yr0 = length_Atkison2006(chla=chla_surf_study_area_allyrs.chla.isel(years=selected_years_idx[0]), 
+                                   temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=selected_years_idx[0]), 
+                                   initial_length=35, intermoult_period=10)
+length_mhw_yr1 = length_Atkison2006(chla=chla_surf_study_area_allyrs.chla.isel(years=selected_years_idx[1]), 
+                                   temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=selected_years_idx[1]), 
+                                   initial_length=35, intermoult_period=10)
+length_mhw_yr2 = length_Atkison2006(chla=chla_surf_study_area_allyrs.chla.isel(years=selected_years_idx[2]), 
+                                   temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=selected_years_idx[2]), 
+                                   initial_length=35, intermoult_period=10)
 
-    simulated_length = length_Atkison2006(chla=chla, temp=temp, initial_length=35, intermoult_period=10)
+# === Last days values (eta, xi)
+clim_last = climatological_length[-1, :, :]
+yr0_last = length_mhw_yr0[-1, :, :]
+yr1_last = length_mhw_yr1[-1, :, :]
+yr2_last = length_mhw_yr2[-1, :, :]
 
-    lengths_allyears.append(simulated_length)
+diff0 = yr0_last - clim_last
+diff1 = yr1_last - clim_last
+diff2 = yr2_last - clim_last
 
-# Combine and assign years
-simulated_length_study_area_1980_2019 = xr.concat(lengths_allyears, dim='years')
-simulated_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.assign_coords(years=chla_surf_study_area_allyrs['years'])
+# %% ============== Plot the length differences ============== 
+# === Layout config ===
+plot = 'report' #report slides
+
+if plot == 'report':
+    fig_width = 6.3228348611
+    fig_height = fig_width/1.5
+    
+else:
+    fig_width = 12
+    fig_height = 8
+  
+# === Figure layout ===
+fig, axs = plt.subplots(2, 4, figsize=(fig_width, fig_height), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+plt.subplots_adjust(hspace=0.05, wspace=0.05)
+
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+
+# === Setup: circle for polar projection boundary ===
+theta = np.linspace(np.pi / 2, np.pi, 100)
+center, radius = [0.5, 0.51], 0.5
+arc = np.vstack([np.cos(theta), np.sin(theta)]).T
+verts = np.concatenate([[center], arc * radius + center, [center]])
+circle = mpath.Path(verts)
+
+
+# === Plotting setup ===
+from matplotlib.colors import LinearSegmentedColormap
+# colors = ["#561664", "#952374", "#FFFFFF", "#F59F00", "#A72529"]  
+colors = ["#762a83", "#c2a5cf", "#f7f7f7", "#fdae61", "#d73027"]  # ColorBrewer-inspired
+
+cmap_len = LinearSegmentedColormap.from_list("length", colors, N=256)
+# cmap_len = 'viridis'
+cmap_diff = 'coolwarm'
+norm_len = mcolors.Normalize(vmin=33, vmax=37)
+norm_diff = mcolors.TwoSlopeNorm(vmin=-2, vcenter=0, vmax=2)
+
+# === Data and titles ===
+plot_data = [
+    (clim_last, "Climatological", cmap_len, norm_len),
+    (yr0_last,  f"30th April {selected_years[0]+1}", cmap_len, norm_len),
+    (yr1_last,  f"30th April {selected_years[1]+1}", cmap_len, norm_len),
+    (yr2_last,  f"30th April {selected_years[2]+1}", cmap_len, norm_len),
+    (None,      "", None, None),  # Empty panel
+    (diff0,     rf"30th April $\Delta_{{{selected_years[0]+1} - \mathrm{{clim}}}}$", cmap_diff, norm_diff),
+    (diff1,     rf"30th April $\Delta_{{{selected_years[1]+1} - \mathrm{{clim}}}}$", cmap_diff, norm_diff),
+    (diff2,     rf"30th April $\Delta_{{{selected_years[2]+1} - \mathrm{{clim}}}}$", cmap_diff, norm_diff)
+]
+
+ims = []
+for i, (data, title, cmap, norm) in enumerate(plot_data):
+    row = i // 4
+    col = i % 4
+    ax = axs[row, col]
+
+    if data is not None:
+        im = ax.pcolormesh(growth_study_area.lon_rho, growth_study_area.lat_rho, data,
+                           transform=ccrs.PlateCarree(), cmap=cmap, norm=norm,
+                           shading='auto', rasterized=True)
+        ims.append(im)
+    else:
+        ax.axis('off')  # Hide empty subplot
+        continue
+
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map extent and features
+    ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=4)  # Land should be drawn above the plot
+    lw = 0.7 if plot == 'slides' else 0.4
+    ax.coastlines(color='black', linewidth=lw, zorder=5)
+    ax.set_facecolor('#F6F6F3')
+        
+    # Gridlines
+    import matplotlib.ticker as mticker
+    from cartopy.mpl.ticker import LongitudeFormatter
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.7, linestyle='--', linewidth=lw, zorder=7)
+    gl.xlocator = mticker.FixedLocator(np.arange(-80, 1, 20))  # -90, -60, -30, 0
+    gl.xformatter = LongitudeFormatter(degree_symbol='°', number_format='.0f', dateline_direction_label=False)
+    gl.yformatter = LatitudeFormatter()
+    gl.xlabels_top = False
+    gl.xlabels_bottom = False
+    gl.ylabels_right = False
+    gl.xlabels_left = True
+    gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs
+
+    # Titles
+    ax.set_title(title, **title_kwargs)
+
+# === Colorbars ===
+# Length colorbar (top row)
+cbar_ax1 = fig.add_axes([0.92, 0.55, 0.015, 0.35])  # [left, bottom, width, height]
+cbar1 = fig.colorbar(ims[0], cax=cbar_ax1, extend='both', **tick_kwargs)
+cbar1.set_label("Length [mm]", **label_kwargs)
+
+# Δ Length colorbar (bottom row)
+cbar_ax2 = fig.add_axes([0.92, 0.12, 0.015, 0.35])
+cbar2 = fig.colorbar(ims[4], cax=cbar_ax2, extend='both', **tick_kwargs)
+cbar2.set_label(r"$\Delta$ Length [mm]", **label_kwargs)
+
+# === Title & labels ===
+# Add a big title if plotting for slides
+if plot == 'slides':
+    fig.suptitle("Krill Length on Last Day of Season – Atlantic Sector",  y=0.98, **suptitle_kwargs)
+
+# === Save or show ===
+
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/case_study_AtlanticSector/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"length_differences_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+# %% =============== Impact of MHWs ===============
+# Define 2 areas to study
+# 1. Copy dataset
+chla = chla_surf_study_area_allyrs
+
+# 2. Convert longitude from [0, 360] → [-180, 180] if needed
+lon = xr.where(chla.lon_rho > 180, chla.lon_rho - 360, chla.lon_rho)
+lat = chla.lat_rho
+
+# 3. Define masks for each subregion
+
+# == Subregion 1: 60–63°S, 70–90°W
+mask_1 = ((lat >= -63) & (lat <= -60)) & ((lon >= -90) & (lon <= -70))
+
+# == Subregion 2: 63–68°S, 60–68°W
+mask_2 = ((lat >= -68) & (lat <= -63)) & ((lon >= -68) & (lon <= -60))
+
+# 4. Apply masks to get subregion indices
+idx_eta_1, idx_xi_1 = np.where(mask_1)
+idx_eta_2, idx_xi_2 = np.where(mask_2)
+
+# 5. Use bounding box around those points to subset dataset
+def bounding_box_slice(eta_idx, xi_idx, pad=0):
+    return slice(min(eta_idx)-pad, max(eta_idx)+1+pad), slice(min(xi_idx)-pad, max(xi_idx)+1+pad)
+
+eta_1, xi_1 = bounding_box_slice(idx_eta_1, idx_xi_1)
+eta_2, xi_2 = bounding_box_slice(idx_eta_2, idx_xi_2)
+
+# 6. Final subsets
+subregion_1 = chla.isel(eta_rho=eta_1, xi_rho=xi_1)
+subregion_2 = chla.isel(eta_rho=eta_2, xi_rho=xi_2)
+
+
+# # == Length Southern Ocean
+# # simulated_length_full_SO = length_Atkison2006(chla=chla_surf_1season_SO.raw_chla, temp=temp_avg_100m_1season_SO.avg_temp, initial_length= 35, intermoult_period=10)
+# # mean_length_area_SO = simulated_length_full_SO.mean(dim=["eta_rho", "xi_rho"])
+
+# # == Length Atlantic Sector for all years
+# lengths_allyears = []
+
+# for yr in range(39):
+#     print(f' -- Processing {1980+yr}')
+#     chla = chla_surf_study_area_allyrs.chla.isel(years=yr)
+#     temp = temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr)
+
+#     simulated_length = length_Atkison2006(chla=chla, temp=temp, initial_length=35, intermoult_period=10)
+
+#     lengths_allyears.append(simulated_length)
+
+# # Combine and assign years
+# simulated_length_study_area_1980_2019 = xr.concat(lengths_allyears, dim='years')
+# simulated_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.assign_coords(years=chla_surf_study_area_allyrs['years'])
 
 # %% ======================== Extracting the growth rate ========================
 # Calculate length on a daily basis
