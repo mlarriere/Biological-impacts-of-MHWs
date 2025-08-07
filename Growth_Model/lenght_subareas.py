@@ -60,6 +60,7 @@ print("Working directory set to:", os.getcwd())
 
 # Directories
 ds_roms = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/SO_d025_avg_daily_1979.nc')
+roms_bathymetry = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/SO_d025_avg_daily_1979.nc').h
 z_rho = np.load('/home/jwongmeng/work/ROMS/scripts/coords/z_rho.npy')
 
 path_temp = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/' # drift and bias corrected temperature files
@@ -116,6 +117,158 @@ chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf
 mhw_duration_seasonal = xr.open_dataset(os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))) #shape (39, 181, 231, 1442)
 
 
+roms_bathymetry_box= subset_spatial_domain(roms_bathymetry, lat_range=(-90, -60), lon_range=(250, 360))
+
+
+# %% Finding extnet
+import seaborn as sns
+from matplotlib.colors import TwoSlopeNorm
+import matplotlib.ticker as mticker
+
+# Central point of Box 3
+lat_center = -61.0
+lon_center = 286.0
+
+# Updated expansion list with smaller and mid
+expansions = [0.25, 0.5, 1.0, 1.25, 1.5, 2.0, 2.5]
+selected_years = [1989, 2000, 2016]
+full_palette = ['red', 'purple', 'orange', 'green', 'blue', 'brown', 'cyan']  # extended to match expansions
+
+for year in selected_years:
+    box_sizes = []
+    temp_dists = []
+    box_outlines = []
+    labels = []
+    all_temp_boxes = []
+    valid_colors = []
+
+    for i, expand in enumerate(expansions):
+        lat_min = lat_center - expand
+        lat_max = lat_center + expand
+        lon_min = lon_center - expand
+        lon_max = lon_center + expand
+
+        if lat_max > -60:
+            continue  # keep everything south of 60°S
+
+        temp_box = subset_spatial_domain(
+            temp_avg_100m_SO_allyrs.sel(years=[year]),
+            lat_range=(lat_min, lat_max),
+            lon_range=(lon_min, lon_max)
+        )
+
+        if temp_box.sizes['eta_rho'] == 0 or temp_box.sizes['xi_rho'] == 0:
+            continue
+
+        temp_data = temp_box['avg_temp'].isel(years=0)  # [days, eta_rho, xi_rho]
+        flat_temp = temp_data.values.flatten()
+        flat_temp = flat_temp[~np.isnan(flat_temp)]
+
+        if len(flat_temp) == 0:
+            continue
+
+        lat_size = lat_max - lat_min
+        lon_size = lon_max - lon_min
+        box_area = lat_size * lon_size
+
+        box_sizes.append(box_area)
+        temp_dists.append(flat_temp)
+        box_outlines.append(((lon_min, lon_max), (lat_min, lat_max)))
+        labels.append(f"{lat_size:.2f}° x {lon_size:.2f}°")
+        all_temp_boxes.append(temp_data)
+        valid_colors.append(full_palette[i])  # match color to valid box
+
+    if not all_temp_boxes:
+        continue  # skip if no valid boxes
+
+    # --- Determine dynamic map extent ---
+    all_lons = []
+    all_lats = []
+    for (lon_bounds, lat_bounds) in box_outlines:
+        lon_min, lon_max = lon_bounds
+        lat_min, lat_max = lat_bounds
+        all_lons.extend([lon_min, lon_max])
+        all_lats.extend([lat_min, lat_max])
+
+    # More horizontal (longitude) padding, less vertical (latitude)
+    lon_min_map = min(all_lons) - 3.0  # wider longitude padding
+    lon_max_map = max(all_lons) + 3.0
+    lat_min_map = max(min(all_lats) - 0.2, -63)
+    lat_max_map = min(max(all_lats) + 0.2, -60)
+
+    # === Map field (from largest valid box) ===
+    temp_data_largest = all_temp_boxes[-1]  # last one is largest extent
+    temp_mean_field = temp_data_largest.mean(dim='days')
+    temp_std_field = temp_data_largest.std(dim='days')
+
+    # === Plotting ===
+    fig = plt.figure(figsize=(13, 4))
+    gs = gridspec.GridSpec(nrows=1, ncols=2, width_ratios=[3, 2], wspace=0.3)
+
+    # --- Plot 1: KDE temperature distribution ---
+    ax1 = fig.add_subplot(gs[0])
+    for i, temp_vals in enumerate(temp_dists):
+        sns.kdeplot(temp_vals, label=labels[i], ax=ax1, color=valid_colors[i], linewidth=2)
+
+    ax1.set_title(f"Temperature Distribution ({year})")
+    ax1.set_xlabel("Temperature (°C)")
+    ax1.set_ylabel("Density")
+    ax1.legend(title="Box Extent", fontsize=8, title_fontsize=9)
+    ax1.grid(True)
+
+    # --- Plot 2: Polar map ---
+    ax2 = fig.add_subplot(gs[1], projection=ccrs.SouthPolarStereo())
+    ax2.set_extent([lon_min_map, lon_max_map, lat_min_map, lat_max_map], crs=ccrs.PlateCarree())
+    ax2.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
+    ax2.coastlines(color='black', linewidth=0.4, zorder=3)
+    ax2.set_facecolor('#DEE2E6')
+
+    # Add gridlines with labels
+    gl = ax2.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.7, linestyle='--')
+    gl.top_labels = False
+    gl.right_labels = False
+    gl.left_labels = True
+    gl.bottom_labels = True
+    gl.xformatter = ccrs.cartopy.mpl.gridliner.LONGITUDE_FORMATTER
+    gl.yformatter = ccrs.cartopy.mpl.gridliner.LATITUDE_FORMATTER
+    gl.xlocator = mticker.MultipleLocator(1)
+    gl.ylocator = mticker.MultipleLocator(0.5)
+
+    # Mean temp field as base (with white at 0°C)
+    im = ax2.pcolormesh(temp_data_largest.lon_rho, temp_data_largest.lat_rho, temp_mean_field,
+                        transform=ccrs.PlateCarree(), cmap='coolwarm', shading='auto',
+                        zorder=1)
+
+    # Add STD as contours
+    std_levels = np.linspace(np.nanmin(temp_std_field), np.nanmax(temp_std_field), 6)
+    cs = ax2.contour(temp_data_largest.lon_rho, temp_data_largest.lat_rho, temp_std_field,
+                     levels=std_levels, colors='black', linewidths=0.6,
+                     transform=ccrs.PlateCarree(), zorder=4)
+    ax2.clabel(cs, fmt='%.2f', fontsize=6)
+
+    # Latitude circle at -60°S
+    lons = np.linspace(-180, 180, 1000)
+    lats = np.full_like(lons, -60)
+    ax2.plot(lons, lats, transform=ccrs.PlateCarree(),
+             color='black', linestyle='--', linewidth=0.5, zorder=10)
+
+    # Draw all valid box outlines
+    for i, ((lon_bounds, lat_bounds), label) in enumerate(zip(box_outlines, labels)):
+        lon_min, lon_max = lon_bounds
+        lat_min, lat_max = lat_bounds
+        box_lons = [lon_min, lon_max, lon_max, lon_min, lon_min]
+        box_lats = [lat_min, lat_min, lat_max, lat_max, lat_min]
+        ax2.plot(box_lons, box_lats, transform=ccrs.PlateCarree(),
+                 linewidth=1.2, linestyle='-', color=valid_colors[i], alpha=0.8, zorder=5)
+
+    cbar = plt.colorbar(im, ax=ax2, orientation='vertical', shrink=0.7, pad=0.05)
+    cbar.set_label("Mean Temperature (°C)")
+
+    ax2.set_title("Box Extents + Mean and STD")
+    plt.tight_layout()
+    plt.show()
+
+
 
 # %% ====================== Candidating Areas ======================
 from scipy.ndimage import label
@@ -130,10 +283,10 @@ def count_events_longer_than_30days(da):
     return sum(events)
 
 lat_candidates = np.arange(-66, -60, 1.0)
-lon_candidates = np.arange(270, 310, 2.0)
+lon_candidates = np.arange(270, 290, 1.0)
 threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
 selected_years = [1989, 2000, 2016]
-cv_threshold = 0.3
+cv_threshold = 0.5
 
 results = []
 
@@ -193,15 +346,17 @@ for lat_min in lat_candidates:
                 'thresholds': thresholds_with_events
             })
 
-# %% ====================== Northern Extent ======================
+# %% ================================================================================================================================================================================
+#                                                                                           Northern Extent 
+#    ================================================================================================================================================================================
 candidate_boxes = {
-    'box0': {'lat_range': (-61, -60), 'lon_range': (270, 274)}, #no -mhw only on day1
-    'box1': {'lat_range': (-61, -60), 'lon_range': (278, 282)}, #no - only 4°C MHW
-    'box2': {'lat_range': (-62, -60), 'lon_range': (278, 282)},
-    'box3': {'lat_range': (-62, -60), 'lon_range': (284, 288)}, #yes!
+    'box0': {'lat_range': (-64.0, -61.0), 'lon_range': (272.0, 276.0)}, 
+    'box1': {'lat_range': (-64.0, -61.0), 'lon_range': (273.0, 277.0)},
+    'box2': {'lat_range': (-64.0, -61.0), 'lon_range': (274.0, 278.0)},
+    'box3': {'lat_range': (-61.0, -60), 'lon_range': (271.0, 275.0)}, 
 }
 
-selected_box_key = 'box3'  # box1 box2 box3
+selected_box_key = 'box3'  # box0 box1 box2 box3
 
 lat_range = candidate_boxes[selected_box_key]['lat_range']
 lon_range = candidate_boxes[selected_box_key]['lon_range']
@@ -216,7 +371,7 @@ mhw_north_box = subset_spatial_domain(mhw_duration_seasonal, lat_range=lat_range
 # %% ==================== Mean Temperature =====================
 selected_years = [1989, 2000, 2016]
 selected_years_idx = np.array(selected_years) - 1980  # [9, 20, 36]
-year_idx = selected_years_idx[0]
+year_idx = selected_years_idx[2]
 
 # --- North extent
 temp_north_avg = temp_north.isel(years=year_idx).mean(dim=['eta_rho', 'xi_rho']) #shape (181,)
@@ -225,11 +380,7 @@ temp_north_std = temp_north.isel(years=year_idx).std(dim=['eta_rho', 'xi_rho'])
 mean_val = temp_north_avg.avg_temp.mean().item()  # scalar mean value
 std_val = temp_north_std.avg_temp.mean().item()  # scalar std value
 
-cv = std_val / abs(mean_val) if mean_val != 0 else np.nan
-print(f"Coefficient of Variation (CV): {cv:.3f}")
-
 # %% ================ Plot MHWs ================
-
 # Threshold info
 threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
 threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
@@ -265,7 +416,7 @@ for i in range(6):
     axes.append(ax)
 
 for ax, day_idx, day_label in zip(axes, selected_days, day_labels):
-    data = mhw_north_box  # your dataset
+    data = mhw_north_box  
 
     # No event mask for that day averaged over years
     no_event_mask = ((data['det_1deg'].isel(years= year_idx, days=day_idx) == 0) &
@@ -285,7 +436,7 @@ for ax, day_idx, day_label in zip(axes, selected_days, day_labels):
     ax.coastlines(color='black', linewidth=lw, zorder=4)
     ax.set_facecolor('#DEE2E6')
 
-    ax.set_extent([280, 300, -70, -57], crs=ccrs.PlateCarree())
+    ax.set_extent([268, 288, -70, -57], crs=ccrs.PlateCarree())
     
     # Gridlines
     gl = ax.gridlines(draw_labels=True, linewidth=lw, color='gray', alpha=0.3, linestyle='--', zorder=9)
@@ -293,10 +444,32 @@ for ax, day_idx, day_label in zip(axes, selected_days, day_labels):
     gl.xlabel_style = gridlabel_kwargs
     gl.ylabel_style = gridlabel_kwargs  
 
+    # Sector boundaries
+    for lon in [-90, 120, 0]:
+            ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#080808', linestyle='--', linewidth=0.5)
+
     # Draw 60°S latitude circle accurately
     lons = np.linspace(-180, 180, 1000)  # or 0 to 360 if your data is in that range
     lats = np.full_like(lons, -60)       # constant latitude at -60°S
     ax.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=lw, zorder=10)
+
+    # --- Add bathymetry contours ---
+    # bathy_lon = roms_bathymetry['lon_rho']
+    # bathy_lat = roms_bathymetry['lat_rho']
+    # bathy = roms_bathymetry.where((bathy_lon >= 260) & (bathy_lon <= 300) & (bathy_lat >= -70) & (bathy_lat <= -60))
+    # contour_levels = [200, 2000]
+    # cs = ax.contour(
+    #     bathy_lon, bathy_lat, bathy,
+    #     levels=contour_levels,
+    #     colors='black',
+    #     linewidths=0.6,
+    #     linestyles='--',
+    #     transform=ccrs.PlateCarree(),
+    #     zorder=2
+    # )
+
+    # # Label the contours with depth values
+    # ax.clabel(cs, fmt='%d m', inline=True, fontsize=5, colors='black')
 
     ax.set_title(day_label, **title_kwargs)
 
@@ -328,42 +501,47 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"mhws_subarea_North_{year_idx+1980}_{plot}.pdf"
-    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
 else:    
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
 # %% ================== Identify events ==================
 from scipy.ndimage import label
+data = mhw_north_box  
 
-data = mhw_north_box  # mhw_duration_peninsula
-
-# Threshold configuration
 threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
-threshold_labels = ['$\geq$ 90th perc and 1°C', '$\geq$ 90th perc and 2°C', '$\geq$ 90th perc and 3°C', '$\geq$ 90th perc and 4°C']
+threshold_labels = ['$\\geq$ 90th perc and 1°C', '$\\geq$ 90th perc and 2°C', '$\\geq$ 90th perc and 3°C', '$\\geq$ 90th perc and 4°C']
 threshold_events = {}
 
 for var, label_name in zip(threshold_vars, threshold_labels):
-    mhw_north_box_filtered = data.where(mhw_north_box.duration > 30)
-
     # Binary 3D array: (days, eta_rho, xi_rho)
-    det = mhw_north_box_filtered[var].isel(years=year_idx).fillna(0).astype(bool)
+    det_filtered = data[var].isel(years=year_idx).fillna(0).astype(bool)
 
-    # 1 where ANY! pixel in the area exceeds threshold on that day
-    daily_series = det.any(dim=['eta_rho', 'xi_rho']).values  # shape (181,)
+    # Spatial fraction per day
+    total_valid = det_filtered.notnull().sum(dim=['eta_rho', 'xi_rho'])
+    daily_detected = det_filtered.sum(dim=['eta_rho', 'xi_rho'])
+    spatial_fraction = daily_detected / total_valid
 
-    # Label connected events in time (consecutive 1)
+    # Daily series of True where >5% of region is active
+    daily_series = (spatial_fraction > 0.05).values  # shape (181,)
+    
+    # daily_series = det_filtered.any(dim=['eta_rho', 'xi_rho'])
+
+    # Label connected time events
     labeled_array, num_events = label(daily_series)
 
-    # Store result
+    # Filter only events with duration > 30 days
+    event_lengths = [np.sum(labeled_array == i) for i in range(1, num_events + 1)]
+    long_events = [l for l in event_lengths if l > 30]
+
+    # Save
     threshold_events[label_name] = {
-        'n_events': num_events,
-        'lengths': [np.sum(labeled_array == i) for i in range(1, num_events + 1)],
-        'days': labeled_array  # for possible plotting
+        'n_events': len(long_events),
+        'lengths': long_events,
+        'days': labeled_array  # useful for plotting
     }
-
-
 
 # %% ================ LENGTH ================
 from Growth_Model.growth_model import length_Atkison2006  
@@ -432,8 +610,9 @@ ax.coastlines(color='black', linewidth=lw, zorder=3)
 ax.set_facecolor('#DEE2E6')
 
 # Zoom region
-ax.set_extent([280, 300, -70, -57], crs=ccrs.PlateCarree())
-
+# ax.set_extent([270, 290, -70, -57], crs=ccrs.PlateCarree())
+ax.set_extent([268, 288, -70, -57], crs=ccrs.PlateCarree())
+    
 # Gridlines
 gl = ax.gridlines(draw_labels=True, linewidth=lw, color='gray', alpha=0.3, linestyle='--', zorder=4)
 # gl.top_labels = False
@@ -445,6 +624,9 @@ gl.ylabel_style = gridlabel_kwargs
 # Draw 60°S latitude circle accurately
 lons = np.linspace(-180, 180, 1000)  # or 0 to 360 if your data is in that range
 lats = np.full_like(lons, -60)       # constant latitude at -60°S
+# Sector boundaries
+for lon in [-90, 120, 0]:
+        ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#080808', linestyle='--', linewidth=0.5)
 
 ax.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=lw, zorder=10)
 
@@ -461,8 +643,8 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"maplength_subarea_North_{year_idx+1980}_{plot}.pdf"
-    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
 else:    
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
@@ -577,8 +759,547 @@ yticks = np.arange(ymin, ymax + 0.01, 0.5)
 ax2.set_yticks(yticks)
 
 
+
 # --- MHW Area Coverage Plot ---
-data = mhw_north_box.where(mhw_north_box.duration > 30)
+data = mhw_north_box
+eta_dim = data.dims['eta_rho']
+xi_dim = data.dims['xi_rho']
+total_area = eta_dim * xi_dim
+
+for var, label in zip(['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg'], threshold_colors.keys()):
+    detection = data[var].isel(years=year_idx).fillna(0).astype(bool)  # [days, y, x]
+    active_days_mask = threshold_events[label]['days']  # [days,] array where 1,2,... = valid long events
+    
+    # Make 3D mask where only valid event days are retained
+    mask_valid = np.isin(active_days_mask, np.unique(active_days_mask[active_days_mask > 0]))  # shape: [days]
+    detection_filtered = detection.copy()
+    detection_filtered[~mask_valid, :, :] = False
+
+    # Calculate area per day
+    daily_area_covered = detection_filtered.sum(dim=['eta_rho', 'xi_rho']).values
+    daily_area_percent = 100 * daily_area_covered / total_area
+
+    ax3.plot(days_xaxis, daily_area_percent, color=threshold_colors[label], linewidth=lw)
+
+
+# for var, label in zip(['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg'], threshold_colors.keys()):
+#     mask = data[var].isel(years=year_idx)
+#     daily_area_covered = mask.fillna(0).astype(bool).sum(dim=['eta_rho', 'xi_rho']).values
+#     daily_area_percent = 100 * daily_area_covered / total_area
+#     ax3.plot(days_xaxis, daily_area_percent, color=threshold_colors[label], linewidth=lw)
+
+ax3.set_ylabel("Area [$\%$]", **label_kwargs)
+ax3.set_xlabel("Date", **label_kwargs)
+ax3.set_xticks(tick_positions)
+ax3.set_xticklabels(tick_labels, rotation=45, ha='right', **tick_kwargs)
+# ax3.grid(True, linestyle='--', alpha=0.4)
+
+# --- Bottom legend: only threshold colors ---
+bottom_handles = [
+    Patch(facecolor=color, edgecolor='black', lw=0.5)
+    for label, color in threshold_colors.items()
+]
+bottom_labels = list(threshold_colors.keys())
+
+fig.legend(
+    bottom_handles, bottom_labels,
+    loc='lower center',
+    ncol=2,
+    frameon=True,
+    bbox_to_anchor=(0.5, -0.15),
+    handlelength=1.5,
+    fontsize=9
+)
+if plot=='slides':
+    fig.suptitle(f"Growth Season {year_idx+1980}-{year_idx+1980+1}", **suptitle_kwargs)
+
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"timeseries_subarea_North_{year_idx+1980}_{plot}.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+
+# %% ================================================================================================================================================================================
+#                                                                                           Peninsula Extent 
+#    ================================================================================================================================================================================
+from shapely.geometry import Polygon, Point
+
+def tilted_rectangle_mask(ds, point1, point2, point3, point4):
+    polygon = Polygon([point1, point2, point3, point4, point1])
+
+    mask = np.zeros(ds.lat_rho.shape, dtype=bool)
+    for i in range(ds.dims['eta_rho']):
+        for j in range(ds.dims['xi_rho']):
+            lon = ds.lon_rho.values[i, j]
+            lat = ds.lat_rho.values[i, j]
+            if polygon.contains(Point(lon, lat)):
+                mask[i, j] = True
+
+    mask_da = xr.DataArray(mask, dims=['eta_rho', 'xi_rho'],
+                           coords={'eta_rho': ds.eta_rho, 'xi_rho': ds.xi_rho})
+    return ds.where(mask_da, drop=True)
+
+# -- Peninsula big extent
+# Subset broad rectangle around peninsula
+temp_peninsula_box = subset_spatial_domain(temp_avg_100m_SO_allyrs, lat_range=(-90, -60), lon_range=(270, 360))
+chla_peninsula_box = subset_spatial_domain(chla_surf_SO_allyrs, lat_range=(-90, -60), lon_range=(270, 360))
+mhw_peninsula_box = subset_spatial_domain(mhw_duration_seasonal, lat_range=(-90, -60), lon_range=(270, 360))
+
+
+# -- Peninsula smaller extent
+temp_peninsula_tilted = tilted_rectangle_mask(
+    ds=temp_peninsula_box,
+    point1=(360-65, -64),   # SW corner (more west/south)
+    point2=(360-64, -65),   # SE corner
+    point3=(360-62, -64),   # NE corner (more east/north)
+    point4=(360-63, -63)    # NW corner
+)
+
+chla_peninsula_tilted = tilted_rectangle_mask(
+    ds=chla_peninsula_box,
+    point1=(360-65, -64),   # SW corner (more west/south)
+    point2=(360-64, -65),   # SE corner
+    point3=(360-62, -64),   # NE corner (more east/north)
+    point4=(360-63, -63)    # NW corner
+)
+
+mhw_peninsula_tilted = tilted_rectangle_mask(
+    ds=mhw_peninsula_box,
+    point1=(360-65, -64),   # SW corner (more west/south)
+    point2=(360-64, -65),   # SE corner
+    point3=(360-62, -64),   # NE corner (more east/north)
+    point4=(360-63, -63)    # NW corner
+)
+
+
+# %% ==================== Mean Temperature =====================
+selected_years = [1989, 2000, 2016]
+selected_years_idx = np.array(selected_years) - 1980  # [9, 20, 36]
+year_idx = selected_years_idx[2]
+
+# --- Peninsula extent
+temp_peninsula_avg = temp_peninsula_tilted.isel(years=year_idx).mean(dim=['eta_rho', 'xi_rho']) #shape (181,)
+temp_peninsula_std = temp_peninsula_tilted.isel(years=year_idx).std(dim=['eta_rho', 'xi_rho']) 
+
+mean_val = temp_peninsula_avg.avg_temp.mean().item()  # scalar mean value
+std_val = temp_peninsula_std.avg_temp.mean().item()  # scalar std value
+
+
+# %% ================ Plot MHWs ================
+# Threshold info
+threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
+threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
+threshold_labels = ['$\geq$ 1°C and 90th perc', '$\geq$ 2°C and 90th perc', '$\geq$ 3°C and 90th perc', '$\geq$ 4°C and 90th perc']
+
+# Layout config
+plot = 'report'
+if plot == 'report':
+    fig_width = 6.3228348611
+    fig_height = fig_width/2
+else:
+    fig_width = 16
+    fig_height = 8
+
+# Selected days and labels
+selected_days = [0, 30, 61, 92, 120, 180]
+day_labels = ['Nov 1st', 'Dec 1st', 'Jan 1st', 'Feb 1st', 'Mar 1st', 'Apr 30th']
+
+# === Custom font sizes ===
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+
+
+fig = plt.figure(figsize=(fig_width, fig_height))
+gs = gridspec.GridSpec(nrows=2, ncols=3, hspace=0.3, wspace=0.05)
+
+axes = []
+for i in range(6):
+    ax = fig.add_subplot(gs[i // 3, i % 3], projection=ccrs.SouthPolarStereo())
+    axes.append(ax)
+
+for ax, day_idx, day_label in zip(axes, selected_days, day_labels):
+    data = mhw_peninsula_tilted
+
+    # No event mask for that day averaged over years
+    no_event_mask = ((data['det_1deg'].isel(years= year_idx, days=day_idx) == 0) &
+                     (data['det_2deg'].isel(years= year_idx, days=day_idx) == 0) &
+                     (data['det_3deg'].isel(years= year_idx, days=day_idx) == 0) &
+                     (data['det_4deg'].isel(years= year_idx, days=day_idx) == 0)).fillna(True)
+    
+    ax.contourf(data.lon_rho, data.lat_rho, no_event_mask, levels=[0.5, 1], colors=['white'], transform=ccrs.PlateCarree(), zorder=1)
+    
+    for var, color in zip(threshold_vars, threshold_colors):
+        event_mask = data[var].isel(years= year_idx, days=day_idx).fillna(0)
+        binary_mask = (event_mask >= 0.166).astype(int)
+        ax.contourf(data.lon_rho, data.lat_rho, binary_mask, levels=[0.5, 1], colors=[color], transform=ccrs.PlateCarree(), alpha=0.8, zorder=2)
+    
+    lw = 0.7 if plot == 'slides' else 0.4
+    ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=3)
+    ax.coastlines(color='black', linewidth=lw, zorder=4)
+    ax.set_facecolor('#DEE2E6')
+
+    ax.set_extent([285, 305, -70, -60], crs=ccrs.PlateCarree())
+    
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, linewidth=lw, color='gray', alpha=0.3, linestyle='--', zorder=9)
+    gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs  
+
+    # Draw 60°S latitude circle accurately
+    lons = np.linspace(-180, 180, 1000)  # or 0 to 360 if your data is in that range
+    lats = np.full_like(lons, -60)       # constant latitude at -60°S
+    ax.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=lw, zorder=10)
+
+    ax.set_title(day_label, **title_kwargs)
+
+    # --- Add bathymetry contours ---
+    bathy_lon = roms_bathymetry_box['lon_rho']
+    bathy_lat = roms_bathymetry_box['lat_rho']
+    bathy = roms_bathymetry_box.where((bathy_lon >= 285) & (bathy_lon <= 305) & (bathy_lat >= -70) & (bathy_lat <= -60))
+
+    # Choose contour levels (e.g., shelf and slope breaks)
+    contour_levels = [200, 2000]
+
+    # Plot contour lines
+    cs = ax.contour(
+        bathy_lon, bathy_lat, bathy,
+        levels=contour_levels,
+        colors='black',
+        linewidths=0.6,
+        linestyles='--',
+        transform=ccrs.PlateCarree(),
+        zorder=2
+    )
+
+    # Label the contours with depth values
+    ax.clabel(cs, fmt='%d m', inline=True, fontsize=5, colors='black')
+
+
+# Legend
+from matplotlib.patches import Patch
+
+# --- Legend handles ---
+legend_handles = [Patch(facecolor='white', edgecolor='black', label='No MHW event', linewidth=0.5)]
+legend_handles += [
+    Patch(facecolor=c, edgecolor='black', label=l, linewidth=0.5)
+    for c, l in zip(threshold_colors, threshold_labels)
+]
+
+legend_kwargs = {
+    "frameon": True,
+    "ncol": 3,  
+    "loc": "lower center",
+    "bbox_to_anchor": (0.52, -0.1)
+}
+
+fig.legend(handles=legend_handles, **legend_kwargs)
+
+# Title
+if plot=='slides':
+    fig.suptitle(f"MHW Detection in {year_idx+1980} - {year_idx+1980+1}", **suptitle_kwargs)
+
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"mhws_subarea_Peninsula_{year_idx+1980}_{plot}.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+# %% ================== Identify events ==================
+from scipy.ndimage import label
+data = mhw_peninsula_tilted  
+
+threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
+threshold_labels = ['$\\geq$ 90th perc and 1°C', '$\\geq$ 90th perc and 2°C', '$\\geq$ 90th perc and 3°C', '$\\geq$ 90th perc and 4°C']
+threshold_events = {}
+
+for var, label_name in zip(threshold_vars, threshold_labels):
+    # Binary 3D array: (days, eta_rho, xi_rho)
+    det_filtered = data[var].isel(years=year_idx).fillna(0).astype(bool)
+
+    # # Spatial fraction per day
+    # total_valid = det_filtered.notnull().sum(dim=['eta_rho', 'xi_rho'])
+    # daily_detected = det_filtered.sum(dim=['eta_rho', 'xi_rho'])
+    # spatial_fraction = daily_detected / total_valid
+
+    # # Daily series of True where >5% of region is active
+    # daily_series = (spatial_fraction > 0.05).values  # shape (181,)
+    
+    daily_series = det_filtered.any(dim=['eta_rho', 'xi_rho'])
+
+    # Label connected time events
+    labeled_array, num_events = label(daily_series)
+
+    # Filter only events with duration > 30 days
+    event_lengths = [np.sum(labeled_array == i) for i in range(1, num_events + 1)]
+    long_events = [l for l in event_lengths if l > 30]
+
+    # Save
+    threshold_events[label_name] = {
+        'n_events': len(long_events),
+        'lengths': long_events,
+        'days': labeled_array  # useful for plotting
+    }
+
+
+
+# %% ================ LENGTH ================
+from Growth_Model.growth_model import length_Atkison2006  
+
+# == Climatological Drivers
+temp_clim_peninsula = temp_peninsula_tilted.isel(years=slice(0,30)) #shape: (30, 181, 231, 360)
+temp_clim_peninsula_mean = temp_clim_peninsula.mean(dim=['years']) #shape: (181, 231, 360)
+chla_clim_peninsula = chla_peninsula_tilted.isel(years=slice(0,30))
+chla_clim_peninsula_mean = chla_clim_peninsula.mean(dim=['years'])
+
+# == Climatological Length
+climatological_length_peninsula = length_Atkison2006(chla=chla_clim_peninsula_mean.chla, 
+                                                     temp=temp_clim_peninsula_mean.avg_temp, 
+                                                     initial_length=35, intermoult_period=10)
+climatological_length_peninsula_mean = climatological_length_peninsula.mean(dim=['eta_rho', 'xi_rho'])
+
+# == Length for Peninsula area
+length_peninsula = length_Atkison2006(chla=chla_peninsula_tilted.chla.isel(years=year_idx),
+                                      temp=temp_peninsula_tilted.avg_temp.isel(years=year_idx),
+                                      initial_length=35, intermoult_period=10)
+length_peninsula_mean = length_peninsula.mean(dim=['eta_rho', 'xi_rho'])
+
+# %% ========== Plot area with final lentgh ==========
+from matplotlib.colors import LinearSegmentedColormap
+# === Layout config ===
+plot = 'report'  # 'report' or 'slides'
+
+if plot == 'report':
+    fig_width = 6.3228348611 / 2  # half-column width in inches
+    fig_height = fig_width/1.5
+else:
+    fig_width = 8
+    fig_height = 6
+
+# === Custom font sizes ===
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+
+# === Color map ===
+colors = [
+    (0.00, "#f7f7f7"),  # 35 mm
+    (0.25, "#F27A02"),  # 36 mm
+    (0.50, "#D73027"),  # 37 mm
+    (0.75, "#7D1C17"),  # 38 mm
+    (1.00, "#450F0D")   # 39 mm
+]
+cmap_len = LinearSegmentedColormap.from_list("length_custom", colors, N=256)
+plot_kwargs = dict(cmap=cmap_len, vmin=35, vmax=39, rasterized=True)
+
+# === Figure and GridSpec for plot + colorbar ===
+fig = plt.figure(figsize=(fig_width, fig_height))
+gs = gridspec.GridSpec(nrows=1, ncols=2, width_ratios=[20, 1], wspace=0.05)
+
+# === Main map ===
+ax = fig.add_subplot(gs[0], projection=ccrs.SouthPolarStereo())
+theta = np.linspace(np.pi / 2, np.pi, 100)
+center, radius = [0.5, 0.51], 0.5
+arc = np.vstack([np.cos(theta), np.sin(theta)]).T
+verts = np.concatenate([[center], arc * radius + center, [center]])
+circle = mpath.Path(verts)
+
+# Plot data
+mask = ~np.isnan(mhw_peninsula_tilted.duration.isel(years=year_idx, days=-1))
+length_data_masked = length_peninsula.isel(days=-1).where(mask)
+im = ax.pcolormesh(length_data_masked.lon_rho, length_data_masked.lat_rho,
+                   length_data_masked, transform=ccrs.PlateCarree(), **plot_kwargs, zorder=1)
+# data = length_peninsula.isel(days=-1)
+# im = ax.pcolormesh(data.lon_rho, data.lat_rho, data, transform=ccrs.PlateCarree(), **plot_kwargs, zorder=1)
+
+# Map extent and features
+ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)  # Land should be drawn above the plot
+lw = 0.7 if plot == 'slides' else 0.4
+ax.coastlines(color='black', linewidth=lw, zorder=3)
+ax.set_facecolor('#DEE2E6')
+
+# Zoom region
+ax.set_extent([285, 305, -70, -60], crs=ccrs.PlateCarree())
+
+# Gridlines
+gl = ax.gridlines(draw_labels=True, linewidth=lw, color='gray', alpha=0.3, linestyle='--', zorder=4)
+gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+gl.xlabel_style = gridlabel_kwargs
+gl.ylabel_style = gridlabel_kwargs
+
+# Draw 60°S latitude circle accurately
+lons = np.linspace(-180, 180, 1000)  # or 0 to 360 if your data is in that range
+lats = np.full_like(lons, -60)       # constant latitude at -60°S
+ax.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=lw, zorder=10)
+
+# --- Add bathymetry contours ---
+bathy = roms_bathymetry_box.where((bathy_lon >= 285) & (bathy_lon <= 305) & (bathy_lat >= -70) & (bathy_lat <= -60))
+bathy_lon = roms_bathymetry_box['lon_rho']
+bathy_lat = roms_bathymetry_box['lat_rho']
+
+# Choose contour levels (e.g., shelf and slope breaks)
+contour_levels = [200, 2000]
+
+# Plot contour lines
+cs = ax.contour(
+    bathy_lon, bathy_lat, bathy,
+    levels=contour_levels,
+    colors='black',
+    linewidths=0.6,
+    linestyles='--',
+    transform=ccrs.PlateCarree(),
+    zorder=2
+)
+
+# Label the contours with depth values
+ax.clabel(cs, fmt='%d m', inline=True, fontsize=5, colors='black')
+
+# === Colorbar ===
+cax = fig.add_subplot(gs[1])
+cbar = fig.colorbar(im, cax=cax, orientation='vertical', extend='max')
+cbar.set_ticks([35, 36, 37, 38, 39])
+cbar.set_ticklabels(['35', '36', '37', '38', '39'])
+cbar.set_label("Length [mm]", ** label_kwargs)
+cbar.ax.tick_params(**tick_kwargs)
+
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"maplength_subarea_Peninsula_{year_idx+1980}_{plot}.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+# %% ================= Times Series =================
+from datetime import datetime, timedelta
+
+# --- Setup days axis ---
+days_xaxis = np.arange(181)
+base_date = datetime(2021, 11, 1)  # Start from Nov 1
+date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
+date_dict = dict(date_list)
+
+tick_positions = np.arange(days_xaxis.min(), days_xaxis.max() + 1, 15)
+tick_labels = [date_dict.get(day, '') for day in tick_positions]
+
+# --- Colors for threshold fills ---
+threshold_colors = {
+    '$\geq$ 90th perc and 1°C': '#5A7854',
+    '$\geq$ 90th perc and 2°C': '#8780C6',
+    '$\geq$ 90th perc and 3°C': '#E07800',
+    '$\geq$ 90th perc and 4°C': '#9B2808'
+}
+
+# === Layout config ===
+plot = 'report'  # 'report' or 'slides'
+
+if plot == 'report':
+    fig_width = 6.3228348611 / 1.5  # half-column width in inches
+    fig_height = fig_width
+else:
+    fig_width = 8
+    fig_height = 6
+
+# === Custom font sizes ===
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+lw= 0.5 if 'report' else 2
+
+# --- Plot setup ---
+fig, (ax1, ax2, ax3) = plt.subplots(
+    3, 1, figsize=(fig_width, fig_height),
+    sharex=True,
+    gridspec_kw={'height_ratios': [1, 1, 1], 'hspace': 0.15}
+)
+
+# --- Temperature Plot ---
+mean = temp_peninsula_avg.avg_temp
+std= temp_peninsula_std.avg_temp
+line = ax1.plot(days_xaxis, mean, color='black', linewidth=lw, label='Mean')[0]
+std_fill = ax1.fill_between(days_xaxis, mean - std, mean + std,
+                            color='black', alpha=0.3, label='±1 Std Dev')
+
+used_labels = set()
+for label, info in threshold_events.items():
+    color = threshold_colors.get(label, 'grey')
+    active_days = info['days']
+    if len(active_days) == 0:
+        continue
+    for event_id in np.unique(active_days[active_days > 0]):
+        idx = np.where(active_days == event_id)[0]
+        if len(idx) == 0:
+            continue
+        start_day = days_xaxis[idx[0]]
+        end_day = days_xaxis[idx[-1]] + 1
+        if label not in used_labels:
+            ax1.axvspan(start_day, end_day, color=color, alpha=0.6, label=label)
+            used_labels.add(label)
+        else:
+            ax1.axvspan(start_day, end_day, color=color, alpha=0.6)
+
+ax1.set_ylabel("Temperature [°C]", **label_kwargs)
+
+# Legend with only mean and std
+leg=ax1.legend(handles=[line, Patch(facecolor='black', alpha=0.3, label='±1 Std Dev')], 
+           loc='upper right', frameon=True, bbox_to_anchor =(0.3, 0.99), handlelength=0.7, fontsize=9)
+leg.get_frame().set_linewidth(0.5)  # Thinner frame, default is usually 1.0 or more
+
+ymin = np.floor((mean - std).min().item() * 2) / 2
+ymax = np.ceil((mean + std).max().item() * 2) / 2
+yticks = np.arange(ymin, ymax + 0.1, 1)
+ax1.set_yticks(yticks)
+
+
+# --- Krill Length Plot ---
+line_1 = ax2.plot(days_xaxis, length_peninsula_mean, color='black', linewidth=lw, label='Krill Length')[0]
+line_2 = ax2.plot(days_xaxis, climatological_length_peninsula_mean, color='#263E69', linewidth=lw, linestyle='--', label='Climatology')[0]
+
+for label, info in threshold_events.items():
+    color = threshold_colors.get(label, 'grey')
+    active_days = info['days']
+    if len(active_days) == 0:
+        continue
+    for event_id in np.unique(active_days[active_days > 0]):
+        idx = np.where(active_days == event_id)[0]
+        if len(idx) == 0:
+            continue
+        start_day = days_xaxis[idx[0]]
+        end_day = days_xaxis[idx[-1]] + 1
+        ax2.axvspan(start_day, end_day, color=color, alpha=0.6)
+
+ax2.set_ylabel("Length [mm]", **label_kwargs)
+# ax2.grid(True, linestyle='--', alpha=0.4)
+leg=ax2.legend([line_2], ['Climatology'], loc='upper left', frameon=True, bbox_to_anchor =(0.01, 0.49), handlelength=0.7, fontsize=9)
+leg.get_frame().set_linewidth(0.5)  # Thinner frame, default is usually 1.0 or more
+
+ymin = np.floor(length_peninsula_mean.min().item() * 4) / 4
+ymax = np.ceil(length_peninsula_mean.max().item() * 4) / 4
+yticks = np.arange(ymin, ymax + 0.01, 0.5)
+ax2.set_yticks(yticks)
+
+
+# --- MHW Area Coverage Plot ---
+data = mhw_peninsula_tilted.where(mhw_peninsula_tilted.duration > 30)
 eta_dim = data.dims['eta_rho']
 xi_dim = data.dims['xi_rho']
 total_area = eta_dim * xi_dim #256 cells
@@ -616,9 +1337,9 @@ if plot=='slides':
 
 # --- Output handling ---
 if plot == 'report':
-    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/case_study_AtlanticSector/')
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
-    outfile = f"timeseries_subarea_North_{year_idx+1980}_{plot}.pdf"
+    outfile = f"timeseries_subarea_Peninsula_{year_idx+1980}_{plot}.pdf"
     plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
     # plt.show()
 else:    
@@ -626,134 +1347,101 @@ else:
     plt.show()
 
 
+# %% # %%  ================================================ Plot BOTH areas ================================================
+# === Layout config ===
+plot = 'report'  # 'report' or 'slides'
 
+if plot == 'report':
+    fig_width = 6.3228348611 
+    fig_height = fig_width 
+else:
+    fig_width = 8
+    fig_height = 6
 
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+lw = 0.7 if plot == 'slides' else 0.4
 
+# === Data slices ===
+# year_idx = 36 
+# day_idx = 10
+# north = temp_north.avg_temp.isel(years=year_idx, days=day_idx)
+# pen = temp_peninsula_tilted.avg_temp.isel(years=year_idx, days=day_idx)
+north = temp_clim_atl_mean.avg_temp.mean(dim='days')
+pen = temp_clim_peninsula_mean.avg_temp.mean(dim='days')
 
+# === Setup Figure and Axes ===
+fig = plt.figure(figsize=(fig_width, fig_height))
+ax = fig.add_subplot(1, 1, 1, projection=ccrs.SouthPolarStereo())
 
+# === Plot Data ===
+colors = [
+    (0.00, "#f7f7f7"),  # 35 mm
+    (0.25, "#F27A02"),  # 36 mm
+    (0.50, "#D73027"),  # 37 mm
+    (0.75, "#7D1C17"),  # 38 mm
+    (1.00, "#450F0D")   # 39 mm
+]
+cmap_len = LinearSegmentedColormap.from_list("length_custom", colors, N=256)
+plot_kwargs = dict(cmap=cmap_len, vmin=35, vmax=39, rasterized=True)
 
-# %% ================= Second area
+vmin, vmax = 0, 3 # Set color scale bounds manually for consistency
 
-# -- Peninsula subarea
-# Subset broad rectangle around peninsula
-temp_peninsula_box = subset_spatial_domain(temp_avg_100m_SO_allyrs, lat_range=(-90, -60), lon_range=(270, 360))
-chla_peninsula_box = subset_spatial_domain(chla_surf_SO_allyrs, lat_range=(-90, -60), lon_range=(270, 360))
-
-from shapely.geometry import Polygon, Point
-
-def tilted_rectangle_mask(ds, point1, point2, point3, point4):
-    """
-    Applies a polygonal (tilted rectangle) mask using 4 corner points (lon, lat).
-    
-    Parameters:
-    - ds: xarray.Dataset with lat_rho and lon_rho
-    - point1 → point2 → point3 → point4 → point1: corners of the polygon in (lon, lat)
-    
-    Returns:
-    - Masked xarray.Dataset within polygon
-    """
-    polygon = Polygon([point1, point2, point3, point4, point1])
-
-    mask = np.zeros(ds.lat_rho.shape, dtype=bool)
-    for i in range(ds.dims['eta_rho']):
-        for j in range(ds.dims['xi_rho']):
-            lon = ds.lon_rho.values[i, j]
-            lat = ds.lat_rho.values[i, j]
-            if polygon.contains(Point(lon, lat)):
-                mask[i, j] = True
-
-    mask_da = xr.DataArray(mask, dims=['eta_rho', 'xi_rho'],
-                           coords={'eta_rho': ds.eta_rho, 'xi_rho': ds.xi_rho})
-    return ds.where(mask_da, drop=True)
-
-temp_peninsula_tilted = tilted_rectangle_mask(
-    ds=temp_peninsula_box,
-    point1=(360-65, -64),   # SW corner (more west/south)
-    point2=(360-64, -65),   # SE corner
-    point3=(360-62, -64),   # NE corner (more east/north)
-    point4=(360-63, -63)    # NW corner
+pcm1 = ax.pcolormesh(
+    north.lon_rho, north.lat_rho, north,
+    transform=ccrs.PlateCarree(),
+    cmap=cmap_len, vmin=vmin, vmax=vmax, zorder=1
+)
+pcm2 = ax.pcolormesh(
+    pen.lon_rho, pen.lat_rho, pen,
+    transform=ccrs.PlateCarree(),
+    cmap=cmap_len, vmin=vmin, vmax=vmax, zorder=1
 )
 
-chla_peninsula_tilted = tilted_rectangle_mask(
-    ds=chla_peninsula_box,
-    point1=(360-65, -64),   # SW corner (more west/south)
-    point2=(360-64, -65),   # SE corner
-    point3=(360-62, -64),   # NE corner (more east/north)
-    point4=(360-63, -63)    # NW corner
-)
+# === Features ===
+ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
+ax.coastlines(resolution='10m', color='black', linewidth=lw, zorder=3)
+ax.set_facecolor('#DEE2E6')
 
-# -- Peninsula Extnet 
-mhw_peninsula_box = subset_spatial_domain(mhw_duration_seasonal, lat_range=(-90, -60), lon_range=(270, 360))
-mhw_peninsula_tilted = tilted_rectangle_mask(
-    ds=mhw_peninsula_box,
-    point1=(360-65, -64),   # SW corner (more west/south)
-    point2=(360-64, -65),   # SE corner
-    point3=(360-62, -64),   # NE corner (more east/north)
-    point4=(360-63, -63)    # NW corner
-)
+# === Extent and Grid ===
+ax.set_extent([265, 0, -90, -55], crs=ccrs.PlateCarree())
+gl = ax.gridlines(draw_labels=True, linewidth=lw, color='gray', alpha=0.3, linestyle='--', zorder=4)
+gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+gl.xlabel_style = gridlabel_kwargs
+gl.ylabel_style = gridlabel_kwargs
 
-selected_years = [1989, 2000, 2016]
-selected_years_idx = np.array(selected_years) - 1980  # [9, 20, 36]
-year_idx = selected_years_idx[2]
+# === Circle for 60°S Latitude ===
+lons = np.linspace(-180, 180, 1000)
+lats = np.full_like(lons, -60)
+ax.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=lw, zorder=10)
 
-# --- Peninsula extent
-temp_peninsula_tilted_avg = temp_peninsula_tilted.isel(years=year_idx).mean(dim=['eta_rho', 'xi_rho']) #shape (181,)
+# === Optional: Clipping Circle for Circular Look ===
+theta = np.linspace(np.pi / 2, np.pi+np.pi/10, 100)
+center, radius = [0.5, 0.51], 0.5
+arc = np.vstack([np.cos(theta), np.sin(theta)]).T
+verts = np.concatenate([[center], arc * radius + center, [center]])
+circle = mpath.Path(verts)
+ax.set_boundary(circle, transform=ax.transAxes)
 
+# === Colorbar ===
+cbar = fig.colorbar(pcm2, ax=ax, orientation='vertical', extend='both', pad=0.05, shrink=0.8)
+cbar.set_label('Temperature [°C]', **label_kwargs)
 
+# === Title or Label ===
+if plot == 'slides':
+    ax.set_title(f'Temperature at 100m – Day {day_idx} of Year {1980 + year_idx}', **title_kwargs)
 
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"both_areas_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
 
-# == Length for pninsula
-length_peninsula = length_Atkison2006(chla=chla_peninsula_tilted.chla.isel(years=year_idx), 
-                                   temp=temp_peninsula_tilted.avg_temp.isel(years=year_idx), 
-                                   initial_length=35, intermoult_period=10)
-length_peninsula_mean = length_peninsula.mean(dim=['eta_rho', 'xi_rho'])
-
-
-
-# %% # %%  ======================== PLot both areas ========================
-# Year and day slice
-year_idx = 36  # 2015
-day_idx = 10
-
-# Extract slices
-north_data = temp_north.avg_temp.isel(years=year_idx, days=day_idx)
-peninsula_data = temp_peninsula_tilted.avg_temp.isel(years=year_idx, days=day_idx)
-
-# Define circular boundary path for polar view
-def circular_boundary():
-    theta = np.linspace(0, 2 * np.pi, 100)
-    center, radius = [0.5, 0.5], 0.5
-    verts = np.vstack([np.cos(theta), np.sin(theta)]).T
-    circle = mpath.Path(verts * radius + center)
-    return circle
-
-# Plotting
-fig, axes = plt.subplots(1, 2, figsize=(12, 6), subplot_kw={'projection': ccrs.SouthPolarStereo()})
-
-# Shared plotting settings
-def plot_region(ax, data, title):
-    im = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
-                       transform=ccrs.PlateCarree(),
-                       cmap='coolwarm', vmin=-2, vmax=4)
-    ax.coastlines()
-    ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=100)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-    ax.set_boundary(circular_boundary(), transform=ax.transAxes)
-    ax.set_title(title)
-    # Sector boundaries
-    for lon in [-90, 120, 0]:
-            ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#080808', linestyle='--', linewidth=0.5)
-
-    return im
-
-    
-# Plot both regions
-im1 = plot_region(axes[0], north_data, 'North Region (2015, Day 10)')
-im2 = plot_region(axes[1], peninsula_data, 'Peninsula Region (2015, Day 10)')
-
-# Colorbar
-cbar = fig.colorbar(im2, ax=axes.ravel().tolist(), orientation='horizontal', pad=0.05)
-cbar.set_label('Avg Temperature at 100m (°C)')
-
-plt.tight_layout()
-plt.show()
+# %%
