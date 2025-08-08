@@ -1377,27 +1377,37 @@ fig = plt.figure(figsize=(fig_width, fig_height))
 ax = fig.add_subplot(1, 1, 1, projection=ccrs.SouthPolarStereo())
 
 # === Plot Data ===
-colors = [
-    (0.00, "#f7f7f7"),  # 35 mm
-    (0.25, "#F27A02"),  # 36 mm
-    (0.50, "#D73027"),  # 37 mm
-    (0.75, "#7D1C17"),  # 38 mm
-    (1.00, "#450F0D")   # 39 mm
-]
-cmap_len = LinearSegmentedColormap.from_list("length_custom", colors, N=256)
-plot_kwargs = dict(cmap=cmap_len, vmin=35, vmax=39, rasterized=True)
+from matplotlib.colors import LinearSegmentedColormap
 
-vmin, vmax = 0, 3 # Set color scale bounds manually for consistency
+colors1 = [
+    (0.00, "#D73027"),  # 35 mm
+    (0.25, "#D73027"),  # 36 mm
+    (0.50, "#D73027"),  # 37 mm
+    (0.75, "#D73027"),  # 38 mm
+    (1.00, "#D73027")   # 39 mm
+]
+
+colors2 = [
+    (0.00, "#7B2CBF"),  # 35 mm
+    (0.25, "#7B2CBF"),  # 36 mm
+    (0.50, "#7B2CBF"),  # 37 mm
+    (0.75, "#7B2CBF"),  # 38 mm
+    (1.00, "#7B2CBF")   # 39 mm
+]
+cmap_len1 = LinearSegmentedColormap.from_list("length_custom", colors1, N=256)
+cmap_len2 = LinearSegmentedColormap.from_list("length_custom", colors2, N=256)
+plot_kwargs1 = dict(cmap=cmap_len1, vmin=0, vmax=2, rasterized=True)
+plot_kwargs2 = dict(cmap=cmap_len2, vmin=0, vmax=2, rasterized=True)
 
 pcm1 = ax.pcolormesh(
     north.lon_rho, north.lat_rho, north,
     transform=ccrs.PlateCarree(),
-    cmap=cmap_len, vmin=vmin, vmax=vmax, zorder=1
+    cmap=cmap_len1, zorder=1
 )
 pcm2 = ax.pcolormesh(
     pen.lon_rho, pen.lat_rho, pen,
     transform=ccrs.PlateCarree(),
-    cmap=cmap_len, vmin=vmin, vmax=vmax, zorder=1
+    cmap=cmap_len2, zorder=1
 )
 
 # === Features ===
@@ -1411,6 +1421,9 @@ gl = ax.gridlines(draw_labels=True, linewidth=lw, color='gray', alpha=0.3, lines
 gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
 gl.xlabel_style = gridlabel_kwargs
 gl.ylabel_style = gridlabel_kwargs
+# Sector boundaries
+for lon in [-90, 120, 0]:
+        ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#080808', linestyle='--', linewidth=lw)
 
 # === Circle for 60°S Latitude ===
 lons = np.linspace(-180, 180, 1000)
@@ -1419,7 +1432,7 @@ ax.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--',
 
 # === Optional: Clipping Circle for Circular Look ===
 theta = np.linspace(np.pi / 2, np.pi+np.pi/10, 100)
-center, radius = [0.5, 0.51], 0.5
+center, radius = [0.5, 0.5], 0.5
 arc = np.vstack([np.cos(theta), np.sin(theta)]).T
 verts = np.concatenate([[center], arc * radius + center, [center]])
 circle = mpath.Path(verts)
@@ -1438,10 +1451,126 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"both_areas_{plot}.pdf"
-    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
 else:    
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
+# %% # %%  ================================================ Plot Mean Temperature ================================================
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+from matplotlib.colors import Normalize
+
+# === Layout config ===
+plot = 'report'  # 'report' or 'slides'
+
+if plot == 'report':
+    fig_width = 6.3228348611  # full-column width in inches
+    fig_height = fig_width / 2
+else:
+    fig_width = 10
+    fig_height = 5
+
+# === Font sizes ===
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+
+# === Figure and GridSpec ===
+fig = plt.figure(figsize=(fig_width, fig_height))
+gs = gridspec.GridSpec(nrows=1, ncols=4, width_ratios=[20, 1, 20, 1], wspace=0.3)
+
+# === Normalization shared for both plots ===
+norm = Normalize(vmin=0, vmax=4)
+
+# === Subplot 1: Atlantic Sector ===
+ax1 = fig.add_subplot(gs[0], projection=ccrs.SouthPolarStereo())
+ax1.set_extent([268, 288, -70, -57], crs=ccrs.PlateCarree())
+
+temp1 = temp_clim_atl_mean.avg_temp.isel(days=-1)
+lon1 = temp_clim_atl_mean.lon_rho
+lat1 = temp_clim_atl_mean.lat_rho
+
+im1 = ax1.pcolormesh(
+    lon1, lat1, temp1,
+    cmap='Reds',
+    norm=norm,
+    transform=ccrs.PlateCarree(),
+    rasterized=True,
+    zorder=1
+)
+
+ax1.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
+ax1.coastlines(color='black', linewidth=0.4, zorder=3)
+ax1.set_facecolor('#DEE2E6')
+
+gl1 = ax1.gridlines(draw_labels=True, linewidth=0.4, color='gray', alpha=0.3, linestyle='--', zorder=4)
+gl1.xlabel_style = {'size': 6}
+gl1.ylabel_style = {'size': 6}
+
+# Latitude circle
+lons = np.linspace(-180, 180, 1000)
+lats = np.full_like(lons, -60)
+ax1.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=0.4, zorder=10)
+
+# Colorbar 1
+cax1 = fig.add_subplot(gs[1])
+cbar1 = fig.colorbar(im1, cax=cax1, orientation='vertical', extend='both', pad=0.01, aspect=30)
+cbar1.set_label("T [°C]", **label_kwargs)
+cbar1.set_ticks([0, 1, 2, 3, 4])
+cbar1.ax.tick_params(**tick_kwargs)
+
+# === Subplot 2: Peninsula Sector ===
+ax2 = fig.add_subplot(gs[2], projection=ccrs.SouthPolarStereo())
+ax2.set_extent([285, 305, -70, -60], crs=ccrs.PlateCarree())
+
+temp2 = temp_clim_peninsula_mean.avg_temp.isel(days=-1)
+lon2 = temp_clim_peninsula_mean.lon_rho
+lat2 = temp_clim_peninsula_mean.lat_rho
+
+im2 = ax2.pcolormesh(
+    lon2, lat2, temp2,
+    cmap='Reds',     # change here from 'coolwarm' to 'Reds'
+    norm=norm,       # use same normalization
+    transform=ccrs.PlateCarree(),
+    rasterized=True,
+    zorder=1
+)
+
+ax2.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)
+ax2.coastlines(color='black', linewidth=0.4, zorder=3)
+ax2.set_facecolor('#DEE2E6')
+
+gl2 = ax2.gridlines(draw_labels=True, linewidth=0.4, color='gray', alpha=0.3, linestyle='--', zorder=4)
+gl2.xlabel_style = {'size': 6}
+gl2.ylabel_style = {'size': 6}
+
+ax2.plot(lons, lats, transform=ccrs.PlateCarree(), color='black', linestyle='--', linewidth=0.4, zorder=10)
+
+# Colorbar 2
+cax2 = fig.add_subplot(gs[3])
+cbar2 = fig.colorbar(im2, cax=cax2, orientation='vertical', extend='both', pad=0.05, aspect=30)
+cbar2.set_label("T [°C]", **label_kwargs)
+cbar2.set_ticks([0, 1, 2, 3, 4])
+cbar2.ax.tick_params(**tick_kwargs)
+
+# === Title ===
+if plot == 'slides':
+    fig.suptitle("Climatological Mean Temperature (Last Day)", **suptitle_kwargs)
+
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"both_areas_temp_{plot}.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:
     plt.show()
 
 # %%
