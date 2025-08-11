@@ -1101,6 +1101,160 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
+
+
+# %% ============== Chla and temperature ============== 
+# -- Avg climatlofical drivers
+chla_clim_mean = chla_clim_atl_mean.mean(dim='days')
+temp_clim_mean = temp_clim_atl_mean.mean(dim='days')
+
+# -- Avg Cha for selected years 
+chla_yr0= chla_surf_study_area_allyrs.chla.isel(years=selected_years_idx[0]).mean(dim='days')
+chla_yr1= chla_surf_study_area_allyrs.chla.isel(years=selected_years_idx[1]).mean(dim='days')
+chla_yr2= chla_surf_study_area_allyrs.chla.isel(years=selected_years_idx[2]).mean(dim='days')
+
+# -- Avg Temp for selected years 
+temp_yr0= temp_avg_100m_study_area_allyrs.avg_temp.isel(years=selected_years_idx[0]).mean(dim='days')
+temp_yr1= temp_avg_100m_study_area_allyrs.avg_temp.isel(years=selected_years_idx[1]).mean(dim='days')
+temp_yr2= temp_avg_100m_study_area_allyrs.avg_temp.isel(years=selected_years_idx[2]).mean(dim='days')
+
+
+# -- Differences
+delta_chla_yr0 = chla_yr0 - chla_clim_mean
+delta_chla_yr1 = chla_yr1 - chla_clim_mean
+delta_chla_yr2 = chla_yr2 - chla_clim_mean
+
+delta_temp_yr0 = temp_yr0 - temp_clim_mean
+delta_temp_yr1 = temp_yr1 - temp_clim_mean
+delta_temp_yr2 = temp_yr2 - temp_clim_mean
+
+
+
+
+# %% ============== Plot Chla and temperature ============== 
+# === Layout config ===
+plot = 'report' #report slides
+if plot == 'report':
+    fig_width = 6.3228348611
+    fig_height = fig_width/1.5
+    
+else:
+    fig_width = 12
+    fig_height = 8
+  
+# === Figure layout ===
+fig, axs = plt.subplots(2, 3, figsize=(fig_width, fig_height), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+plt.subplots_adjust(hspace=0.05, wspace=0.05)
+
+title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
+
+# === Setup: circle for polar projection boundary ===
+theta = np.linspace(np.pi / 2, np.pi, 100)
+center, radius = [0.5, 0.51], 0.5
+arc = np.vstack([np.cos(theta), np.sin(theta)]).T
+verts = np.concatenate([[center], arc * radius + center, [center]])
+circle = mpath.Path(verts)
+
+# === Plotting setup ===
+from matplotlib.colors import LinearSegmentedColormap
+color_chla = ["#0E1B11", "#4A8956", "#73A942", "#E7D20D", "#FBB02D"]
+cmap_chla = LinearSegmentedColormap.from_list("chla", color_chla, N=256)
+colors_temp = ["#0A3647", "#669BBC", "#FFFFFF", "#EE9B00", "#AE2012"] #BB3E03
+cmap_temp = LinearSegmentedColormap.from_list("temp", colors_temp, N=256)
+cmap_diff = 'coolwarm'
+norm_diff_chla = mcolors.TwoSlopeNorm(vmin=-0.5, vcenter=0, vmax=0.5)
+norm_diff_temp = mcolors.TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1)
+
+# === Data and titles ===
+plot_data = [
+    (delta_chla_yr0.chla,  f"{selected_years[0]}-{selected_years[0]+1} vs Climatology", cmap_diff, norm_diff_chla),
+    (delta_chla_yr1.chla,  f"{selected_years[1]}-{selected_years[1]+1} vs Climatology", cmap_diff, norm_diff_chla),
+    (delta_chla_yr2.chla,  f"{selected_years[2]}-{selected_years[2]+1} vs Climatology", cmap_diff, norm_diff_chla),
+    (delta_temp_yr0.avg_temp,  f"{selected_years[0]}-{selected_years[0]+1} vs Climatology", cmap_diff, norm_diff_temp),
+    (delta_temp_yr1.avg_temp,  f"{selected_years[1]}-{selected_years[1]+1} vs Climatology", cmap_diff, norm_diff_temp),
+    (delta_temp_yr2.avg_temp,  f"{selected_years[2]}-{selected_years[2]+1} vs Climatology", cmap_diff, norm_diff_temp),
+]
+
+
+ims = []
+for i, (data, title, cmap, norm) in enumerate(plot_data):
+    row = i // 3
+    col = i % 3
+    ax = axs[row, col]
+
+    if data is not None:
+        im = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+                           transform=ccrs.PlateCarree(), cmap=cmap, norm=norm,
+                           shading='auto', rasterized=True)
+        ims.append(im)
+    else:
+        ax.axis('off')  # Hide empty subplot
+        continue
+
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map extent and features
+    ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=4)  # Land should be drawn above the plot
+    lw = 0.7 if plot == 'slides' else 0.4
+    ax.coastlines(color='black', linewidth=lw, zorder=5)
+    ax.set_facecolor('#F6F6F3')
+        
+    # Gridlines
+    import matplotlib.ticker as mticker
+    from cartopy.mpl.ticker import LongitudeFormatter
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.7, linestyle='--', linewidth=lw, zorder=7)
+    gl.xlocator = mticker.FixedLocator(np.arange(-80, 1, 20))  # -90, -60, -30, 0
+    gl.xformatter = LongitudeFormatter(degree_symbol='°', number_format='.0f', dateline_direction_label=False)
+    gl.yformatter = LatitudeFormatter()
+    gl.xlabels_top = False
+    gl.xlabels_bottom = False
+    gl.ylabels_right = False
+    gl.xlabels_left = True
+    gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs
+
+    # Titles
+    ax.set_title(title, **title_kwargs)
+
+# === Colorbars ===
+# Colorbar for top row (plots 0,1,2)
+cbar_ax1 = fig.add_axes([0.92, 0.55, 0.015, 0.35])  # adjust as needed
+cbar1 = fig.colorbar(ims[0], cax=cbar_ax1, extend='both', **tick_kwargs)
+cbar1.set_label("$\Delta$ Chl-a [mg/m3]", **label_kwargs)
+cbar1.set_ticks([-0.5, -0.25, 0, 0.25, 0.5])
+cbar1.ax.tick_params(labelsize=tick_kwargs.get('labelsize', 8))
+
+# Colorbar for bottom row (plots 3,4,5)
+cbar_ax2 = fig.add_axes([0.92, 0.12, 0.015, 0.35])
+cbar2 = fig.colorbar(ims[3], cax=cbar_ax2, extend='both', **tick_kwargs)
+cbar2.set_label("$\Delta$ Temp [°C]", **label_kwargs)
+cbar2.ax.tick_params(labelsize=tick_kwargs.get('labelsize', 8))
+
+# === Title & labels ===
+# Add a big title if plotting for slides
+if plot == 'slides':
+    fig.suptitle("Krill Length on Last Day of Season – Atlantic Sector",  y=0.98, **suptitle_kwargs)
+
+# Big titles for rows
+fig.text(0.5, 0.99, "Chl-a Difference", ha='center', fontsize=12 if plot == 'report' else 18, fontweight='bold')
+fig.text(0.5, 0.58, "Temperature Difference", ha='center', fontsize=12 if plot == 'report' else 18, fontweight='bold')
+
+# --- Output handling ---
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/case_study_AtlanticSector/')
+    os.makedirs(outdir, exist_ok=True)
+    outfile = f"drivers_differences_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
+else:    
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    plt.show()
+
 # %% 
 
 # # == Length Southern Ocean
