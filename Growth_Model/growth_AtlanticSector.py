@@ -25,6 +25,7 @@ from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
 import matplotlib.gridspec as gridspec
 
+from datetime import datetime, timedelta
 import time
 from tqdm.contrib.concurrent import process_map
 
@@ -552,7 +553,7 @@ chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf
 chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) #select spatial extent
 
 #%% ============== Equation decomposition ==============
-def decompose_growth(chla, temp, length=35):
+def decompose_growth(chla, temp, length):
     """Returns the breakdown of growth components."""
     # Constants
     a = np.mean([-0.196, -0.216])
@@ -560,112 +561,164 @@ def decompose_growth(chla, temp, length=35):
     d, e = 0.377, 0.321
     f, g = 0.013, -0.0115
 
-    const_value =  b * length + c * length**2
-    const_term = xr.full_like(chla, const_value)
+    length_term =  b * length + c * length**2
     chla_term = a + (d * chla) / (e + chla)
     temp_term = f * temp + g * temp**2
-    total_growth = const_term + chla_term + temp_term
+    total_growth = length_term + chla_term + temp_term
 
     return xr.Dataset({
-        "const_term": const_term,
+        "length_term": length_term,
         "chla_term": chla_term,
         "temp_term": temp_term,
         "total_growth": total_growth
     })
 
-# Region-mean timeseries
-# chl_series = chla_surf_study_area_1season['chla'].mean(dim=['eta_rho', 'xi_rho'])
-# temp_series = temp_avg_100m_study_area_1season['avg_temp'].mean(dim=['eta_rho', 'xi_rho'])
-chl_series = chla_surf_study_area_allyrs['chla'].mean(dim=['years', 'eta_rho', 'xi_rho'])
-temp_series = temp_avg_100m_study_area_allyrs['avg_temp'].mean(dim=['years', 'eta_rho', 'xi_rho'])
 
-# Decompose
-growth_decomp = decompose_growth(chl_series, temp_series)
+# == Climatological Drivers -> Mean Chla and T°C  (days, eta, xi)
+temp_clim = temp_avg_100m_SO_allyrs.isel(years=slice(0,30)) #shape: (30, 181, 231, 360)
+temp_clim_mean = temp_clim.mean(dim=['years']) #shape: (181, 231, 360)
+chla_clim = chla_surf_SO_allyrs.isel(years=slice(0,30))
+chla_clim_mean = chla_clim.mean(dim=['years'])
 
-# ======== PLOT
-plot='slides' #report slides
+# == Climatological Length
+from Growth_Model.growth_model import length_Atkison2006  
+climatological_length = length_Atkison2006(chla=chla_clim_mean.chla, 
+                                           temp=temp_clim_mean.avg_temp, 
+                                           initial_length=35, intermoult_period=1)
 
+# == Calculate Terms contribution
+growth_decomp = decompose_growth(chla_clim_mean.chla, temp_clim_mean.avg_temp, climatological_length)
+growth_decomp_avg= growth_decomp.mean(dim=['eta_rho', 'xi_rho'])
+growth_decomp_1cell=growth_decomp.isel(eta_rho=200, xi_rho=1000)
+# %% ============== PLOT Equation Decompsition ==============
+plot = 'report'  # 'report' or 'slides'
+
+# Figure size depending on plot type
 if plot == 'report':
     fig_width = 6.3228348611
-    fig_height = fig_width *1.5
-    fig, axes = plt.subplots(2, 1, figsize=(fig_width, fig_height), sharex=True)
+    fig_height = fig_width
+else:
+    fig_width = 16
+    fig_height = 9
 
-else:  # 'slides'
-    fig_width = 16 
-    fig_height = 9 
-    fig, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height), sharey=True)
+fig = plt.figure(figsize=(fig_width, fig_height))
 
-from datetime import datetime, timedelta
-base_date = datetime(2021, 11, 1)  # Nov 1 (season start)
+# Create a gridspec: 2 rows, 3 columns
+# bottom row's middle col is bigger vertically (e.g. height ratio 1.5)
+if plot=='slides':
+    gs = gridspec.GridSpec(2, 3, height_ratios=[1, 1.5], figure=fig, hspace=0.6, wspace=0.3)
+if plot=='report':
+    gs = gridspec.GridSpec(2, 3, height_ratios=[1, 1.5], figure=fig, hspace=0.99, wspace=0.2)
+
+# Axes for top row (3 equal width subplots)
+ax_len = fig.add_subplot(gs[0, 0])
+ax_chla = fig.add_subplot(gs[0, 1])
+ax_temp = fig.add_subplot(gs[0, 2])
+
+# Bottom row: only middle column occupied, spanning full height ratio
+ax_tot = fig.add_subplot(gs[1, 1:3])  
+
+# Date setup
+base_date = datetime(2021, 11, 1)
 date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
 date_dict = dict(date_list)
-days_xaxis = np.arange(181)  # Just 0 to 180 (1 per day)
+days_xaxis = np.arange(181)
 
-# Font size settings
+# Font sizes and styles
 maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {}
 subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {}
 label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
 tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
-legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 8}
 
-# Format x-axis
 wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
 selected_ticks = [(day, label) for day, label in date_dict.items() if label in wanted_labels]
-selected_ticks.sort()  # Sort by day to ensure chronological order
+selected_ticks.sort()
 tick_positions, tick_labels = zip(*selected_ticks)
 
-# --- Subplot 1: Drivers only ---
-axes[0].plot(days_xaxis, growth_decomp['chla_term'].values, label='Chla term', color='#385129')
-axes[0].plot(days_xaxis, growth_decomp['temp_term'].values, label='T°C term', color='#AD460B')
-axes[0].plot(days_xaxis, growth_decomp['const_term'].values, label='Length term', color='#942624')
-axes[0].set_ylabel("Growth [mm/d]", **label_kwargs)
-axes[0].set_ylim(-0.1, 0.25)
-if plot == 'slides':
-    axes[0].set_xlabel("Date", **label_kwargs)
-axes[0].legend(loc='upper left', **legend_kwargs)
-axes[0].grid(False)
-axes[0].tick_params(**tick_kwargs)
+# --- Plotting ---
+lw = 0.7 if plot == 'report' else 1
+# Length term (top left)
+ax_len.plot(days_xaxis, growth_decomp_avg['length_term'].values, color='#AE2012', linewidth=lw)#, label='Length term')
+ax_len.set_title('Length Term', **subtitle_kwargs)
+ax_len.set_xlabel('Date', **label_kwargs)
+ax_len.set_ylabel('Growth [mm/d]', **label_kwargs)
+ax_len.set_xticks(tick_positions)
+ax_len.set_xticklabels(tick_labels, rotation=45)
+# ax_len.legend(**legend_kwargs)
+ax_len.grid(False)
+ax_len.tick_params(**tick_kwargs)
 
-# --- Subplot 2: Sums and total with drivers faint ---
+# Chla term (top middle)
+ax_chla.plot(days_xaxis, growth_decomp_avg['chla_term'].values, color='#547A3E', linewidth=lw)#, label='Chla term')
+ax_chla.set_title('Chl-a Term', **subtitle_kwargs)
+ax_chla.set_xlabel('Date', **label_kwargs)
+ax_chla.set_ylabel('Growth [mm/d]', **label_kwargs)
+ax_chla.set_xticks(tick_positions)
+ax_chla.set_xticklabels(tick_labels, rotation=45)
+# ax_chla.legend(**legend_kwargs)
+ax_chla.grid(False)
+ax_chla.tick_params(**tick_kwargs)
+
+# Temp term (top right)
+ax_temp.plot(days_xaxis, growth_decomp_avg['temp_term'].values, color='#CA6702', linewidth=lw)#, label='Temperature term')
+ax_temp.set_title('Temperature Term', **subtitle_kwargs)
+ax_temp.set_xlabel('Date', **label_kwargs)
+ax_temp.set_ylabel('Growth [mm/d]', **label_kwargs)
+ax_temp.set_xticks(tick_positions)
+ax_temp.set_xticklabels(tick_labels, rotation=45)
+# ax_temp.legend(**legend_kwargs)
+ax_temp.grid(False)
+ax_temp.tick_params(**tick_kwargs)
+
+# Bottom middle bigger plot (combined)
 alpha_driver = 0.6
-axes[1].plot(days_xaxis, growth_decomp['chla_term'].values, color='#385129', alpha=alpha_driver)
-axes[1].plot(days_xaxis, growth_decomp['temp_term'].values, color='#AD460B', alpha=alpha_driver)
-axes[1].plot(days_xaxis, growth_decomp['const_term'].values, color='#942624', alpha=alpha_driver)
+ax_tot.plot(days_xaxis, growth_decomp_avg['chla_term'].values, color='#547A3E', alpha=alpha_driver, linewidth=lw)
+ax_tot.plot(days_xaxis, growth_decomp_avg['temp_term'].values, color='#CA6702', alpha=alpha_driver, linewidth=lw)
+ax_tot.plot(days_xaxis, growth_decomp_avg['length_term'].values, color='#AE2012', alpha=alpha_driver, linewidth=lw)
+# ax_tot.plot(days_xaxis, (growth_decomp_avg['chla_term'] + growth_decomp_avg['temp_term']).values,
+#             linestyle='--', color='#385129', label='(Chla + T°C) terms')
+# ax_tot.plot(days_xaxis, (growth_decomp_avg['chla_term'] + growth_decomp_avg['length_term']).values,
+#             linestyle='--', color='#942624', label='(Chla + Length) terms')
+ax_tot.plot(days_xaxis, growth_decomp_avg['total_growth'].values,
+            color='black', label='Total growth', linewidth=lw)
 
-axes[1].plot(days_xaxis, (growth_decomp['chla_term'] + growth_decomp['temp_term']).values, label='(Chla + T°C) terms', linestyle='--', color='#385129')
-axes[1].plot(days_xaxis, (growth_decomp['chla_term'] + growth_decomp['const_term']).values, label='(Chla + Length) terms', linestyle='--', color='#942624')
-axes[1].plot(days_xaxis, growth_decomp['total_growth'].values, label='Total growth', color='black', linewidth=2)
+ax_tot.set_title('Combined Growth Terms', **subtitle_kwargs)
+ax_tot.set_xlabel('Date', **label_kwargs)
+ax_tot.set_ylabel('Growth [mm/d]', **label_kwargs)
+ax_tot.set_ylim(-0.1, 0.25)
+from matplotlib.lines import Line2D
+handles, labels = ax_tot.get_legend_handles_labels()
+custom_handles = [Line2D([], [], color=h.get_color(), linewidth=0.75) for h in handles]
+ax_tot.legend(custom_handles, labels, loc='upper left', **legend_kwargs)
+ax_tot.grid(False)
+ax_tot.tick_params(**tick_kwargs)
+ax_tot.set_xticks(tick_positions)
+ax_tot.set_xticklabels(tick_labels, rotation=45)
+
+# Suptitle
 if plot == 'report':
-    axes[1].set_ylabel("Growth [mm/d]", **label_kwargs)
-axes[1].set_xlabel("Date", **label_kwargs)
-axes[1].set_ylim(-0.1, 0.25)
-axes[1].legend(loc='upper left', **legend_kwargs)
-axes[1].grid(False)
-axes[1].tick_params(**tick_kwargs)
+    suptitle_y = 1.09
+    title_text = ("Component-wise Contribution from the Equation\n Climatological Mean Drivers")
 
-for ax in axes:
-    ax.set_xticks(tick_positions)
-    ax.set_xticklabels(tick_labels, rotation=45)
-
-if plot == 'report':
-    suptitle_y = 0.92
-    title_text = ("Mean Krill Growth in the Atlantic Sector\n"
-                  r"\small{Component-wise Contribution from the Atkinson Equation}""\n"r"\small{Growth season (1980-2018)}")
-else:  # slides
-    suptitle_y = 0.93
-    title_text = ("Mean Krill Growth in the Atlantic Sector\n"
-                  "Component-wise Contribution from the Atkinson Equation\nGrowth season (1980-2018)")
-
-fig.suptitle(title_text, **maintitle_kwargs, y=suptitle_y)
-
-# --- Output handling ---    
-plt.tight_layout(rect=[0, 0.1, 1, 0.95])  # leave space at bottom for colorbar
-if plot == 'report':    
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/Atkison_decomp_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
-    plt.show()
 else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/Atkison_decomp_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    suptitle_y = 1.02
+    title_text = ("Component-wise Contribution from the Atkinson Equation\n Climatological Mean Drivers\n Southern Ocean (south of 60°S)")
+
+# fig.suptitle(title_text, **maintitle_kwargs, y=suptitle_y)
+
+# --- Output handling ---
+plt.tight_layout()
+outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/eq_decomposition')
+os.makedirs(outdir, exist_ok=True)
+if plot == 'report':
+    outfile = f"Atkison_decomp_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
+else:    
+    outfile = f"Atkison_decomp_{plot}.png"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=500, format='png', bbox_inches='tight')
+    plt.show()    
 
 #%% ============== Plot drivers ============== 
 temp_mean_ts = temp_avg_100m_study_area_1season['avg_temp'].mean(dim=['eta_rho', 'xi_rho'])
@@ -956,12 +1009,11 @@ circle = mpath.Path(verts)
 # === Plotting setup ===
 from matplotlib.colors import LinearSegmentedColormap
 # colors = ["#561664", "#952374", "#FFFFFF", "#F59F00", "#A72529"]  
-colors = ["#762a83", "#c2a5cf", "#f7f7f7", "#fdae61", "#d73027"]  # ColorBrewer-inspired
-
+colors = ["#511c5b", "#762a83", "#c2a5cf", "#f7f7f7", "#fdae61", "#d73027",  "#7d1c17"]  # ColorBrewer-inspired
 cmap_len = LinearSegmentedColormap.from_list("length", colors, N=256)
 # cmap_len = 'viridis'
 cmap_diff = 'coolwarm'
-norm_len = mcolors.Normalize(vmin=33, vmax=37)
+norm_len = mcolors.Normalize(vmin=32, vmax=38)
 norm_diff = mcolors.TwoSlopeNorm(vmin=-2, vcenter=0, vmax=2)
 
 # === Data and titles ===
@@ -1023,6 +1075,9 @@ for i, (data, title, cmap, norm) in enumerate(plot_data):
 cbar_ax1 = fig.add_axes([0.92, 0.55, 0.015, 0.35])  # [left, bottom, width, height]
 cbar1 = fig.colorbar(ims[0], cax=cbar_ax1, extend='both', **tick_kwargs)
 cbar1.set_label("Length [mm]", **label_kwargs)
+ticks = np.arange(32, 39, 1)  # 33,34,35,36,37,38
+cbar1.set_ticks(ticks)
+cbar1.set_ticklabels([str(t) for t in ticks])
 
 # Δ Length colorbar (bottom row)
 cbar_ax2 = fig.add_axes([0.92, 0.12, 0.015, 0.35])
@@ -1034,7 +1089,6 @@ cbar2.set_label(r"$\Delta$ Length [mm]", **label_kwargs)
 if plot == 'slides':
     fig.suptitle("Krill Length on Last Day of Season – Atlantic Sector",  y=0.98, **suptitle_kwargs)
 
-# === Save or show ===
 
 # --- Output handling ---
 if plot == 'report':
@@ -1047,38 +1101,7 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
-# %% =============== Impact of MHWs ===============
-# Define 2 areas to study
-# 1. Copy dataset
-chla = chla_surf_study_area_allyrs
-
-# 2. Convert longitude from [0, 360] → [-180, 180] if needed
-lon = xr.where(chla.lon_rho > 180, chla.lon_rho - 360, chla.lon_rho)
-lat = chla.lat_rho
-
-# 3. Define masks for each subregion
-
-# == Subregion 1: 60–63°S, 70–90°W
-mask_1 = ((lat >= -63) & (lat <= -60)) & ((lon >= -90) & (lon <= -70))
-
-# == Subregion 2: 63–68°S, 60–68°W
-mask_2 = ((lat >= -68) & (lat <= -63)) & ((lon >= -68) & (lon <= -60))
-
-# 4. Apply masks to get subregion indices
-idx_eta_1, idx_xi_1 = np.where(mask_1)
-idx_eta_2, idx_xi_2 = np.where(mask_2)
-
-# 5. Use bounding box around those points to subset dataset
-def bounding_box_slice(eta_idx, xi_idx, pad=0):
-    return slice(min(eta_idx)-pad, max(eta_idx)+1+pad), slice(min(xi_idx)-pad, max(xi_idx)+1+pad)
-
-eta_1, xi_1 = bounding_box_slice(idx_eta_1, idx_xi_1)
-eta_2, xi_2 = bounding_box_slice(idx_eta_2, idx_xi_2)
-
-# 6. Final subsets
-subregion_1 = chla.isel(eta_rho=eta_1, xi_rho=xi_1)
-subregion_2 = chla.isel(eta_rho=eta_2, xi_rho=xi_2)
-
+# %% 
 
 # # == Length Southern Ocean
 # # simulated_length_full_SO = length_Atkison2006(chla=chla_surf_1season_SO.raw_chla, temp=temp_avg_100m_1season_SO.avg_temp, initial_length= 35, intermoult_period=10)
@@ -1100,85 +1123,85 @@ subregion_2 = chla.isel(eta_rho=eta_2, xi_rho=xi_2)
 # simulated_length_study_area_1980_2019 = xr.concat(lengths_allyears, dim='years')
 # simulated_length_study_area_1980_2019 = simulated_length_study_area_1980_2019.assign_coords(years=chla_surf_study_area_allyrs['years'])
 
-# %% ======================== Extracting the growth rate ========================
-# Calculate length on a daily basis
-simulated_length_1season_daily = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
-                                                         initial_length= 35, intermoult_period=1)
+# # %% ======================== Extracting the growth rate ========================
+# # Calculate length on a daily basis
+# simulated_length_1season_daily = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
+#                                                          initial_length= 35, intermoult_period=1)
 
-# One step back - extracting growth rate (mm/d) between each days
-daily_growth = simulated_length_1season_daily.diff(dim='days') #shape (180, 231, 360)
+# # One step back - extracting growth rate (mm/d) between each days
+# daily_growth = simulated_length_1season_daily.diff(dim='days') #shape (180, 231, 360)
 
-# -- Create masks for the different MHW scenarios (Use Temp Mask - Boolean: where MHW occurred)
-mhw_1 = xr.where(~np.isnan(temp_mhw.temp_1deg.isel(years=year_index)), 1, 0)
-mhw_2 = xr.where(~np.isnan(temp_mhw.temp_2deg.isel(years=year_index)), 1, 0)
-mhw_3 = xr.where(~np.isnan(temp_mhw.temp_3deg.isel(years=year_index)), 1, 0)
-mhw_4 = xr.where(~np.isnan(temp_mhw.temp_4deg.isel(years=year_index)), 1, 0)
+# # -- Create masks for the different MHW scenarios (Use Temp Mask - Boolean: where MHW occurred)
+# mhw_1 = xr.where(~np.isnan(temp_mhw.temp_1deg.isel(years=year_index)), 1, 0)
+# mhw_2 = xr.where(~np.isnan(temp_mhw.temp_2deg.isel(years=year_index)), 1, 0)
+# mhw_3 = xr.where(~np.isnan(temp_mhw.temp_3deg.isel(years=year_index)), 1, 0)
+# mhw_4 = xr.where(~np.isnan(temp_mhw.temp_4deg.isel(years=year_index)), 1, 0)
 
-# Non non-exclusive masks, i.e. a 4°C MHW also counted as a 1°C
-growth_by_mhw_level = {
-    1: daily_growth.where(mhw_1 == 1),
-    2: daily_growth.where(mhw_2 == 1),
-    3: daily_growth.where(mhw_3 == 1),
-    4: daily_growth.where(mhw_4 == 1),
-    0: daily_growth.where((mhw_1 + mhw_2 + mhw_3 + mhw_4) == 0)  # explicitly outside any MHW
-}
+# # Non non-exclusive masks, i.e. a 4°C MHW also counted as a 1°C
+# growth_by_mhw_level = {
+#     1: daily_growth.where(mhw_1 == 1),
+#     2: daily_growth.where(mhw_2 == 1),
+#     3: daily_growth.where(mhw_3 == 1),
+#     4: daily_growth.where(mhw_4 == 1),
+#     0: daily_growth.where((mhw_1 + mhw_2 + mhw_3 + mhw_4) == 0)  # explicitly outside any MHW
+# }
 
-# -- Compute length under the different scenarios
-initial_length = 35
-intermoult_period = 10
-n_days = daily_growth.sizes["days"]+1
+# # -- Compute length under the different scenarios
+# initial_length = 35
+# intermoult_period = 10
+# n_days = daily_growth.sizes["days"]+1
 
-length_by_mhw_level = {}
-for level in range(5):
-    growth = growth_by_mhw_level[level]  # shape: (days, eta_rho, xi_rho)
+# length_by_mhw_level = {}
+# for level in range(5):
+#     growth = growth_by_mhw_level[level]  # shape: (days, eta_rho, xi_rho)
 
-    # 1. Mean growth over space for each day (daily)
-    daily_mean_growth = growth.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+#     # 1. Mean growth over space for each day (daily)
+#     daily_mean_growth = growth.mean(dim=["eta_rho", "xi_rho"], skipna=True)
 
-    # 2. Calculate length under the different scenarios -- with IMP=10days
-    # Average over 10-day blocks 
-    growth_blocks = []
-    for i in range(0, n_days, intermoult_period):
-        block = daily_mean_growth.isel(days=slice(i, min(i + intermoult_period, n_days)))
-        avg_block_growth = block.mean().item()  # scalar growth per day in this block
-        growth_blocks.extend([avg_block_growth] * len(block))  # same growth each day in block
+#     # 2. Calculate length under the different scenarios -- with IMP=10days
+#     # Average over 10-day blocks 
+#     growth_blocks = []
+#     for i in range(0, n_days, intermoult_period):
+#         block = daily_mean_growth.isel(days=slice(i, min(i + intermoult_period, n_days)))
+#         avg_block_growth = block.mean().item()  # scalar growth per day in this block
+#         growth_blocks.extend([avg_block_growth] * len(block))  # same growth each day in block
     
-    # Length
-    length_series = [initial_length]
-    current_length = initial_length
-    for i in range(1, n_days):  # Start from 1 because day 0 is initial
-        if i % intermoult_period == 0:
-            current_length += growth_blocks[i - 1]  # Apply growth from previous full day
-        length_series.append(current_length)
+#     # Length
+#     length_series = [initial_length]
+#     current_length = initial_length
+#     for i in range(1, n_days):  # Start from 1 because day 0 is initial
+#         if i % intermoult_period == 0:
+#             current_length += growth_blocks[i - 1]  # Apply growth from previous full day
+#         length_series.append(current_length)
 
-    # Convert to DataArray
-    length_by_mhw_level[level] = xr.DataArray(
-        data=length_series,
-        dims=["days"],
-        coords={"days": simulated_length_1season_daily.days}
-    )
+#     # Convert to DataArray
+#     length_by_mhw_level[level] = xr.DataArray(
+#         data=length_series,
+#         dims=["days"],
+#         coords={"days": simulated_length_1season_daily.days}
+#     )
 
-# -- Do the same but mean avg over full period - disregarding mhws 
-simulated_length_1season_daily_imp = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
-                                                         initial_length= 35, intermoult_period=10)
+# # -- Do the same but mean avg over full period - disregarding mhws 
+# simulated_length_1season_daily_imp = length_Atkison2006(chla=chla_surf_study_area_1season.chla, temp=temp_avg_100m_study_area_1season.avg_temp, 
+#                                                          initial_length= 35, intermoult_period=10)
 
-mean_length_full_area = simulated_length_1season_daily_imp.mean(dim=["eta_rho", "xi_rho"], skipna=True)
-std_length_full_area = simulated_length_1season_daily_imp.std(dim=["eta_rho", "xi_rho"], skipna=True)
+# mean_length_full_area = simulated_length_1season_daily_imp.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+# std_length_full_area = simulated_length_1season_daily_imp.std(dim=["eta_rho", "xi_rho"], skipna=True)
 
-# Rename
-mean_length_full_area = xr.DataArray(data=mean_length_full_area, dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_full_area")
-mean_length_study_area_non_MHWs = xr.DataArray(data=length_by_mhw_level[0], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_study_area_non_MHWs")
-average_length_ts_1deg = xr.DataArray(data=length_by_mhw_level[1], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_1deg")
-average_length_ts_2deg = xr.DataArray(data=length_by_mhw_level[2], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_2deg")
-average_length_ts_3deg = xr.DataArray(data=length_by_mhw_level[3], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_3deg")
-average_length_ts_4deg = xr.DataArray(data=length_by_mhw_level[4], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_4deg")
+# # Rename
+# mean_length_full_area = xr.DataArray(data=mean_length_full_area, dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_full_area")
+# mean_length_study_area_non_MHWs = xr.DataArray(data=length_by_mhw_level[0], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="mean_length_study_area_non_MHWs")
+# average_length_ts_1deg = xr.DataArray(data=length_by_mhw_level[1], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_1deg")
+# average_length_ts_2deg = xr.DataArray(data=length_by_mhw_level[2], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_2deg")
+# average_length_ts_3deg = xr.DataArray(data=length_by_mhw_level[3], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_3deg")
+# average_length_ts_4deg = xr.DataArray(data=length_by_mhw_level[4], dims=["days"], coords={"days": simulated_length_1season_daily.days}, name="average_length_ts_4deg")
 
-print(f"Full seasonal mean length: {mean_length_full_area[-1].values:.2f} mm")
-print(f"Non MHW mean length: {mean_length_study_area_non_MHWs[-1].values:.2f} mm")
-print(f"MHW 1°C mean length: {average_length_ts_1deg[-1].values:.2f} mm")
-print(f"MHW 2°C mean length: {average_length_ts_2deg[-1].values:.2f} mm")
-print(f"MHW 3°C mean length: {average_length_ts_3deg[-1].values:.2f} mm")
-print(f"MHW 4°C mean length: {average_length_ts_4deg[-1].values:.2f} mm")
+# print(f"Full seasonal mean length: {mean_length_full_area[-1].values:.2f} mm")
+# print(f"Non MHW mean length: {mean_length_study_area_non_MHWs[-1].values:.2f} mm")
+# print(f"MHW 1°C mean length: {average_length_ts_1deg[-1].values:.2f} mm")
+# print(f"MHW 2°C mean length: {average_length_ts_2deg[-1].values:.2f} mm")
+# print(f"MHW 3°C mean length: {average_length_ts_3deg[-1].values:.2f} mm")
+# print(f"MHW 4°C mean length: {average_length_ts_4deg[-1].values:.2f} mm")
 
 
 # %% ======================== Spatial Average - weighted by exposure time ========================
@@ -1351,239 +1374,239 @@ print(f"MHW 4°C mean length: {average_length_ts_4deg[-1].values:.2f} mm")
 # print(f"Full spatial mean length: {simulated_length_study_area_1season.mean(['eta_rho', 'xi_rho'])[-1].values:.2f} mm")
 
 
-# %% ============== Plotting length over 1 season ==============
-# Define colors and labels
-threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
-threshold_labels = ['1°C and 90th perc', '2°C and 90th perc', '3°C and 90th perc', '4°C and 90th perc']
+# # %% ============== Plotting length over 1 season ==============
+# # Define colors and labels
+# threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
+# threshold_labels = ['1°C and 90th perc', '2°C and 90th perc', '3°C and 90th perc', '4°C and 90th perc']
 
-# Deal with day to have continuous x-axis
-days_xaxis = np.where(simulated_length_study_area_1980_2019.days.values < 304, 
-                      simulated_length_study_area_1980_2019.days.values + 365, 
-                      simulated_length_study_area_1980_2019.days.values).astype(int)
-from datetime import datetime, timedelta
-base_date = datetime(2021, 11, 1)  # Nov 1 (season start)
-date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
-date_dict = dict(date_list)
-days_xaxis = np.arange(181)  # Just 0 to 180 (1 per day)
+# # Deal with day to have continuous x-axis
+# days_xaxis = np.where(simulated_length_study_area_1980_2019.days.values < 304, 
+#                       simulated_length_study_area_1980_2019.days.values + 365, 
+#                       simulated_length_study_area_1980_2019.days.values).astype(int)
+# from datetime import datetime, timedelta
+# base_date = datetime(2021, 11, 1)  # Nov 1 (season start)
+# date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
+# date_dict = dict(date_list)
+# days_xaxis = np.arange(181)  # Just 0 to 180 (1 per day)
 
-plot = 'report'  # 'report' or 'slides'
+# plot = 'report'  # 'report' or 'slides'
 
-if plot == 'report':
-    fig_width = 6.3228348611  # text width in inches
-    fig_height = fig_width / 2
-else:  # 'slides'
-    fig_width = 15
-    fig_height = 6
+# if plot == 'report':
+#     fig_width = 6.3228348611  # text width in inches
+#     fig_height = fig_width / 2
+# else:  # 'slides'
+#     fig_width = 15
+#     fig_height = 6
 
-fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+# fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-# Font size settings
-maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {'fontsize': 13}
-subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {'fontsize': 10}
-label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
-tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
-legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 10}
+# # Font size settings
+# maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {'fontsize': 13}
+# subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {'fontsize': 10}
+# label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+# tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+# legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 10}
 
-# --- Length time series ---
-lw=1.5 if 'report' else 2
-ax.plot(days_xaxis, average_length_ts_1deg, color='#5A7854', linewidth=lw, label='1°C and 90th perc')
-ax.plot(days_xaxis, average_length_ts_2deg, color='#8780C6', linewidth=lw, label='2°C and 90th perc') 
-ax.plot(days_xaxis, average_length_ts_3deg, color='#E07800', linewidth=lw, label='3°C and 90th perc') 
-ax.plot(days_xaxis, average_length_ts_4deg, color='#9B2808', linewidth=lw, label='4°C and 90th perc')
-ax.plot(days_xaxis, mean_length_study_area_non_MHWs, label=f"Non-MHWs", color="black", linestyle='-', linewidth=lw)
+# # --- Length time series ---
+# lw=1.5 if 'report' else 2
+# ax.plot(days_xaxis, average_length_ts_1deg, color='#5A7854', linewidth=lw, label='1°C and 90th perc')
+# ax.plot(days_xaxis, average_length_ts_2deg, color='#8780C6', linewidth=lw, label='2°C and 90th perc') 
+# ax.plot(days_xaxis, average_length_ts_3deg, color='#E07800', linewidth=lw, label='3°C and 90th perc') 
+# ax.plot(days_xaxis, average_length_ts_4deg, color='#9B2808', linewidth=lw, label='4°C and 90th perc')
+# ax.plot(days_xaxis, mean_length_study_area_non_MHWs, label=f"Non-MHWs", color="black", linestyle='-', linewidth=lw)
 
-# mean_values_1980_2018 = mean_length_study_area_1980_2019.values
-# std_values = std_length_mean_length_study_area_1980_2019.values
-mean_values_season = mean_length_full_area.values
-std_values_season  = std_length_full_area.values
-ax.plot(days_xaxis, mean_values_season, label="$\mu$", color="grey", linestyle='--', linewidth=lw)
-ax.fill_between(days_xaxis,
-                mean_values_season - std_values_season,
-                mean_values_season + std_values_season,
-                color="gray", alpha=0.2, label="$\mu$±1$\sigma$")
+# # mean_values_1980_2018 = mean_length_study_area_1980_2019.values
+# # std_values = std_length_mean_length_study_area_1980_2019.values
+# mean_values_season = mean_length_full_area.values
+# std_values_season  = std_length_full_area.values
+# ax.plot(days_xaxis, mean_values_season, label="$\mu$", color="grey", linestyle='--', linewidth=lw)
+# ax.fill_between(days_xaxis,
+#                 mean_values_season - std_values_season,
+#                 mean_values_season + std_values_season,
+#                 color="gray", alpha=0.2, label="$\mu$±1$\sigma$")
 
-# Define labels to keep
-wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
-tick_positions = []
-tick_labels = []
-for day, label in date_dict.items():
-    if label in wanted_labels:
-        tick_positions.append(day)
-        tick_labels.append(label)
-ax.set_xticks(tick_positions)
-ax.tick_params(axis='both', **tick_kwargs)
+# # Define labels to keep
+# wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
+# tick_positions = []
+# tick_labels = []
+# for day, label in date_dict.items():
+#     if label in wanted_labels:
+#         tick_positions.append(day)
+#         tick_labels.append(label)
+# ax.set_xticks(tick_positions)
+# ax.tick_params(axis='both', **tick_kwargs)
 
-# ax.set_xticks(tick_positions, **tick_kwargs)
-ax.set_xticklabels(tick_labels, rotation=45)
-ax.set_xlabel("Date", **label_kwargs)
-ax.set_ylabel("Length (mm)", **label_kwargs)
-# ax.set_ylim(32,37.5)
-# ax.grid(True, alpha=0.3)
-ax.tick_params(axis='both', **tick_kwargs)
-ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.25), 
-          ncol=3, frameon=True, **legend_kwargs)
+# # ax.set_xticks(tick_positions, **tick_kwargs)
+# ax.set_xticklabels(tick_labels, rotation=45)
+# ax.set_xlabel("Date", **label_kwargs)
+# ax.set_ylabel("Length (mm)", **label_kwargs)
+# # ax.set_ylim(32,37.5)
+# # ax.grid(True, alpha=0.3)
+# ax.tick_params(axis='both', **tick_kwargs)
+# ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.25), 
+#           ncol=3, frameon=True, **legend_kwargs)
 
-if plot == 'report':
-    suptitle_y = 1.07
-else:  # slides
-    suptitle_y = 1.01
+# if plot == 'report':
+#     suptitle_y = 1.07
+# else:  # slides
+#     suptitle_y = 1.01
     
-# --- Title and subtitle ---
-fig.suptitle(
-    "Evolution of Krill Length \nunder MHW and Non-MHW conditions in the Atlantic Sector",
-    **maintitle_kwargs,
-    y=suptitle_y
-)
+# # --- Title and subtitle ---
+# fig.suptitle(
+#     "Evolution of Krill Length \nunder MHW and Non-MHW conditions in the Atlantic Sector",
+#     **maintitle_kwargs,
+#     y=suptitle_y
+# )
 
-ax.set_title(f"Growth Season {selected_years[yr_chosen]}–{selected_years[yr_chosen]+1}", **subtitle_kwargs)
-
-
-# --- Output handling ---    
-if plot == 'report':    
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_mhw_{selected_years[yr_chosen]}_{plot}.pdf'), dpi =200, format='pdf', bbox_inches='tight')
-    plt.show()
-else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_mhw_{selected_years[yr_chosen]}_{plot}.png'), dpi =500, format='png', bbox_inches='tight')
-    plt.show()
+# ax.set_title(f"Growth Season {selected_years[yr_chosen]}–{selected_years[yr_chosen]+1}", **subtitle_kwargs)
 
 
-
-# %% ======================== Extracting the growth rate ========================
-# == Length Atlantic Sector for all years
-lengths_allyears = []
-
-for yr in range(39):
-    print(f' -- Processing {1980+yr}')
-    chla = chla_surf_study_area_allyrs.chla.isel(years=yr)
-    temp = temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr)
-
-    # Calculate length
-    simulated_length_yr = length_Atkison2006(chla=chla, temp=temp, initial_length=35, intermoult_period=10)
-    mean_length_yr = simulated_length_yr.mean(dim=["eta_rho", "xi_rho"], skipna=True)
-
-    lengths_allyears.append(mean_length_yr)
-
-# Back to DataArray
-length_stacked = np.stack(lengths_allyears, axis=0)
-
-# Create DataArray
-krill_length_timeseries = xr.DataArray(
-    data=length_stacked,
-    coords={"years": np.arange(1980, 2019), "days": np.arange(0, 181)},
-    dims=["years", "days"],
-    name="krill_length"
-)
-krill_length_timeseries.attrs["units"] = "mm"
-krill_length_timeseries.attrs["description"] = "Mean krill length over season (0–180 days), spatially averaged, per year"
-krill_length_timeseries.attrs["initial_length"] = 35
-krill_length_timeseries.attrs["intermoult_period"] = 10
-
-#
-mean_length_study_area_1980_2019 = krill_length_timeseries.mean(dim=['years'])
-
-# %% ============== Plot evolution of the area ==============
-from datetime import datetime, timedelta
-
-# Create days axis: 0 to 180
-days_xaxis = np.arange(181)
-base_date = datetime(2021, 11, 1)  # Start from Nov 1
-date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
-date_dict = dict(date_list)
-
-# Set up color map from red (1980) to green (2019)
-colors = [(0, "#278E2F"), (0.6, "#EE9B00"), (1, "#AE2012")]
-custom_cmap = mcolors.LinearSegmentedColormap.from_list("GreenYellowRed", colors)
-
-norm = mpl.colors.Normalize(vmin=1980, vmax=2019)
-sm = mpl.cm.ScalarMappable(cmap=custom_cmap, norm=norm)
-sm.set_array([])
-
-plot = 'report'  # 'report' or 'slides'
-
-if plot == 'report':
-    fig_width = 6.3228348611  # text width in inches
-    fig_height = fig_width/2
-else:  # 'slides'
-    fig_width = 10
-    fig_height = 5
-
-fig, ax_len = plt.subplots(figsize=(fig_width, fig_height))
-
-# Font size settings
-maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {'fontsize': 13}
-subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {'fontsize': 10}
-label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
-tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
-legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+# # --- Output handling ---    
+# if plot == 'report':    
+#     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_mhw_{selected_years[yr_chosen]}_{plot}.pdf'), dpi =200, format='pdf', bbox_inches='tight')
+#     plt.show()
+# else:
+#     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_mhw_{selected_years[yr_chosen]}_{plot}.png'), dpi =500, format='png', bbox_inches='tight')
+#     plt.show()
 
 
-# --- Loop over years ---
-for yr in range(38):
-    annual_length = length_Atkison2006(chla=chla_surf_study_area_allyrs.chla.isel(years=yr),
-                                       temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr),
-                                       initial_length= 35, intermoult_period=10)
-    annual_length_mean = annual_length.mean(dim=('eta_rho', 'xi_rho'))
-    ax_len.plot(days_xaxis, annual_length_mean, color=custom_cmap(norm(yr+1980)), linewidth=1)
-    # ax_len.plot(days_xaxis, krill_length_timeseries.isel(years=yr), color=custom_cmap(norm(yr+1980)), linewidth=1)
 
-# Plot mean 
-ax_len.plot(days_xaxis, mean_length_study_area_1980_2019.values, linestyle='--', color='black',
-            label="Mean 1980–2018")
+# # %% ======================== Extracting the growth rate ========================
+# # == Length Atlantic Sector for all years
+# lengths_allyears = []
+
+# for yr in range(39):
+#     print(f' -- Processing {1980+yr}')
+#     chla = chla_surf_study_area_allyrs.chla.isel(years=yr)
+#     temp = temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr)
+
+#     # Calculate length
+#     simulated_length_yr = length_Atkison2006(chla=chla, temp=temp, initial_length=35, intermoult_period=10)
+#     mean_length_yr = simulated_length_yr.mean(dim=["eta_rho", "xi_rho"], skipna=True)
+
+#     lengths_allyears.append(mean_length_yr)
+
+# # Back to DataArray
+# length_stacked = np.stack(lengths_allyears, axis=0)
+
+# # Create DataArray
+# krill_length_timeseries = xr.DataArray(
+#     data=length_stacked,
+#     coords={"years": np.arange(1980, 2019), "days": np.arange(0, 181)},
+#     dims=["years", "days"],
+#     name="krill_length"
+# )
+# krill_length_timeseries.attrs["units"] = "mm"
+# krill_length_timeseries.attrs["description"] = "Mean krill length over season (0–180 days), spatially averaged, per year"
+# krill_length_timeseries.attrs["initial_length"] = 35
+# krill_length_timeseries.attrs["intermoult_period"] = 10
+
+# #
+# mean_length_study_area_1980_2019 = krill_length_timeseries.mean(dim=['years'])
+
+# # %% ============== Plot evolution of the area ==============
+# from datetime import datetime, timedelta
+
+# # Create days axis: 0 to 180
+# days_xaxis = np.arange(181)
+# base_date = datetime(2021, 11, 1)  # Start from Nov 1
+# date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(181)]
+# date_dict = dict(date_list)
+
+# # Set up color map from red (1980) to green (2019)
+# colors = [(0, "#278E2F"), (0.6, "#EE9B00"), (1, "#AE2012")]
+# custom_cmap = mcolors.LinearSegmentedColormap.from_list("GreenYellowRed", colors)
+
+# norm = mpl.colors.Normalize(vmin=1980, vmax=2019)
+# sm = mpl.cm.ScalarMappable(cmap=custom_cmap, norm=norm)
+# sm.set_array([])
+
+# plot = 'report'  # 'report' or 'slides'
+
+# if plot == 'report':
+#     fig_width = 6.3228348611  # text width in inches
+#     fig_height = fig_width/2
+# else:  # 'slides'
+#     fig_width = 10
+#     fig_height = 5
+
+# fig, ax_len = plt.subplots(figsize=(fig_width, fig_height))
+
+# # Font size settings
+# maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {'fontsize': 13}
+# subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {'fontsize': 10}
+# label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+# tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+# legend_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+
+
+# # --- Loop over years ---
+# for yr in range(38):
+#     annual_length = length_Atkison2006(chla=chla_surf_study_area_allyrs.chla.isel(years=yr),
+#                                        temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr),
+#                                        initial_length= 35, intermoult_period=10)
+#     annual_length_mean = annual_length.mean(dim=('eta_rho', 'xi_rho'))
+#     ax_len.plot(days_xaxis, annual_length_mean, color=custom_cmap(norm(yr+1980)), linewidth=1)
+#     # ax_len.plot(days_xaxis, krill_length_timeseries.isel(years=yr), color=custom_cmap(norm(yr+1980)), linewidth=1)
+
+# # Plot mean 
+# ax_len.plot(days_xaxis, mean_length_study_area_1980_2019.values, linestyle='--', color='black',
+#             label="Mean 1980–2018")
     
-# Format x-axis ticks
-wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
-tick_positions, tick_labels = zip(*[(day, label) for day, label in date_dict.items() if label in wanted_labels])
-ax_len.set_xticks(tick_positions)
-ax_len.set_xticklabels(tick_labels, rotation=45, fontsize=tick_kwargs.get('labelsize', None))
+# # Format x-axis ticks
+# wanted_labels = {"Nov 01", "Dec 01", "Jan 01", "Feb 01", "Mar 01", "Apr 01", "Apr 30"}
+# tick_positions, tick_labels = zip(*[(day, label) for day, label in date_dict.items() if label in wanted_labels])
+# ax_len.set_xticks(tick_positions)
+# ax_len.set_xticklabels(tick_labels, rotation=45, fontsize=tick_kwargs.get('labelsize', None))
 
-# Labels and title
-ax_len.set_xlabel("Date", **label_kwargs)
-ax_len.set_ylabel("Length (mm)", **label_kwargs)
-ax_len.set_ylim(34.8, 36)
-ax_len.tick_params(axis='both', **tick_kwargs)
-ax_len.legend(loc='upper left', handlelength=2.5, **legend_kwargs)
+# # Labels and title
+# ax_len.set_xlabel("Date", **label_kwargs)
+# ax_len.set_ylabel("Length (mm)", **label_kwargs)
+# ax_len.set_ylim(34.8, 36)
+# ax_len.tick_params(axis='both', **tick_kwargs)
+# ax_len.legend(loc='upper left', handlelength=2.5, **legend_kwargs)
 
-fig.subplots_adjust(top=0.88 if plot == 'slides' else 0.90)
+# fig.subplots_adjust(top=0.88 if plot == 'slides' else 0.90)
 
-suptitle_y = 1.05 if plot == 'slides' else 0.99
-fig.suptitle("Interannual Variability of Krill Length", y=suptitle_y, **maintitle_kwargs)
+# suptitle_y = 1.05 if plot == 'slides' else 0.99
+# fig.suptitle("Interannual Variability of Krill Length", y=suptitle_y, **maintitle_kwargs)
 
-subtitle_y = 0.95 if plot == 'slides' else 0.89
-fig.text(0.5, subtitle_y, "Spatial average over the Atlantic Sector (0-90°W) during growth season", ha='center', **subtitle_kwargs)
-
-
-# Colorbar
-cbar = fig.colorbar(sm, ax=ax_len, orientation='vertical', label='Year')
-cbar.set_ticks(np.linspace(1980, 2018, 5).astype(int))
-cbar.ax.tick_params(**tick_kwargs)
+# subtitle_y = 0.95 if plot == 'slides' else 0.89
+# fig.text(0.5, subtitle_y, "Spatial average over the Atlantic Sector (0-90°W) during growth season", ha='center', **subtitle_kwargs)
 
 
-# --- Output handling ---    
-plt.tight_layout()
-if plot == 'report':    
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_all_years_atl_sector_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
-    plt.show()
-else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_all_years_atl_sector_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
-    plt.show()
+# # Colorbar
+# cbar = fig.colorbar(sm, ax=ax_len, orientation='vertical', label='Year')
+# cbar.set_ticks(np.linspace(1980, 2018, 5).astype(int))
+# cbar.ax.tick_params(**tick_kwargs)
+
+
+# # --- Output handling ---    
+# plt.tight_layout()
+# if plot == 'report':    
+#     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_all_years_atl_sector_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+#     plt.show()
+# else:
+#     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/length_all_years_atl_sector_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+#     plt.show()
     
 
-# %% Likelihood
+# # %% Likelihood
 
-mean_length = mean_length_study_area_1980_2019  # shape: (181,)
+# mean_length = mean_length_study_area_1980_2019  # shape: (181,)
 
-all_lengths = []
-for yr in range(38):
-    annual_length = length_Atkison2006(
-        chla=chla_surf_study_area_allyrs.chla.isel(years=yr),
-        temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr),
-        initial_length=35, intermoult_period=10
-    )
-    annual_length_mean = annual_length.mean(dim=('eta_rho', 'xi_rho'))  # shape: (181,)
-    all_lengths.append(annual_length_mean.values)
+# all_lengths = []
+# for yr in range(38):
+#     annual_length = length_Atkison2006(
+#         chla=chla_surf_study_area_allyrs.chla.isel(years=yr),
+#         temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr),
+#         initial_length=35, intermoult_period=10
+#     )
+#     annual_length_mean = annual_length.mean(dim=('eta_rho', 'xi_rho'))  # shape: (181,)
+#     all_lengths.append(annual_length_mean.values)
 
-all_lengths = np.stack(all_lengths)  # shape: (38, 181)
+# all_lengths = np.stack(all_lengths)  # shape: (38, 181)
 
 
-probability_above_mean = (all_lengths > mean_length.values).sum(axis=0) / all_lengths.shape[0]
-overall_likelihood = (all_lengths.mean(axis=1) > mean_length.values.mean()).mean()
+# probability_above_mean = (all_lengths > mean_length.values).sum(axis=0) / all_lengths.shape[0]
+# overall_likelihood = (all_lengths.mean(axis=1) > mean_length.values.mean()).mean()
