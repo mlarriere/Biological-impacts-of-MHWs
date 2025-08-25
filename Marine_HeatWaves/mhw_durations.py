@@ -15,17 +15,25 @@ import xarray as xr
 import numpy as np
 import gc
 import psutil #retracing memory
+import glob
+import collections
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
 import matplotlib.pyplot as plt
 import matplotlib.path as mpath
+import matplotlib.colors as mcolors
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
+import matplotlib.gridspec as gridspec
 
+from datetime import datetime, timedelta
 import time
 from tqdm.contrib.concurrent import process_map
 
 from joblib import Parallel, delayed
+
 
 #%% Server 
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -379,4 +387,151 @@ os.makedirs(os.path.join(output_path, "mhw_durations"), exist_ok=True)
 process_map(mhw_duration, range(3,6), max_workers=6, desc="Processing depth")  # detects extremes for each latitude in parallel - computing time ~10min total
 
 
+
+#%% =============== Mean duration over hincast ===============
+det_combined_ds= xr.open_dataset( os.path.join(path_det, f"duration_AND_thresh_5mFULL.nc"))
+thresholds = ["det_1deg", "det_2deg", "det_3deg", "det_4deg"]
+
+mean_duration_hindcast = xr.Dataset({
+    t: det_combined_ds["duration"].where(det_combined_ds[t] > 0).mean(dim="years", skipna=True)
+    for t in thresholds
+})
+
+# Collapse the days dimension to get one mean duration per grid cell
+mean_duration_plot = mean_duration_hindcast.mean(dim="days", skipna=True)
+
+#%% =============== Mean duration Plot ===============
+plot = 'slides'  # slides report
+
+# --------- Figure layout ---------
+if plot == 'report':
+    fig_width = 6.3228348611*0.5
+    fig_height = 9.3656988889 #674.33032pt
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(4, 1, hspace=0.4, wspace=0)  # 4 rows, 1 column
+
+    axs = []
+    axs.append(fig.add_subplot(gs[0, 0], projection=ccrs.SouthPolarStereo()))  # 1°C
+    axs.append(fig.add_subplot(gs[1, 0], projection=ccrs.SouthPolarStereo()))  # 2°C
+    axs.append(fig.add_subplot(gs[2, 0], projection=ccrs.SouthPolarStereo()))  # 3°C
+    axs.append(fig.add_subplot(gs[3, 0], projection=ccrs.SouthPolarStereo()))  # 4°C
+
+elif plot == 'slides':
+    fig_width = 6.3228348611
+    fig_height = fig_width
+    fig = plt.figure(figsize=(fig_width * 5, fig_height))  # 5 columns wide
+    gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)
+    axs = [fig.add_subplot(gs[0, j], projection=ccrs.SouthPolarStereo()) for j in range(4)]
+
+# Font size settings
+maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {}
+subtitle_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+
+plot_data = [(mean_duration_plot['det_1deg'], r"MHWs $\ge$ 1$^\circ$C"),
+            (mean_duration_plot['det_2deg'], r"MHWs $\ge$ 2$^\circ$C"),
+            (mean_duration_plot['det_3deg'], r"MHWs $\ge$ 3$^\circ$C"),
+            (mean_duration_plot['det_4deg'], r"MHWs $\ge$ 4$^\circ$C")]
+
+# --- Color Setup ---
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import BoundaryNorm
+
+# Define bin
+bins = [0, 5, 10, 15, 20, 25, 30]  
+n_colors = len(bins) - 1 
+
+colors = ["#F4E9CD", "#9DBEBB", "#5F9796", "#468189", "#254D58", "#031926"]  
+# cmap = LinearSegmentedColormap.from_list("duration", colors, N=256)
+cmap = LinearSegmentedColormap.from_list("duration", colors, N=n_colors)
+norm = BoundaryNorm(boundaries=bins, ncolors=n_colors)
+
+# norm = mcolors.Normalize(vmin=0, vmax=100)
+
+
+# --------- Plot ---------
+for i, (data, title) in enumerate(plot_data):
+    ax = axs[i]
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map features
+    lw = 1 if plot == 'slides' else 0.5
+    ax.coastlines(color='black', linewidth=lw, zorder=4)
+    ax.add_feature(cfeature.LAND, zorder=2, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=lw, zorder=5)
+
+    # Gridlines
+    lw_grid = 0.7 if plot == 'slides' else 0.3
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=lw_grid, zorder=3)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    # Font size settings for gridline labels
+    gridlabel_kwargs = {'size': 10, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # CHLA data
+    im = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+                       transform=ccrs.PlateCarree(), cmap=cmap, norm=norm, 
+                       shading='auto', zorder=1, rasterized=True)
+    
+    # ax.set_title(title, **title_kwargs)
+    if plot == 'report':
+        ax.text(1.5, 0.5,  title,
+            rotation=-90, va='center', ha='center',
+            transform=ax.transAxes, **subtitle_kwargs)
+    else:
+        ax.set_title(title, **subtitle_kwargs)
+# --------- Colorbar ---------
+if plot == 'report':
+    cbar_kwargs = {'fraction': 0.02, 'pad': 0.06, 'aspect': 50}
+else:
+    cbar_kwargs = {'fraction': 0.05, 'pad': 0.07, 'aspect': 40}
+
+if plot == 'report':
+    cbar = fig.colorbar(im, ax=axs, orientation='vertical', extend='max', location='bottom', fraction=0.025, pad=0.04, shrink=0.9)
+else: 
+    cbar = fig.colorbar(im, ax=axs, extend='max', orientation='vertical', fraction=0.025, pad=0.04, shrink=0.9)
+
+
+# cbar = fig.colorbar(im, ax=axs, orientation='horizontal', extend='max', **cbar_kwargs)
+cbar.set_label("Mean Duration [days]", **label_kwargs)
+cbar.ax.tick_params(**tick_kwargs)
+
+# --------- Title and subtitle ---------
+if plot == 'report':
+    suptitle_y = 0.98
+    fig.suptitle(f'Mean MHW duration', y=suptitle_y, **maintitle_kwargs)
+    # fig.text(0.5, suptitle_y - 0.05, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **title_kwargs, style='italic')
+else:
+    suptitle_y = 1.05
+    fig.suptitle(f'Mean MHW duration', y=suptitle_y, **maintitle_kwargs)
+    # fig.text(0.5, suptitle_y - 0.08, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', fontsize=17, style='italic')
+
+
+# --------- Output handling ---------
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Marine_HeatWaves/figures_outputs/MHWs_metrics/')
+    outfile = f"mhw_duration_{plot}.pdf"
+    # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
+else:
+    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/mhw_duration_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
 # %%
+
