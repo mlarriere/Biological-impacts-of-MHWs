@@ -60,6 +60,11 @@ working_dir = "/home/mlarriere/Projects/biological_impacts_MHWs/Biological-impac
 os.chdir(working_dir)
 print("Working directory set to:", os.getcwd())
 
+import sys
+sys.path.append(working_dir+'Growth_Model') 
+from growth_model import *  # import growth function
+
+
 # Directories
 ds_roms = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/SO_d025_avg_daily_1979.nc')
 z_rho = np.load('/home/jwongmeng/work/ROMS/scripts/coords/z_rho.npy')
@@ -104,23 +109,31 @@ date_dict = dict(date_list)
 combined_file = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))
 ds_mhw_duration = xr.open_dataset(combined_file) #shape: (40, 181, 231, 1442)
 
-# %% Find longest and more intense MHW
+# %% ================================== Find longest and more intense MHW ==================================
+# Select threshold
 det3deg = False #True #False
-det4deg = True #False #True 
+det4deg = False #False #True 
+det1deg = True #False #True 
 if det3deg:
     threshold= 'det_3deg'
 if det4deg:
     threshold= 'det_4deg'
-period = 'recent' #full
+if det1deg:
+    threshold= 'det_1deg'
 
+# Select time period
+period = 'full' #full recent
 if period == 'recent':
     ds = ds_mhw_duration.isel(years=slice(30,39))
 else: 
     ds= ds_mhw_duration
 
-# Maximum duration of 4/3deg event
+# Threshold mask
 duration_filtered = ds['duration'].where(ds[threshold])
+
+# Maximum duration of 4/3deg event
 max_duration = duration_filtered.max()
+
 # Find when and where
 index = np.unravel_index(np.nanargmax(duration_filtered.values), duration_filtered.shape)
 year_idx, day_idx, eta_idx, xi_idx = index
@@ -136,9 +149,9 @@ print(f"Location: lat={lat:.2f}, lon={lon:.2f}")
 
 
 # ==== full temporal extent ====
-# Longest 4°C MHW lasted 504.0 days
-# Year: 1982, Day-of-year: 349
-# Location: lat=-76.58, lon=27.88
+# Longest det_3deg MHW lasted 613.0 days
+# Year: 36, Day-of-year: 102
+# Location: lat=-60.82, lon=169.62
 
 # ==== 2010-2019 temporal extent ====
 # Longest det_4deg MHW lasted 613.0 days
@@ -149,7 +162,7 @@ print(f"Location: lat={lat:.2f}, lon={lon:.2f}")
 # Year: 2017, Day-of-year: 304
 # Location: lat=-60.82, lon=169.62
 
-# Select extent based on this event
+# %% ================================== Select extent based on this event ==================================
 growth_seasons = xr.open_dataset(os.path.join(path_growth, "growth_Atkison2006_seasonal.nc"))
 
 # === Select extent to investigate
@@ -383,31 +396,30 @@ plt.show()
 # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_impactMHWs/drivers_study_area.pdf'), dpi =150, format='pdf', bbox_inches='tight')
 
 # %% Calculating growth
-# Funtion to simulate daily growth based on CHLA, temperature, and initial length
-def run_growth_model(chla, temp, initial_length, a, b, c, d, e, f, g):
-    # Get dimensions
-    n_days = chla.sizes['days'] #181 days
-    shape = chla.isel(days=0).shape #(106, 161)
-    # Initialisation - dataarray to store length
-    length = xr.DataArray(np.full((n_days, *shape), np.nan), 
-                          dims=("days", "eta_rho", "xi_rho"),
-                          coords={"days": chla.days, "lat_rho": chla.lat_rho, "lon_rho": chla.lon_rho})
+# # Funtion to simulate daily growth based on CHLA, temperature, and initial length
+# def run_growth_model(chla, temp, initial_length, a, b, c, d, e, f, g):
+#     # Get dimensions
+#     n_days = chla.sizes['days'] #181 days
+#     shape = chla.isel(days=0).shape #(106, 161)
+#     # Initialisation - dataarray to store length
+#     length = xr.DataArray(np.full((n_days, *shape), np.nan), 
+#                           dims=("days", "eta_rho", "xi_rho"),
+#                           coords={"days": chla.days, "lat_rho": chla.lat_rho, "lon_rho": chla.lon_rho})
 
-    # First step -- initial length (hypothethis - on Nov1st krill length = 35mm)
-    length[0] = initial_length
+#     # First step -- initial length (hypothethis - on Nov1st krill length = 35mm)
+#     length[0] = initial_length
 
-    # Simulate growth day by day
-    for t in range(1, n_days):
-        chl = chla.isel(days=t)
-        tmp = temp.isel(days=t)
-        prev_len = length[t-1]
-        growth = (a + b * prev_len + c * prev_len**2 + (d * chl) / (e + chl) + f * tmp + g * tmp**2) # Growth model - Eq. 4 (Atkinson et al. 2006)
-        length[t] = prev_len + growth
+#     # Simulate growth day by day
+#     for t in range(1, n_days):
+#         chl = chla.isel(days=t)
+#         tmp = temp.isel(days=t)
+#         prev_len = length[t-1]
+#         growth = (a + b * prev_len + c * prev_len**2 + (d * chl) / (e + chl) + f * tmp + g * tmp**2) # Growth model - Eq. 4 (Atkinson et al. 2006)
+#         length[t] = prev_len + growth
 
-    return length
+#     return length
 
-
-simulated_length_study_area = run_growth_model(chla=chla_surf_1season.raw_chla, temp=temp_avg_100m_1season.avg_temp, initial_length=35, a=a, b=b, c=c, d=d, e=e, f=f, g=g)
+simulated_length_study_area = length_Atkison2006(chla=chla_surf_1season.raw_chla, temp=temp_avg_100m_1season.avg_temp, initial_length=35, intermoult_period= 10)
 mean_length_area_study_area = simulated_length_study_area.mean(dim=["eta_rho", "xi_rho"])
 std_length_area_study_area = simulated_length_study_area.std(dim=["eta_rho", "xi_rho"])
 
