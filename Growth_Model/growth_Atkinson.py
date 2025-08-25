@@ -898,7 +898,7 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
 
     # --- Dynamic title setup ---
     if varname == 'growth':
-        var_bigtitle = 'Antarctic Krill Growth - Southern Ocean'
+        var_bigtitle = 'Krill Growth Rate'
         var_title = 'Growth'
         units_label = '[mm/d]'
         norm_main = mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2)
@@ -1028,7 +1028,7 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
     else:
         suptitle_y = 0.9
         fig.suptitle(f'{var_bigtitle}', y=suptitle_y, x=0.55, **suptitle_kwargs)
-        fig.text(0.5, suptitle_y - 0.055, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
+        fig.text(0.55, suptitle_y - 0.055, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
 
     # --- Output handling ---
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/eq_decomposition')
@@ -1038,11 +1038,11 @@ def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot=
         # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
         plt.show()
     else:    
-        # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/{varname}_diff_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
-        plt.show()
+        plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/eq_decomposition/{varname}_diff_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+        # plt.show()
 
 # Choose variable to plot
-variable = 'growth'  #'growth', 'temp', 'chla'
+variable = 'temp'  #'growth', 'temp', 'chla'
 
 if variable == 'growth':
     ds = growth_seasons.isel(xi_rho=slice(0, -1)).growth
@@ -1070,7 +1070,7 @@ elif variable == 'chla':
     label = 'Chla [mg/m³]'
     ticks =  [0, 0.5, 1] # 2.5, 3, 3.5, 4, 4.5 ,5
 
-plot_comparison(variable, ds, cmap_var=cmap_var, ticks=ticks, cbar_label=label, plot='report') #report slides
+plot_comparison(variable, ds, cmap_var=cmap_var, ticks=ticks, cbar_label=label, plot='slides') #report slides
 
 # %% =========================== Growth during MHW events ===========================
 # ==== MHWs events detected -- only surface
@@ -1208,10 +1208,10 @@ elif plot == 'slides':
         axs.append(ax)
 
 # --------- Data ---------
-plot_data = [(growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_1deg, r"MHWs $>$ 1$^\circ$C"),
-             (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_2deg, r"MHWs $>$ 2$^\circ$C"),
-             (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_3deg, r"MHWs $>$ 3$^\circ$C"),
-             (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_4deg, r"MHWs $>$ 4$^\circ$C"),
+plot_data = [(growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_1deg, r"MHWs $\ge$ 1$^\circ$C"),
+             (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_2deg, r"MHWs $\ge$ 2$^\circ$C"),
+             (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_3deg, r"MHWs $\ge$ 3$^\circ$C"),
+             (growth_mhw_mean.isel(xi_rho=slice(0, -1)).growth_4deg, r"MHWs $\ge$ 4$^\circ$C"),
              (growth_no_mhw_mean.isel(xi_rho=slice(0, -1)).growth_noMHW, r"No MHWs")]
 
 title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
@@ -1309,8 +1309,8 @@ if plot == 'report':
     # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:    
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/mhws_VS_non_mhws/growth_mhw_VS_nomhw_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/mhws_VS_non_mhws/growth_mhw_VS_nomhw_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
     
 # %% =========================== Quantifying the Avg Chla under MHWs ===========================
 # Load data 
@@ -1379,10 +1379,25 @@ if not os.path.exists(chla_mhws_file):
 else: 
     # Load data
     chla_mhws_ds = xr.open_dataset(chla_mhws_file)
+    temp_mhws_ds = xr.open_dataset(os.path.join(path_clim, 'avg_temp_watercolumn_MHW.nc'))
 
+
+
+# Mask for latitudes south of 65°S
+mask_lat = chla_mhws_ds['lat_rho'] >= -65
+
+# Mask for longitude sector: 60°W–120°W (converted to 0–360)
+mask_lon = ((chla_mhws_ds['lon_rho'] <= (360 - 60)) & 
+            (chla_mhws_ds['lon_rho'] >= (360 - 120)))
+
+# Combine masks
+mask = mask_lat & mask_lon
+
+# Apply mask to all variables
+chla_mhws_ds_filtered = chla_mhws_ds.where(mask)
 
 # %% =========================== Plot ===========================
-plot = 'report'  # slides report
+plot = 'slides'  # slides report
 
 # --------- Figure layout ---------
 if plot == 'report':
@@ -1411,10 +1426,10 @@ tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
 # legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
 suptitle_kwargs = {'fontsize': 20, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 12, 'fontweight': 'bold'}
 
-chla_plot_data = [(chla_mhws_ds['chla_mhw_1deg'], r"MHWs $>$ 1$^\circ$C"),
-                  (chla_mhws_ds['chla_mhw_2deg'], r"MHWs $>$ 2$^\circ$C"),
-                  (chla_mhws_ds['chla_mhw_3deg'], r"MHWs $>$ 3$^\circ$C"),
-                  (chla_mhws_ds['chla_mhw_4deg'], r"MHWs $>$ 4$^\circ$C"),
+chla_plot_data = [(chla_mhws_ds['chla_mhw_1deg'], r"MHWs $\ge$ 1$^\circ$C"),
+                  (chla_mhws_ds['chla_mhw_2deg'], r"MHWs $\ge$ 2$^\circ$C"),
+                  (chla_mhws_ds['chla_mhw_3deg'], r"MHWs $\ge$ 3$^\circ$C"),
+                  (chla_mhws_ds['chla_mhw_4deg'], r"MHWs $\ge$ 4$^\circ$C"),
                   (chla_mhws_ds['chla_non_mhw'], r"No MHWs"),]
 
 from matplotlib import colors
@@ -1490,7 +1505,123 @@ if plot == 'report':
     # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/mhws_VS_non_mhws/chla_mhw_VS_nomhw_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
+    # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/mhws_VS_non_mhws/chla_mhw_VS_nomhw_{plot}.pdf'), dpi=300, format='pdf', bbox_inches='tight')
     plt.show()
 
+# %% =========================== Difference (MHWs vs Non MHWs) ===========================
+choice ='chla'
+if choice == 'chla':
+    diff1deg = chla_mhws_ds['chla_mhw_1deg'] - chla_mhws_ds['chla_non_mhw']
+    diff2deg = chla_mhws_ds['chla_mhw_2deg']-chla_mhws_ds['chla_non_mhw']
+    diff3deg = chla_mhws_ds['chla_mhw_3deg']-chla_mhws_ds['chla_non_mhw']
+    diff4deg = chla_mhws_ds['chla_mhw_4deg']-chla_mhws_ds['chla_non_mhw']
+
+# %% =========================== Plot Difference (MHWs vs Non MHWs) ===========================
+plot = 'slides'  # slides report
+
+# --------- Figure layout ---------
+if plot == 'report':
+    fig_width = 6.3228348611
+    fig_height = fig_width
+    fig = plt.figure(figsize=(fig_width, fig_height))
+    gs = gridspec.GridSpec(4, 2, wspace=0.3, hspace=0.5)
+
+    axs = []
+    axs.append(fig.add_subplot(gs[0:2, 0], projection=ccrs.SouthPolarStereo()))  # 1°C
+    axs.append(fig.add_subplot(gs[0:2, 1], projection=ccrs.SouthPolarStereo()))  # 2°C
+    axs.append(fig.add_subplot(gs[2:4, 0], projection=ccrs.SouthPolarStereo()))  # 3°C
+    axs.append(fig.add_subplot(gs[2:4, 1], projection=ccrs.SouthPolarStereo()))  # 4°C
+
+elif plot == 'slides':
+    fig_width = 6.3228348611
+    fig_height = fig_width
+    fig = plt.figure(figsize=(fig_width * 5, fig_height))  # 5 columns wide
+    gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)
+    axs = [fig.add_subplot(gs[0, j], projection=ccrs.SouthPolarStereo()) for j in range(4)]
+
+title_kwargs = {'fontsize': 16} if plot == 'slides' else {}
+label_kwargs = {'fontsize': 15} if plot == 'slides' else {}
+tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
+# legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
+suptitle_kwargs = {'fontsize': 20, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 12, 'fontweight': 'bold'}
+
+chla_plot_data = [(diff1deg, r"MHWs $\ge$ 1$^\circ$C vs Non MHWs"),
+                  (diff2deg, r"MHWs $\ge$ 2$^\circ$C vs Non MHWs"),
+                  (diff3deg, r"MHWs $\ge$ 3$^\circ$C vs Non MHWs"),
+                  (diff4deg, r"MHWs $\ge$ 4$^\circ$C vs Non MHWs")]
+
+norm_diff = mcolors.TwoSlopeNorm(vmin=-0.25, vcenter=0, vmax=0.25)
+cmap = 'coolwarm'
+
+# --------- Plot ---------
+for i, (data, title) in enumerate(chla_plot_data):
+    ax = axs[i]
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    # Circular boundary
+    theta = np.linspace(0, 2 * np.pi, 100)
+    center, radius = [0.5, 0.5], 0.5
+    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+    circle = mpath.Path(verts * radius + center)
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Map features
+    lw = 1 if plot == 'slides' else 1
+    # Draw the land feature after the pcolormesh
+    ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)  # Land should be drawn above the plot
+    ax.coastlines(color='black', linewidth=lw)
+    ax.set_facecolor('#D8D8D8')
+
+    # Sector lines
+    for lon_line in [-90, 0, 120]:
+        ax.plot([lon_line, lon_line], [-90, -60], transform=ccrs.PlateCarree(),
+                color="#080808", linestyle='--', linewidth=lw, zorder=5)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=0.7, zorder=3)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+
+    # CHLA data
+    im = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+                       transform=ccrs.PlateCarree(), cmap=cmap, norm=norm_diff, 
+                       shading='auto', zorder=1, rasterized=True)
+    
+    ax.set_title(title, **title_kwargs)
+
+# --------- Colorbar ---------
+if plot == 'report':
+    cbar_kwargs = {'fraction': 0.02, 'pad': 0.06, 'aspect': 50}
+else:
+    cbar_kwargs = {'fraction': 0.05, 'pad': 0.07, 'aspect': 40}
+
+cbar = fig.colorbar(im, ax=axs, orientation='horizontal', extend='both', **cbar_kwargs)
+cbar.set_label("$\Delta$ Chl-a [mg / m$^{3}$]", **label_kwargs)
+cbar.ax.tick_params(**tick_kwargs)
+
+# --------- Title and subtitle ---------
+if plot == 'report':
+    suptitle_y = 0.98
+    fig.suptitle(f'Difference in surface Chl-a between MHW and Non MHW conditions', y=suptitle_y, **suptitle_kwargs)
+    # fig.text(0.5, suptitle_y - 0.05, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **title_kwargs, style='italic')
+else:
+    suptitle_y = 1.05
+    fig.suptitle(f'Difference in surface Chl-a between MHW and Non MHW conditions', y=suptitle_y, **suptitle_kwargs)
+    # fig.text(0.5, suptitle_y - 0.08, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', fontsize=17, style='italic')
+
+
+# --------- Output handling ---------
+if plot == 'report':
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/mhws_VS_non_mhws/')
+    outfile = f"temp_mhw_VS_nomhw_diff_{plot}.pdf"
+    plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
+else:
+    plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/mhws_VS_non_mhws/chla_mhw_VS_nomhw_diff_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
 # %%
