@@ -351,7 +351,7 @@ else:
 
 # Convert longitude from -180..180 to 0..360
 growth_obs_2017_jan = growth_obs_2017_jan.assign_coords(
-    lon = (growth_obs_2017_jan.lon + 360) % 360 +24 #24 is the start from ROMS (ranging from 24.125 to 383.875)
+    lon = (growth_obs_2017_jan.lon + 360) % 360  #24 is the start from ROMS (ranging from 24.125 to 383.875)
 )
 
 #Sort longitudes so they are increasing from 0 to 360
@@ -538,7 +538,10 @@ model_growth_KNN_da = xr.DataArray(
     name='model_growth_KNN'
 )
 # %% Differences Obs-ROMS
+
 diff = growth_obs_2017_jan.growth - model_growth_KNN_da #shape: (1, 89, 1440)
+
+
 
 # %% ======== Plot
 fig_width = 6.3228348611  # inches = \textwidth
@@ -659,6 +662,6 @@ cbar_diff.set_label("Growth difference [mm]", fontsize=13)
 cbar_diff.ax.tick_params(labelsize=12)
 
 
-plt.suptitle("Difference in growth between Observatinal and modelled data\n January 2017", fontsize=20, y=1.1)
+plt.suptitle("Difference in Growth between Observational and Modelled data\n January 2017", fontsize=20, y=1.1)
 plt.show()
 # %%
