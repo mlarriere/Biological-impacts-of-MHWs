@@ -392,8 +392,7 @@ if not os.path.exists(nb_days_file_FULL):
     
 else: 
     # Load data
-    ds_mhw_daysperyear = xr.open_dataset(nb_days_file_FULL)
-
+    ds_mhw_daysperyear = xr.open_dataset(mean_nb_days_file_FULL)
 # %% ======================== Temperature of the water column (100m) under MHWs ========================
 # -- Write or load data
 avg_temp_FULL = os.path.join(os.path.join(path_clim, 'avg_temp_watercolumn_MHW.nc'))
@@ -457,7 +456,7 @@ variables_temp = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
 titles = ['1°C', '2°C', '3°C', '4°C']
 
 # 4 subplots - 1 for each absolute threshold 
-plot='report' #report
+plot='slides' #report
 
 # Define figure size based on output type
 if plot == 'report':
@@ -469,7 +468,7 @@ if plot == 'report':
 else:  # 'slides'
     fig_width = 6.3228348611  # inches = \textwidth
     fig_height = fig_width 
-    fig = plt.figure(figsize=(fig_width*4, fig_height))  # wide enough for 4 subplots in a row
+    fig = plt.figure(figsize=(fig_width*5, fig_height))  # wide enough for 4 subplots in a row
     gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)  # 4 columns
 
 # Font size settings
@@ -535,11 +534,11 @@ for i, var in enumerate(variables_temp):
 
     if plot == 'report':
         ax.text(1.5, 0.5,  # x slightly left of axis (negative), y centered
-            f'MHWs $>$ {titles[i]}',
+            rf'MHWs $\ge$ {titles[i]}',
             rotation=-90, va='center', ha='center',
             transform=ax.transAxes, **subtitle_kwargs)
     else:
-        ax.set_title(f'MHWs $>$ {titles[i]}', **subtitle_kwargs)
+        ax.set_title(rf'MHWs $\ge$ {titles[i]}', **subtitle_kwargs)
 
 # Common colorbar
 tick_positions = np.arange(-3, 3.5, 1) 
@@ -568,8 +567,8 @@ if plot == 'report':
     # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/temp100m_report.pdf'), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/temp100m_slides.png'), dpi=500, format='png', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/temp100m_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
 
 
 # %% ======================== Plot number of days under MHWs ========================
@@ -599,7 +598,7 @@ for var in variables:
     ds_mhw_daysperyear[var] = ds_mhw_daysperyear[var].where(ds_mhw_daysperyear[var]!=0)
 
 # 4 subplots - 1 for each absolute threshold 
-plot='report' #slides report
+plot='slides' #slides report
 
 # Define figure size based on output type
 if plot == 'report':
@@ -611,7 +610,7 @@ if plot == 'report':
 else:  # 'slides'
     fig_width = 6.3228348611  # inches = \textwidth
     fig_height = fig_width 
-    fig = plt.figure(figsize=(fig_width*4, fig_height))  # wide enough for 4 subplots in a row
+    fig = plt.figure(figsize=(fig_width*5, fig_height))  # wide enough for 4 subplots in a row
     gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)  # 4 columns
 
 # Font size settings
@@ -675,11 +674,11 @@ for i, var in enumerate(variables):
 
     if plot == 'report':
         ax.text(1.5, 0.5,  # x slightly left of axis (negative), y centered
-            f'MHWs $>$ {titles[i]}',
+            rf'MHWs $\ge$ {titles[i]}',
             rotation=-90, va='center', ha='center',
             transform=ax.transAxes, **subtitle_kwargs)
     else:
-        ax.set_title(f'MHWs $>$ {titles[i]}', **subtitle_kwargs)
+        ax.set_title( rf'MHWs $\ge$ {titles[i]}', **subtitle_kwargs)
 
 # Common colorbar
 tick_positions = [(bounds[i] + bounds[i+1]) / 2 for i in range(len(bounds)-1)]  # Tick positions at bin centers
@@ -712,8 +711,9 @@ if plot == 'report':
     # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days_report.pdf'), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days_slides.png'), dpi=500, format='png', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
+
 
 
 # %% ======================== Compute frequency of events ========================
@@ -863,7 +863,7 @@ long_mhw_ref = None  # To store the first mappable
 titles = ['1°C', '2°C', '3°C', '4°C']
 
 # 4 subplots - 1 for each absolute threshold 
-plot='report' #slides report
+plot='slides' #slides report
 
 # Define figure size based on output type
 if plot == 'report':
@@ -881,7 +881,7 @@ if plot == 'report':
 else:
     fig_width = 6.3228348611  # inches = \textwidth
     fig_height = fig_width 
-    fig = plt.figure(figsize=(fig_width*4, fig_height))  # wide enough for 4 subplots in a row
+    fig = plt.figure(figsize=(fig_width*5, fig_height))  # wide enough for 4 subplots in a row
     gs = gridspec.GridSpec(1, 4, wspace=0.1, hspace=0.2)  # 4 columns
     
     axs = []
@@ -950,7 +950,7 @@ for i, var in enumerate(variables):
     if long_mhw_ref is None:
         long_mhw_ref = long_mhw
 
-    ax.set_title(f'MHWs $>$ {titles[i]}', **subtitle_kwargs)
+    ax.set_title(rf'MHWs $\ge$ {titles[i]}', **subtitle_kwargs)
 
 # Legend
 import matplotlib.patches as mpatches
@@ -1015,8 +1015,8 @@ if plot == 'report':
     # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years_report.pdf'), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years_slides.png'), dpi=500, format='png', bbox_inches='tight')
-    plt.show()
+    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    # plt.show()
 
 
 
