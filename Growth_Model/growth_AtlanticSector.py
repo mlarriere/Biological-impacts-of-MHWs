@@ -134,14 +134,249 @@ else:
     growth_study_area = xr.open_dataset(os.path.join(path_growth, 'atlantic_sector/growth_study_area.nc'))
     mhw_duration_study_area = xr.open_dataset(os.path.join(path_growth, 'atlantic_sector/mhw_duration_study_area.nc'))
 
+# %%  ======================== Drivers ========================
+# ==== Temperature [°C] 
+# Weighted averaged temperature of the first 100m - Austral summer - 60S - years = seasonal (i.e. ranging from 1980 to 2018 with days 304-119)
+temp_avg_100m_SO_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_allyears_seasonal.nc')) #shape (39, 181, 231, 1442)
+temp_avg_100m_study_area_allyrs = subset_spatial_domain(temp_avg_100m_SO_allyrs) #select spatial extent -- shape (39, 181, 231, 360)
+
+# ==== Chla [mh Chla/m3] 
+# Weighted averaged chla of the first 100m - Austral summer - 60S - years = seasonal (i.e. ranging from 1980 to 2018 with days 304-119)
+chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
+chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) #select spatial extent
+
 #%% ======================== Compute mean growth for two periods ========================
 growth_early = growth_study_area.growth.sel(years=slice(1980, 2009)).mean(dim=['years', 'days'], skipna=True)
 growth_late = growth_study_area.growth.sel(years=slice(2010, 2018)).mean(dim=['years', 'days'], skipna=True)
 growth_diff = growth_late - growth_early
 
+# ---- Same for drivers
+temp_early = temp_avg_100m_study_area_allyrs.avg_temp.sel(years=slice(1980, 2009)).mean(dim=['years', 'days'], skipna=True)
+temp_late = temp_avg_100m_study_area_allyrs.avg_temp.sel(years=slice(2010, 2018)).mean(dim=['years', 'days'], skipna=True)
+temp_diff = temp_late - temp_early
+
+
+chla_early = chla_surf_study_area_allyrs.chla.sel(years=slice(1980, 2009)).mean(dim=['years', 'days'], skipna=True)
+chla_late = chla_surf_study_area_allyrs.chla.sel(years=slice(2010, 2018)).mean(dim=['years', 'days'], skipna=True)
+chla_diff = chla_late - chla_early
+
+#%% ==== Periods comparison ====
+import matplotlib.colors as mcolors
+def plot_comparison(varname, ds, cmap_var=None, ticks=None, cbar_label='', plot='slides'):
+    # === Layout config ===
+    if plot == 'report':
+        fig_width = 6.3228348611
+        fig_height = 9.3656988889
+        fig, axs = plt.subplots(3, 1, figsize=(fig_width, fig_height), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+        # fig.subplots_adjust(hspace=0.01) 
+    else:
+        fig_width = 16
+        fig_height = 8
+        fig, axs = plt.subplots(1, 3, figsize=(fig_width, fig_height), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+    title_kwargs = {'fontsize': 15} if plot == 'slides' else {'fontsize': 11}
+    label_kwargs = {'fontsize': 14} if plot == 'slides' else {'fontsize': 10}
+    tick_kwargs = {'labelsize': 13} if plot == 'slides' else {'labelsize': 10}
+    suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 13, 'fontweight': 'bold'}
+
+    
+    # Circular boundary
+    theta = np.linspace(np.pi / 2, np.pi, 100)
+    center, radius = [0.5, 0.51], 0.5 # centered at 0.5,0.5
+    arc = np.vstack([np.cos(theta), np.sin(theta)]).T
+    verts = np.concatenate([[center], arc * radius + center, [center]])
+    circle = mpath.Path(verts)
+
+    # Time periods
+    data_1980_2009 = ds.isel(years=slice(0, 30)).mean(dim=('years', 'days'))
+    data_2010_2019 = ds.isel(years=slice(30, 40)).mean(dim=('years', 'days'))
+    data_diff = data_2010_2019 - data_1980_2009
+
+    # --- Dynamic title setup ---
+    if varname == 'growth':
+        var_bigtitle = 'Antarctic Krill Growth - Southern Ocean'
+        var_title = 'Growth'
+        units_label = '[mm/d]'
+        norm_main = mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2)
+        extend_var ='both'
+    elif varname == 'temp':
+        var_bigtitle = 'Temperature - 100m depth average'
+        var_title = 'Temperature'
+        units_label = '[°C]'
+        norm_main = mcolors.TwoSlopeNorm(vmin=-2, vcenter=0, vmax=2)
+        extend_var ='both'
+    elif varname == 'chla':
+        var_bigtitle = 'Chlorophyll-a Concentration'
+        var_title = 'Chl-a'
+        units_label = '[mg/m³]'
+        vmax = data_1980_2009.max()  # Max value for chla colormap
+        norm_main = mcolors.Normalize(vmin=0, vmax=1)
+        extend_var ='max'
+    else:
+        var_title = varname
+        subtitle = ''
+        units_label = ''
+        norm_main = None
+
+    # Difference normalization (centered at zero for difference)
+    if varname == 'growth':
+        norm_diff = mcolors.TwoSlopeNorm(vmin=-0.05, vcenter=0, vmax=0.05)
+    elif varname == 'chla':
+        norm_diff = mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2)
+    elif varname == 'temp':
+        norm_diff = mcolors.TwoSlopeNorm(vmin=-0.5, vcenter=0, vmax=0.5)
+
+    cmap_diff = plt.cm.RdBu_r
+    print('Max diff: ', np.max(data_diff).values)
+    print('Min diff: ', np.min(data_diff).values)
+
+    # Titles and datasets
+    if plot == 'report':
+        font_size_macro = r'\small'
+    else:  # slides
+        font_size_macro = r'\large'
+
+    plot_data = [
+        (data_1980_2009, f"Climatological {var_title}\n{font_size_macro}{{(1980\\,\\textendash\\,2009)}}", norm_main, cmap_var),
+        (data_2010_2019, f"Recent {var_title}\n{font_size_macro}{{(2010\\,\\textendash\\,2018)}}",norm_main, cmap_var),
+        (data_diff, f"Difference\n{font_size_macro}{{(recent\\,\\textendash\\,climatological)}}", norm_diff, cmap_diff),
+        ]
+
+    # Plotting data
+    scs = []  # List to hold the scatter plot objects for each subplot
+    for ax, (data, title, norm, cmap_used) in zip(axs, plot_data):
+        sc = data.plot.pcolormesh(
+            ax=ax, transform=ccrs.PlateCarree(),
+            x="lon_rho", y="lat_rho",
+            add_colorbar=False, cmap=cmap_used, norm=norm, zorder=1, rasterized=True)
+        scs.append(sc)  # Store the plot object
+        
+        ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+        ax.set_boundary(circle, transform=ax.transAxes)
+        
+        # Draw the land feature after the pcolormesh
+        ax.add_feature(cfeature.LAND, facecolor='#F6F6F3', zorder=2)  # Land should be drawn above the plot
+        ax.coastlines(color='black', linewidth=1)
+        ax.set_facecolor('#F6F6F3')
+        
+        # Sector boundaries
+        for lon in [-90, 120, 0]:
+            ax.plot([lon, lon], [-90, -60], transform=ccrs.PlateCarree(), color='#080808',
+                    linestyle='--', linewidth=1)
+
+        # Gridlines
+        gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.2, linestyle='--', linewidth=0.7)
+        gl.xlabels_top = False
+        gl.ylabels_right = False
+        gridlabel_kwargs = {'size': 9, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+        gl.xlabel_style = gridlabel_kwargs
+        gl.ylabel_style = gridlabel_kwargs
+        gl.xformatter = LongitudeFormatter()
+        gl.yformatter = LatitudeFormatter()
+
+        if plot == 'report':
+            ax.set_title(title, x=0.5, y=1.05, ha='center', **title_kwargs)
+        else:
+            ax.set_title(title, y=1.1, **title_kwargs)
+    
+
+    # Adjust layout
+    plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, wspace=0.5, hspace=0.4)
+
+    # Colorbar for the first and second subplots
+    if varname in ['chla', 'growth', 'temp']:
+        ticks = ticks
+
+    else:
+        ticks = np.arange(np.floor(norm.vmin)-1, np.ceil(norm.vmax) + 1, 1)
+    
+    if plot == 'report':
+        # Colorbar for top 2 plots (ax[0] and ax[1])
+        pos1 = axs[0].get_position()
+        pos2 = axs[1].get_position()
+        # Combine colorbar height across both axes
+        cbar_ax1 = fig.add_axes([pos2.x1 + 0.05, pos2.y0, 0.015, pos1.y1 - pos2.y0])
+        cbar1 = fig.colorbar(scs[0], cax=cbar_ax1, cmap=cmap_var, ticks=ticks, extend=extend_var)
+        cbar1.set_label(cbar_label, **label_kwargs)
+        cbar1.ax.tick_params(**tick_kwargs)
+
+        # Colorbar for third (difference) plot
+        pos3 = axs[2].get_position()
+        cbar_ax2 = fig.add_axes([pos3.x1 + 0.05, pos3.y0, 0.015, pos3.height ])
+        cbar2 = fig.colorbar(scs[2], cax=cbar_ax2, cmap=cmap_diff, extend='both')
+        cbar2.set_label(f"$\Delta$ {var_title} {units_label}", **label_kwargs)
+        cbar2.ax.tick_params(**tick_kwargs)
+    else:
+        pos1 = axs[1].get_position()
+        cbar_ax1 = fig.add_axes([pos1.x1 + 0.01, pos1.y0, 0.01, pos1.height])
+        cbar1 = fig.colorbar(scs[0], cax=cbar_ax1, cmap=cmap_var, ticks=ticks, extend=extend_var)
+        cbar1.set_label(cbar_label, **label_kwargs)
+        cbar1.ax.tick_params(**tick_kwargs)
+
+        # Second colorbar (for the difference)
+        pos2 = axs[2].get_position()
+        cbar_ax2 = fig.add_axes([pos2.x1 + 0.045, pos2.y0, 0.01, pos2.height])
+        cbar2 = fig.colorbar(scs[2], cax=cbar_ax2, cmap=cmap_diff, extend='both')
+        cbar2.set_label(f"$\Delta$ {var_title} {units_label}", **label_kwargs)
+        cbar2.ax.tick_params(**tick_kwargs)
+
+    # --- Axis labels and title ---
+    if plot == 'report':
+        suptitle_y = 1
+        fig.suptitle(f'{var_bigtitle}', y=suptitle_y, x=0.55, **suptitle_kwargs)
+        fig.text(0.55, suptitle_y - 0.03, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
+
+    else:
+        suptitle_y = 0.9
+        fig.suptitle(f'{var_bigtitle}', y=suptitle_y, x=0.55, **suptitle_kwargs)
+        fig.text(0.5, suptitle_y - 0.055, 'Growth season (1Nov–30Apr), 1980–2018', ha='center', **label_kwargs, style='italic')
+
+    # --- Output handling ---
+    outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/case_study_AtlanticSector')
+    os.makedirs(outdir, exist_ok=True)
+    if plot == 'report':
+        outfile = f"{varname}_diff_{plot}.pdf"
+        # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
+        plt.show()
+    else:    
+        plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/{varname}_AtlSect_diff_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+        # plt.show()
+
+# Choose variable to plot
+variable = 'chla'  #'growth', 'temp', 'chla'
+
+if variable == 'growth':
+    ds = growth_study_area.growth
+    cmap_var = 'PuOr_r'
+    label = 'Growth [mm/d]'
+    ticks = [-0.2, -0.1, 0, 0.1, 0.2]
+
+elif variable == 'temp':
+    ds = temp_avg_100m_study_area_allyrs.avg_temp
+    vmin, vmax = -4, 4  # Symmetric -- centered at 0
+    colors = ["#0A3647", "#669BBC", "#FFFFFF", "#EE9B00", "#AE2012"] #BB3E03
+    color_positions = np.linspace(vmin, vmax, len(colors))
+    normalized_positions = (color_positions - vmin) / (vmax - vmin)  # Normalize to [0, 1]
+    cmap_var = LinearSegmentedColormap.from_list("thermal_centered", list(zip(normalized_positions, colors)), N=256)
+    label = 'Temperature [°C]'
+    ticks = [-2, -1, 0, 1, 2]
+
+elif variable == 'chla':
+    ds = chla_surf_study_area_allyrs.chla    
+    vmin, vmax = 0, 1
+    colors = ["#0E1B11", "#4A8956", "#73A942", "#E7D20D", "#FBB02D"]
+    color_positions = np.linspace(vmin, vmax, len(colors))
+    normalized_positions = (color_positions - vmin) / (vmax - vmin)  # Normalize to [0, 1]
+    cmap_var = LinearSegmentedColormap.from_list("blue_green_yellow_buffered", list(zip(normalized_positions, colors)), N=256)
+    label = 'Chla [mg/m³]'
+    ticks =  [0, 0.5, 1] # 2.5, 3, 3.5, 4, 4.5 ,5
+
+plot_comparison(variable, ds, cmap_var=cmap_var, ticks=ticks, cbar_label=label, plot='slides') #report slides
+
+
 #%% ======================== Plot Study Area climatology and recent periods ========================
 # ---- Figure layout ----
-plot = 'slides'  # slides report
+plot = 'report'  # slides report
 if plot == 'report':
     fig_width = 6.3228348611
     fig_height = 9.3656988889
@@ -541,16 +776,6 @@ else:
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
-# %%  ======================== Drivers ========================
-# ==== Temperature [°C] 
-# Weighted averaged temperature of the first 100m - Austral summer - 60S - years = seasonal (i.e. ranging from 1980 to 2018 with days 304-119)
-temp_avg_100m_SO_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_allyears_seasonal.nc')) #shape (39, 181, 231, 1442)
-temp_avg_100m_study_area_allyrs = subset_spatial_domain(temp_avg_100m_SO_allyrs) #select spatial extent -- shape (39, 181, 231, 360)
-
-# ==== Chla [mh Chla/m3] 
-# Weighted averaged chla of the first 100m - Austral summer - 60S - years = seasonal (i.e. ranging from 1980 to 2018 with days 304-119)
-chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
-chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) #select spatial extent
 
 #%% ============== Equation decomposition ==============
 def decompose_growth(chla, temp, length):
