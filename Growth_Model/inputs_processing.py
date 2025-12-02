@@ -334,6 +334,7 @@ def mean_temp(ieta, yr):
     # Read data
     fn = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/temp_DC_BC_' + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
     ds_temp_100m = xr.open_dataset(fn)['temp'].isel(year=yr, z_rho=slice(0,14)) #Extracts daily data : 40yr, consider 365 days per year and until 100m depth
+    # ds_temp_surf = xr.open_dataset(fn)['temp'].isel(year=yr, z_rho=0) #Extracts daily data : 40yr, consider 365 days per year and only surface (-5m)
 
     # Reformating
     ds_temp_mean_yr = ds_temp_100m.rename({'day': 'days'})
@@ -351,16 +352,17 @@ def mean_temp(ieta, yr):
                                       coords={"depth": ds_temp_mean_valid.depth}
                                       )
     da_temp_weighted_mean = (ds_temp_mean_valid * depth_thickness_da).sum(dim='depth') / depth_thickness.sum() # Need to consider that the cell don't have the same height -- WEIGHTING
-    # da_temp_weighted_mean.isel(days=100).plot()
+    da_temp_weighted_mean.isel(days=100).plot()
     
     elapsed_time = time.time() - start_time
     print(f"Processing time for eta {ieta}: {elapsed_time:.2f} secs, Memory used: {psutil.virtual_memory().percent}%")
 
-    return da_temp_weighted_mean
+    # return da_temp_weighted_mean
+    return ds_temp_surf
 
 from functools import partial
 for yr in range(1, 41):
-    # yr=40
+    yr=40
     print(f'------------ YEAR {1979+yr} ------------')
     extract_year_eta_for_yr = partial(mean_temp, yr=yr)
     da_temp_list = process_map(extract_year_eta_for_yr, range(0, neta), max_workers=30, desc="Processing ieta for 1yr")  #computing time ~5min per yr
@@ -380,7 +382,8 @@ for yr in range(1, 41):
     temp_60S_south = da_temp_combined_transposed.where(south_mask, drop=True) #shape (181, 231, 1442)
 
     # Write dataset to file
-    output_file = os.path.join(path_growth_inputs, f"temp_avg100m_daily_{1979+yr}.nc")
+    # output_file = os.path.join(path_growth_inputs, f"temp_avg100m_daily_{1979+yr}.nc")
+    output_file = os.path.join(path_growth_inputs, f"temp_surf_daily_{1979+yr}.nc")
     if not os.path.exists(output_file):
         temp_60S_south.to_netcdf(output_file, mode='w')  
 
@@ -393,6 +396,55 @@ temp_mean_all = temp_mean_all.rename({'__xarray_dataarray_variable__':'avg_temp'
 output_file = os.path.join(path_growth_inputs, f"temp_avg100m_allyears.nc")
 if not os.path.exists(output_file):
     temp_mean_all.to_netcdf(output_file, mode='w')  
+
+
+# %% -------------------------------- Surface Temperature --------------------------------
+# === Read only surface temperature
+def preprocess(ds):
+    # Each file is one eta row → add a fake eta dimension
+    return ds.expand_dims({"eta_rho": 1})
+
+ds_all = xr.open_mfdataset(
+    '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/temp_DC_BC_eta*.nc',
+    combine='nested',
+    concat_dim='eta_rho',
+    preprocess=preprocess,
+    parallel=True
+)
+
+ds_temp_surf = ds_all.temp.isel(year=slice(1,41), z_rho=0) #Shape: (434, 40, 365, 1442)
+da_temp_combined_transposed = ds_temp_surf.transpose('year', 'day', 'eta_rho', 'xi_rho')
+
+# === Select extent - south of 60°S
+south_mask = (da_temp_combined_transposed['lat_rho'] <= -60).compute()
+temp_60S_south = da_temp_combined_transposed.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
+
+
+# === Select only austral summer and early spring
+jan_april = temp_60S_south.sel(day=slice(0, 119)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
+jan_april.coords['day'] = jan_april.coords['day'] #keep info on day
+
+nov_dec = temp_60S_south.sel(day=slice(304, 365)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
+nov_dec.coords['day'] = np.arange(304, 365) #keep info on day
+
+temp_surf_austral = xr.concat([nov_dec, jan_april], dim="day") #shape: (40, 181, 231, 1442)
+
+# === Write to file
+ds_out = temp_surf_austral.to_dataset(name="temp")
+
+# Recommended NetCDF encoding (compression + chunking)
+encoding = {
+    "temp": {
+        "zlib": True,
+        "complevel": 4,
+        "dtype": "float32",
+        "chunksizes": (1, 181, 50, 200)  # per-chunk: (year, day, eta, xi)
+    }
+}
+
+# Write to NetCDF4 (classic + compression)
+output_file = os.path.join(path_growth_inputs, f"temp_surf_allyears.nc")
+ds_out.to_netcdf(output_file, format="NETCDF4", encoding=encoding)
 
 #%% Visualization
 # === Parameters ===
