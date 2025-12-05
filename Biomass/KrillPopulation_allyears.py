@@ -90,12 +90,11 @@ def subset_spatial_domain(ds, lat_range=(-80, -60), lon_range=(270, 360)): #, (0
 
     return ds.where(lat_mask & lon_mask, drop=True)
 
-# === Data without MHW scenarios masks
+
 temp_avg_100m_SO_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_allyears_seasonal.nc')) 
-temp_avg_100m_study_area_allyrs = subset_spatial_domain(temp_avg_100m_SO_allyrs) 
+temp_avg_100m_SO_noMHWs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_noMHWs.nc')) 
 
 chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
-chla_surf_study_area_allyrs = subset_spatial_domain(chla_surf_SO_allyrs) 
 
 #%% ====================================================================== 
 # Calculating length for each maturity stage CLIMATOLOGY 
@@ -113,134 +112,141 @@ stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
 stage_IMP = {'juvenile': 12, 'immature': 24, 'mature': 13, 'gravid': 13} # IMP accorindg to Tarling et al 2006 - graph under 0°C
 
 # ==== Climatological Drivers -> Mean Chla and T°C  (days, eta, xi)
-# -- Atlantic sector
-temp_clim_atl = temp_avg_100m_study_area_allyrs.isel(years=slice(0,30)) #shape: (30, 181, 231, 360)
-temp_clim_atl_mean = temp_clim_atl.mean(dim=['years']) #shape: (181, 231, 360)
-chla_clim_atl = chla_surf_study_area_allyrs.isel(years=slice(0,30))
-chla_clim_atl_mean = chla_clim_atl.mean(dim=['years'])
-
 # -- Southern Ocean
 temp_clim = temp_avg_100m_SO_allyrs.isel(years=slice(0,30)) #shape: (30, 181, 231, 1442)
 temp_clim_mean = temp_clim.mean(dim=['years']) #shape: (181, 231, 1442)
 chla_clim = chla_surf_SO_allyrs.isel(years=slice(0,30))
 chla_clim_mean = chla_clim.mean(dim=['years'])
 
-# %%  ================= Climatological Lengths for each grid cell -- Atlantic Sector =================
+
+
+
+# %%  ================= Lengths for each grid cell -- Southern Ocean =================
+from functools import partial
+from tqdm.contrib.concurrent import process_map
+
+# Initialisation
 clim_length_stages =[]
 clim_mass_stages =[]
-for stage in stage_lengths:
+actual_length_stages =[]
+actual_mass_stages =[]
+noMHWs_length_stages=[]
+noMHWs_mass_stages=[]
+
+# Function to run years in parallel
+def length_single_year(yr, stage, chla_ds, temp_ds):
+    chla = chla_ds.chla.isel(years=yr)
+    temp = temp_ds.avg_temp.isel(years=yr)
+
+    length = length_Atkison2006(chla=chla, temp=temp, initial_length=stage_lengths[stage], intermoult_period=stage_IMP[stage], maturity_stage=stage)   # → (181, 231, 1442)
+    mass = length_to_mass(length)
+
+    return length, mass
+
+for stage in stage_lengths: #computing time ~30min (10min per stage and take too much space on the server)
+    # Test
+    # stage= 'juvenile'
     print(stage)
-    climatological_length = length_Atkison2006(chla=chla_clim_atl_mean.chla, 
-                                                temp=temp_clim_atl_mean.avg_temp,
-                                                initial_length=stage_lengths[stage],
-                                                intermoult_period=stage_IMP[stage],
-                                                maturity_stage=stage)
-    climatological_mass = length_to_mass(climatological_length)
+
+    # --------- World1. Climatology
+    print('1. Climatology')
+    climatological_length = length_Atkison2006(chla=chla_clim_mean.chla, temp=temp_clim_mean.avg_temp,
+                                                initial_length=stage_lengths[stage], 
+                                                intermoult_period=stage_IMP[stage], 
+                                                maturity_stage=stage) #shape (181, 231, 1442)
+    climatological_mass = length_to_mass(climatological_length) #shape (181, 231, 1442)
 
     # Store results
     clim_length_stages.append(climatological_length)
     clim_mass_stages.append(climatological_mass)
 
-# -- To Dataset
-length_vars = {}
-mass_vars = {}
-for i, stage in enumerate(stage_lengths):
-    length_vars[stage] = clim_length_stages[i].rename(stage)
-    mass_vars[stage] = clim_mass_stages[i].rename(stage)
+    # --------- World2. Actual
+    print('2. Actual')
+    # Run in parallel
+    func = partial(length_single_year, stage=stage, chla_ds=chla_surf_SO_allyrs, temp_ds=temp_avg_100m_SO_allyrs)
+    actual_results = process_map(func, range(39), max_workers=10, desc=f"Actual growth | stage={stage}") #computing time ~2min
 
-clim_length_ds = xr.Dataset(length_vars)
-clim_mass_ds = xr.Dataset(mass_vars)
-
-# Metadata
-shared_coords = {
-    'days': chla_surf_study_area_allyrs.days,
-    'lon_rho': chla_surf_study_area_allyrs.lon_rho,
-    'lat_rho': chla_surf_study_area_allyrs.lat_rho,
-}
-clim_length_ds = clim_length_ds.assign_coords(shared_coords)
-clim_mass_ds = clim_mass_ds.assign_coords(shared_coords)
-
-clim_length_ds.attrs = {
-    'description': 'Climatological Krill Length Trajectories (30yrs : 1980-2009)',
-    'time window': 'Growth Season (1st Nov to 30th Apr)',
-    'extent': 'Atlantic Sector',
-    'growth_model': 'Atkinson et al., 2006',
-    'created_on': '2025-08-06',
-    'units': 'mm',
-}
-
-clim_mass_ds.attrs = {
-    'description': 'Climatological Krill Dry weight Trajectories (30yrs : 1980-2009)',
-    'time window': 'Growth Season (1st Nov to 30th Apr)',
-    'extent': 'Atlantic Sector',
-    'mass_model': 'Atkinson et al., 2006',
-    'created_on': '2025-08-06',
-    'units': 'mg',
-}
-
-# -- Save to file
-fname = f"clim_length_traj_mat_stages_Atl.nc"
-clim_length_ds.to_netcdf(os.path.join(path_length, fname))
-print(f"Saved mass dataset: {fname}")
-
-fname = f"clim_mass_traj_mat_stages_Atl.nc"
-clim_mass_ds.to_netcdf(os.path.join(path_mass, fname))
-print(f"Saved mass dataset: {fname}")
-
-
-
-# %%  ================= Climatological Lengths for each grid cell -- Southern Ocean =================
-clim_length_stages =[]
-clim_mass_stages =[]
-for stage in stage_lengths:
-    print(stage)
-    climatological_length = length_Atkison2006(chla=chla_clim_mean.chla, 
-                                                temp=temp_clim_mean.avg_temp,
-                                                initial_length=stage_lengths[stage],
-                                                intermoult_period=stage_IMP[stage],
-                                                maturity_stage=stage)
-    climatological_mass = length_to_mass(climatological_length)
+    actual_length_list, actual_mass_list = zip(*actual_results)
+    actual_length = xr.concat(actual_length_list, dim="years") #computing time ~3min, shape (39, 181, 231, 1442)
+    actual_mass = xr.concat(actual_mass_list, dim="years") #computing time ~3min
 
     # Store results
-    clim_length_stages.append(climatological_length)
-    clim_mass_stages.append(climatological_mass)
+    actual_length_stages.append(actual_length)
+    actual_mass_stages.append(actual_mass)
 
-# -- To Dataset
-length_vars = {}
-mass_vars = {}
-for i, stage in enumerate(stage_lengths):
-    length_vars[stage] = clim_length_stages[i].rename(stage)
-    mass_vars[stage] = clim_mass_stages[i].rename(stage)
+    # --------- World3. No MHWs 
+    print('3. No MHWs')
+    # Run in parallel
+    func = partial(length_single_year, stage=stage, chla_ds=chla_surf_SO_allyrs, temp_ds=temp_avg_100m_SO_noMHWs)
+    noMHWs_results = process_map(func, range(39), max_workers=10, desc=f"No MHWs growth | stage={stage}")
 
-clim_length_ds = xr.Dataset(length_vars)
-clim_mass_ds = xr.Dataset(mass_vars)
+    noMHWs_length_list, noMHWs_mass_list = zip(*noMHWs_results)
+    noMHWs_length = xr.concat(noMHWs_length_list, dim="years") #computing time ~3min, shape (39, 181, 231, 1442)
+    noMHWs_mass = xr.concat(noMHWs_mass_list, dim="years") #computing time ~3min
 
-# Metadata
-shared_coords = {
-    'days': chla_surf_SO_allyrs.days,
-    'lon_rho': chla_surf_SO_allyrs.lon_rho,
-    'lat_rho': chla_surf_SO_allyrs.lat_rho,
-}
-clim_length_ds = clim_length_ds.assign_coords(shared_coords)
-clim_mass_ds = clim_mass_ds.assign_coords(shared_coords)
+    # Store results
+    noMHWs_length_stages.append(noMHWs_length)
+    noMHWs_mass_stages.append(noMHWs_mass)
+    
+    # --------- World4. Global Warming
 
-clim_length_ds.attrs = {
-    'description': 'Climatological Krill Length Trajectories (30yrs : 1980-2009)',
-    'time window': 'Growth Season (1st Nov to 30th Apr)',
-    'extent': 'Southern Ocean',
-    'growth_model': 'Atkinson et al., 2006',
-    'created_on': '2025-08-06',
-    'units': 'mm',
-}
 
-clim_mass_ds.attrs = {
-    'description': 'Climatological Krill Dry weight Trajectories (30yrs : 1980-2009)',
-    'time window': 'Growth Season (1st Nov to 30th Apr)',
-    'extent': 'Southern Ocean',
-    'mass_model': 'Atkinson et al., 2006',
-    'created_on': '2025-08-06',
-    'units': 'mg',
-}
+# %%  ================= Save to Datasets =================
+def create_dataset(stage_lengths, list_length_stages, list_mass_stages, 
+                   description_length="", description_weight=""):
+    # Initialise dict
+    length_vars = {}
+    mass_vars = {}
+
+    # Unwrapp
+    # for i, stage in enumerate(stage_lengths):
+    i=0
+    stage='juvenile'
+    length_vars[stage] = list_length_stages[i].rename(stage)
+    mass_vars[stage] = list_mass_stages[i].rename(stage)
+
+    # To dataset
+    length_ds = xr.Dataset(length_vars)
+    mass_ds = xr.Dataset(mass_vars)
+
+    # Shared metadata
+    shared_coords = {'days': chla_surf_SO_allyrs.days, 'lon_rho': chla_surf_SO_allyrs.lon_rho, 'lat_rho': chla_surf_SO_allyrs.lat_rho,}
+    length_ds = length_ds.assign_coords(shared_coords)
+    mass_ds = mass_ds.assign_coords(shared_coords)
+
+    # Add extra Metadata
+    length_ds.attrs = {
+        'description': description_length,
+        'time window': 'Growth Season (1st Nov to 30th Apr)',
+        'extent': 'Southern Ocean',
+        'growth_model': 'Atkinson et al., 2006',
+        'created_on': '2025-12-05',
+        'units': 'mm',
+    }
+
+        
+    mass_ds.attrs = {
+        'description': description_weight,
+        'time window': 'Growth Season (1st Nov to 30th Apr)',
+        'extent': 'Southern Ocean',
+        'mass_model': 'Atkinson et al., 2006',
+        'created_on': '2025-12-05',
+        'units': 'mg',
+    }
+
+
+    return length_ds, mass_ds
+
+
+clim_length_ds, clim_mass_ds = create_dataset(stage_lengths, clim_length_stages, clim_mass_stages, 
+                                              description_length='Climatological Krill Length (30yrs: 1980-2009)', 
+                                              description_weight='Climatological Krill Dry weight (30yrs: 1980-2009)')
+actual_length_ds, actual_mass_ds = create_dataset(stage_lengths, actual_length_stages, actual_mass_stages, 
+                                              description_length='Krill Length (1980-2018)', 
+                                              description_weight='Krill Dry weight (1980-2018)')
+noMHWs_length_ds, noMHWs_mass_ds = create_dataset(stage_lengths, noMHWs_length_stages, noMHWs_mass_stages, 
+                                              description_length="Krill Length without influence of MHWs.\nThe temperature input doesn't contain MHWs (replaced by clim)", 
+                                              description_weight= "Krill Dry weight without influence of MHWs.\nTemperature input don't contain MHWs (replaced by clim)")
 
 # -- Save to file
 fname = f"clim_length_traj_mat_stages_SO.nc"
@@ -254,97 +260,6 @@ print(f"Saved mass dataset: {fname}")
 #%% ====================================================================== 
 # Calculating length for each maturity stage YEARLY 
 # ====================================================================== 
-# %%  ================= Atlantic Sector =================
-# == Lengths traj for each year and grid cell -- shape (39, 181, 231, 360)
-years = np.arange(1980, 2019)
-year_indices = years - 1980  # 0 to 38
-
-lengths_by_stage = {stage: [] for stage in stage_lengths}
-mass_by_stage = {stage: [] for stage in stage_lengths}
-
-
-for yr in year_indices:
-    print(yr+1980)
-    for stage in stage_lengths:
-        print(stage)
-        length_yr = length_Atkison2006(chla=chla_surf_study_area_allyrs.chla.isel(years=yr), 
-                                        temp=temp_avg_100m_study_area_allyrs.avg_temp.isel(years=yr), 
-                                        initial_length=stage_lengths[stage], 
-                                        intermoult_period=stage_IMP[stage],
-                                        maturity_stage=stage)
-        # --- Check shape and fix if necessary ---
-        if length_yr.dims != ('days', 'eta_rho', 'xi_rho'):
-            length_yr = length_yr.transpose('days', 'eta_rho', 'xi_rho')
-
-        # Add coordinate year
-        length_yr = length_yr.expand_dims(dim={'years': [yr + 1980]})
-
-        # Converting to mass
-        mass_yr = length_to_mass(length_yr)   
-
-        # Store rsults
-        lengths_by_stage[stage].append(length_yr)
-        mass_by_stage[stage].append(mass_yr)
-
-length_datasets = {}
-mass_datasets = {}
-for stage in stage_lengths:
-    # Concatenate
-    length_stack = xr.concat(lengths_by_stage[stage], dim='years')
-    mass_stack = xr.concat(mass_by_stage[stage], dim='years')
-    
-    # Adding coords
-    length_stack = length_stack.assign_coords(years=years)
-    mass_stack = mass_stack.assign_coords(years=years)
-
-    length_datasets[stage] = length_stack
-    mass_datasets[stage] = mass_stack
-
-# -- To Dataset
-krill_length_ds = xr.Dataset(length_datasets)
-krill_mass_ds = xr.Dataset(mass_datasets)
-
-# Metadata
-shared_coords = {
-    'days': chla_surf_study_area_allyrs.days,
-    'eta_rho': chla_surf_study_area_allyrs.eta_rho,
-    'xi_rho': chla_surf_study_area_allyrs.xi_rho,
-    'lon_rho': chla_surf_study_area_allyrs.lon_rho,
-    'lat_rho': chla_surf_study_area_allyrs.lat_rho,
-}
-krill_length_ds = krill_length_ds.assign_coords(shared_coords)
-krill_mass_ds = krill_mass_ds.assign_coords(shared_coords)
-
-
-krill_length_ds.attrs = {
-    'title': 'Krill Length Trajectories (1980–2018)',
-    'description': 'Daily krill body lengths for different maturity stages using Atkinson (2006) growth model',
-    'time window': 'Growth Season (1st Nov to 30th Apr)',
-    'extent': 'Atlantic Sector',
-    'growth_model': 'Atkinson et al., 2006',
-    'created_on': '2025-08-06',
-    'units': 'mm',
-}
-
-krill_mass_ds.attrs = {
-    'title': 'Krill Dry Mass Trajectories (1980–2018)',
-    'description': 'Dry weight estimates derived from krill length for different maturity stages',
-    'time window': 'Growth Season (1st Nov to 30th Apr)',
-    'extent': 'Atlantic Sector',
-    'mass_model': 'Atkinson et al., 2006',
-    'created_on': '2025-08-06',
-    'units': 'mg',
-}
-
-# -- Save to file
-fname = f"length_traj_mat_stages_Atl.nc"
-krill_length_ds.to_netcdf(os.path.join(path_length, fname))
-print(f"Saved mass dataset: {fname}")
-
-fname = f"mass_traj_mat_stages_Atl.nc"
-krill_mass_ds.to_netcdf(os.path.join(path_mass, fname))
-print(f"Saved mass dataset: {fname}")
-
 # %%  ================= Southern Ocean =================
 # == Lengths traj for each year and grid cell -- shape (39, 181, 231, 360)
 years = np.arange(1980, 2019)
