@@ -86,39 +86,15 @@ stage_IMP = {'juvenile': 12, 'immature': 24, 'mature': 13, 'gravid': 13} # IMP a
 proportion = {'juvenile': 0.20, 'immature': 0.3, 'mature': 0.3, 'gravid':0.2}
 
 # %% ======================== Area ========================
-# Load data
+# --- Load data
 area_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc')
 
-# --- 1. Calculate total Southern Ocean area (south of 60°S)
+# --- Calculate total Southern Ocean area (south of 60°S)
 # Select surface layer
 area_SO_surf = area_roms['area'].isel(z_t=0)
 
 # Mask latitudes south of 60°S (lat_rho <= -60)
 area_60S_SO = area_SO_surf.where(area_roms['lat_rho'] <= -60, drop=True)
-
-# # --- 2. Atlantic Sector
-# def subset_atlantic_sector(ds, lat_range=(-80, -60), lon_range=(270, 360)):
-#     """
-#     Subset dataset ds to given latitude and longitude ranges.
-#     lon_range: tuple with (min_lon, max_lon) in degrees [0, 360]
-#     """
-#     lat_mask = (ds['lat_rho'] >= lat_range[0]) & (ds['lat_rho'] <= lat_range[1])
-#     lon_mask = (ds['lon_rho'] >= lon_range[0]) & (ds['lon_rho'] <= lon_range[1])
-
-#     combined_mask = lat_mask & lon_mask
-#     return ds.where(combined_mask, drop=True)
-
-
-# # Apply subset
-# area_Atl_Sect = subset_atlantic_sector(area_roms)
-
-# # Select surface layer
-# area_Atl_surf = area_Atl_Sect['area'].isel(z_t=0)
-# area_Atl_surf_m2 = area_Atl_Sect['area'].isel(z_t=0) * 1e6
-
-# # Sum area
-# total_area_Atl_km2 = area_Atl_surf.sum().item()
-# print(f'Total Atlantic Sector area south of 60°S: {total_area_Atl_km2:.2f} km²') #5707377.50 km²
 
 # %% ======================== Abundance from CEPHALOPOD ========================
 # N = 17.85 # Abundance ind/m2
@@ -151,7 +127,7 @@ noMHWs_krillmass_SO = xr.open_dataset(os.path.join(path_biomass, "fake_worlds/no
 print(f'Is initial mass identical? {(clim_krillmass_SO.immature.isel(days=0).values == actual_krillmass_SO.immature.isel(days=0, years=0).values).all()}')
 print(f'Is initial mass identical? {(clim_krillmass_SO.immature.isel(days=0).values == noMHWs_krillmass_SO.immature.isel(days=0, years=0).values).all()}')
 
-# %% Functions
+# %% ======================== Defining Functions ========================
 def density_biomass(mass_ds, proportion, abundance, area, first_day=False, last_day=False):
     # Initialisation
     density_population = xr.zeros_like(mass_ds['juvenile'].isel(days=0))
@@ -175,200 +151,156 @@ def density_biomass(mass_ds, proportion, abundance, area, first_day=False, last_
     return density_population, biomass_population
 
 
-
-
 # %% ================================================
 #             Initial Density and Biomass
 #                      1st Nov
 # ===================================================
-# -- Initialisation
-initial_density = xr.zeros_like(clim_krillmass_SO['juvenile'].isel(days=0))  # shape: (eta_rho, xi_rho)
+output_file_ini = os.path.join(path_biomass, "fake_worlds/biomass_density/initial_krill_biomass.nc")
+if not os.path.exists(output_file_ini):
+    # -- Initialisation
+    initial_density = xr.zeros_like(clim_krillmass_SO['juvenile'].isel(days=0))  # shape: (eta_rho, xi_rho)
 
-# -- Calculate initial density and biomass
-# abundance_day0 = abundance_regridded.euphausia_abundance.isel(bootstrap=0, days=0)
-initial_density, initial_biomass = density_biomass(clim_krillmass_SO, proportion, mean_abundance, area_60S_SO, first_day=True, last_day=False)
+    # -- Calculate initial density and biomass
+    # abundance_day0 = abundance_regridded.euphausia_abundance.isel(bootstrap=0, days=0)
+    initial_density, initial_biomass = density_biomass(clim_krillmass_SO, proportion, mean_abundance, area_60S_SO, first_day=True, last_day=False)
 
-# -- To Dataset
-initial_density.name = "initial_density"
-initial_density.attrs = {"description": "Initial krill biomass density on 1st November (common for all years and conditions).",
-                         "units": "mg/m²",}
-initial_density_ds = initial_density.to_dataset()
+    # -- To Dataset
+    initial_density.name = "initial_density"
+    initial_density.attrs = {"description": "Initial krill biomass density on 1st November (common for all years and conditions).",
+                            "units": "mg/m²",}
+    initial_density_ds = initial_density.to_dataset()
 
-initial_biomass.name = "initial_biomass"
-initial_biomass.attrs = {"description": "Initial krill biomass on 1st November (common for all years and conditions).",
-                         "units": "mg",}
-initial_biomass_ds = initial_biomass.to_dataset()
+    initial_biomass.name = "initial_biomass"
+    initial_biomass.attrs = {"description": "Initial krill biomass on 1st November (common for all years and conditions).",
+                            "units": "mg",}
+    initial_biomass_ds = initial_biomass.to_dataset()
 
-# initial_biomass_t = initial_biomass_mg# * 1e-9# Convert from mg to tonnes
+    # -- Merge Datasets
+    initial_ds = xr.merge([initial_density_ds, initial_biomass_ds])
+
+    # -- Save to file
+    initial_ds.to_netcdf(output_file_ini)
+    print(f"Saved initial krill biomass dataset.'")
+else:
+    print(f"File '{output_file_ini}' already exists.")
 
 # %% ================================================
 #             Final Density and Biomass
 #                    30th April
 # ===================================================
 # ======= 1. Climatology =======
-# final_density_clim = xr.zeros_like(clim_krillmass_SO['juvenile'].isel(days=0))  # shape: (eta_rho, xi_rho)
+output_file_clim = os.path.join(path_biomass, "fake_worlds/biomass_density/clim_krill_biomass.nc")
+if not os.path.exists(output_file_clim):
+    # Calcualte density and biomass
+    density_clim, biomass_clim = density_biomass(clim_krillmass_SO, proportion, mean_abundance, area_60S_SO, first_day=False, last_day=True) #shape (231, 1442)
 
-# # Calculate initial biomass - common for all years (initial length equal)
-# for stage, prop in proportion.items():
-#     print(f"Adding initial biomass for stage: {stage}")
-#     stage_mass_lastday = clim_krillmass_SO[stage].isel(days=-1)  # (eta_rho, xi_rho)
-#     # abundance_lastday = abundance_regridded.euphausia_abundance.isel(bootstrap=0, days=-1)
-#     biomass_stage = prop * mean_abundance * stage_mass_lastday  # mg/m²
-#     final_density_clim += biomass_stage
+    # -- To Dataset
+    density_clim.name = "density"
+    density_clim.attrs = {"description": "Krill biomass density on 30th April, under climatological conditions.",
+                            "units": "mg/m²",}
+    density_clim_ds = density_clim.to_dataset()
 
-# # Multiply by area to get biomass per grid cell
-# final_biomass_clim_mg = final_density_clim * area_Atl_surf_m2  # mg/gridcell
-# final_biomass_clim_t = final_biomass_clim_mg# * 1e-9 # Convert from mg to t
+    biomass_clim.name = "biomass"
+    biomass_clim.attrs = {"description": "Krill biomass on 30th April, under climatological conditions.",
+                            "units": "mg",}
+    biomass_clim_ds = biomass_clim.to_dataset()
 
-density_clim, biomass_clim = density_biomass(clim_krillmass_SO, proportion, mean_abundance, area_60S_SO, first_day=False, last_day=True)
+    # -- Merge Datasets
+    clim_ds = xr.merge([density_clim_ds, biomass_clim_ds])
 
-# -- To Dataset
-density_clim.name = "density"
-density_clim.attrs = {"description": "Krill biomass density on 30th April, under climatological conditions.",
-                         "units": "mg/m²",}
-density_clim_ds = density_clim.to_dataset()
-
-biomass_clim.name = "biomass"
-biomass_clim.attrs = {"description": "Krill biomass on 30th April, under climatological conditions.",
-                         "units": "mg",}
-biomass_clim_ds = biomass_clim.to_dataset()
-
+    # -- Save to file
+    clim_ds.to_netcdf(output_file_clim)
+    print(f"Saved initial krill biomass dataset.'")
+else:
+    # -- Load Dataset
+    print(f"File '{output_file_clim}' already exists. Load data")
+    clim_ds=xr.open_dataset(output_file_clim)
+    
 # ======= 2. Actual =======
-years = np.arange(1980, 2019) 
-actual_density_list = []
-actual_biomass_list = []
+output_file_actual = os.path.join(path_biomass, "fake_worlds/biomass_density/actual_krill_biomass.nc")
+if not os.path.exists(output_file_actual):
 
-for yr_idx, yr in enumerate(years):
-    print(f"\nYear: {yr}")
-    density_actual_yearly, biomass_actual_yearly = density_biomass(actual_krillmass_SO.isel(years=yr_idx), proportion, mean_abundance, area_60S_SO, first_day=False, last_day=True)
+    # Initialisation
+    years = np.arange(1980, 2019) 
+    actual_density_list = []
+    actual_biomass_list = []
 
-    # Store result to list 
-    actual_density_list.append(density_actual_yearly)
-    actual_biomass_list.append(biomass_actual_yearly)
+    for yr_idx, yr in enumerate(years):
+        print(f"\nYear: {yr}")
+        density_actual_yearly, biomass_actual_yearly = density_biomass(actual_krillmass_SO.isel(years=yr_idx), proportion, mean_abundance, area_60S_SO, first_day=False, last_day=True)
 
-# Combine results
-density_actual = xr.concat(actual_density_list, dim="years")
-biomass_actual = xr.concat(actual_biomass_list, dim="years")
+        # Store result to list 
+        actual_density_list.append(density_actual_yearly)
+        actual_biomass_list.append(biomass_actual_yearly)
 
-# -- To Dataset
-density_actual.name = "density"
-density_actual.attrs = {"description": "Krill biomass density on 30th April.",
-                         "units": "mg/m²",}
-density_actual_ds = density_actual.to_dataset()
+    # Combine results
+    density_actual = xr.concat(actual_density_list, dim="years")
+    biomass_actual = xr.concat(actual_biomass_list, dim="years")
 
-biomass_actual.name = "biomass"
-biomass_actual.attrs = {"description": "Krill biomass on 30th April.",
-                         "units": "mg",}
-biomass_actual_ds = biomass_actual.to_dataset()
+    # -- To Dataset
+    density_actual.name = "density"
+    density_actual.attrs = {"description": "Krill biomass density on 30th April.",
+                            "units": "mg/m²",}
+    density_actual_ds = density_actual.to_dataset()
 
+    biomass_actual.name = "biomass"
+    biomass_actual.attrs = {"description": "Krill biomass on 30th April.",
+                            "units": "mg",}
+    biomass_actual_ds = biomass_actual.to_dataset()
+    
+    # -- Merge Datasets
+    actual_ds = xr.merge([density_actual_ds, biomass_actual_ds])
+
+    # -- Save to file
+    actual_ds.to_netcdf(output_file_actual)
+    print(f"Saved actual krill biomass dataset.'")
+else:
+    # -- Load Dataset
+    print(f"File '{output_file_actual}' already exists. Load data")
+    actual_ds=xr.open_dataset(output_file_actual)
+    
 # ======= 3. No MHWs =======
-noMHWs_density_list = []
-noMHWs_biomass_list = []
+output_file_noMHWs = os.path.join(path_biomass, "fake_worlds/biomass_density/noMHWs_krill_biomass.nc")
+if not os.path.exists(output_file_noMHWs):
+    noMHWs_density_list = []
+    noMHWs_biomass_list = []
 
-for yr_idx, yr in enumerate(years):
-    print(f"\nYear: {yr}")
-    density_noMHWs_yearly, biomass_noMHWs_yearly = density_biomass(noMHWs_krillmass_SO.isel(years=yr_idx), proportion, mean_abundance, area_60S_SO, first_day=False, last_day=True)
+    for yr_idx, yr in enumerate(years):
+        print(f"\nYear: {yr}")
+        density_noMHWs_yearly, biomass_noMHWs_yearly = density_biomass(noMHWs_krillmass_SO.isel(years=yr_idx), proportion, mean_abundance, area_60S_SO, first_day=False, last_day=True)
 
-    # Store result to list 
-    noMHWs_density_list.append(density_noMHWs_yearly)
-    noMHWs_biomass_list.append(biomass_noMHWs_yearly)
+        # Store result to list 
+        noMHWs_density_list.append(density_noMHWs_yearly)
+        noMHWs_biomass_list.append(biomass_noMHWs_yearly)
 
-# Combine results
-density_noMHWs = xr.concat(noMHWs_density_list, dim="years")
-biomass_noMHWs = xr.concat(noMHWs_biomass_list, dim="years")
+    # Combine results
+    density_noMHWs = xr.concat(noMHWs_density_list, dim="years")
+    biomass_noMHWs = xr.concat(noMHWs_biomass_list, dim="years")
 
-# -- To Dataset
-density_noMHWs.name = "density"
-density_noMHWs.attrs = {'description': 'Krill biomass density on 30th April each year. The 100m-avg temperatures under surface MHWs have been replaced by 100m-avg temperature climatology to simulate a world without MHWs influence.',
-                         "units": "mg/m²",}
-density_noMHWs_ds = density_noMHWs.to_dataset()
+    # -- To Dataset
+    density_noMHWs.name = "density"
+    density_noMHWs.attrs = {'description': 'Krill biomass density on 30th April each year. The 100m-avg temperatures under surface MHWs have been replaced by 100m-avg temperature climatology to simulate a world without MHWs influence.',
+                            "units": "mg/m²",}
+    density_noMHWs_ds = density_noMHWs.to_dataset()
 
-biomass_noMHWs.name = "biomass"
-biomass_noMHWs.attrs = {'description': 'Krill biomass on 30th April each year. The 100m-avg temperatures under surface MHWs have been replaced by 100m-avg temperature climatology to simulate a world without MHWs influence.',
-                         "units": "mg",}
-biomass_noMHWs_ds = biomass_noMHWs.to_dataset()
+    biomass_noMHWs.name = "biomass"
+    biomass_noMHWs.attrs = {'description': 'Krill biomass on 30th April each year. The 100m-avg temperatures under surface MHWs have been replaced by 100m-avg temperature climatology to simulate a world without MHWs influence.',
+                            "units": "mg",}
+    biomass_noMHWs_ds = biomass_noMHWs.to_dataset()
 
+    # -- Merge Datasets
+    noMHWs_ds = xr.merge([density_noMHWs_ds, biomass_noMHWs_ds])
 
-# %%
-# years = np.arange(1980, 2019)   # 39 years
-# final_density_list2 = []
-
-# for yr_idx, yr in enumerate(years):
-#     print(f"\nYear: {yr}")
-#     # Initialize -- dims (eta_rho: 231, xi_rho: 1442)
-#     final_density = xr.zeros_like(actual_krillmass_SO['juvenile'].isel(years=yr_idx, days=-1))
-
-#     # Calculate density on 30th April (last day)
-#     for stage, prop in proportion.items():
-#         print(f"  Adding final density for stage: {stage}")
-#         stage_mass_day_final = actual_krillmass_SO[stage].isel(years=yr_idx, days=-1)
-#         # abundance_day_final = abundance_regridded.euphausia_abundance.isel(bootstrap=0, days=-1)
-#         biomass_stage = prop * mean_abundance * stage_mass_day_final
-#         final_density += biomass_stage
-
-#     # Add metadata
-#     final_density = final_density.assign_attrs({'units': 'mg/m²'})
+    # -- Save to file
+    noMHWs_ds.to_netcdf(output_file_noMHWs)
+    print(f"Saved actual krill biomass dataset.'")
+else:
+    # -- Load Dataset
+    print(f"File '{output_file_noMHWs}' already exists. Load data")
+    noMHWs_ds=xr.open_dataset(output_file_noMHWs)
     
-#     # Store result to list 
-#     final_density_list2.append(final_density)
 
-# # final_biomass_gridcell = final_density * area_Atl_surf_m2 #mg
-# # final_biomass_t = final_biomass_gridcell# * 1e-9
-
-
-# # -- Combine results in Dataset
-# final_density_actual = xr.concat(final_density_list, dim="years")
-# final_density_actual = final_density_actual.assign_coords(years=years)
-# final_density_actual = final_density_actual.to_dataset(name="density_30thApril")
-# final_density_actual.attrs = {'description': 'Final krill biomass on April 30 each year',
-#                            'units': 'mg/m²',
-#                            'abundance': 'CEPHALOPOD'}
-   
-# comparison = np.isclose(
-#     final_density_list[0].fillna(0),
-#     final_density_list2[0].fillna(0)
-# )
-# print("All True?", comparison.all())
-
-
-# %% ======================== 3. No MHWs World ========================
-# years = np.arange(1980, 2019)   # 39 years
-# final_density_noMHWs_list = []
-
-# for yr_idx, yr in enumerate(years):
-#     print(f"\nYear: {yr}")
-
-#     # Initialize -- dims (eta_rho: 231, xi_rho: 1442)
-#     final_density_noMHWs = xr.zeros_like(noMHWs_krillmass_SO['juvenile'].isel(years=yr_idx, days=-1))
-
-#     # Calculate density on 30th April (last day)
-#     for stage, prop in proportion.items():
-#         print(f"  Adding final density for stage: {stage}")
-#         stage_mass_day_final = noMHWs_krillmass_SO[stage].isel(years=yr_idx, days=-1)
-#         # abundance_day_final = abundance_regridded.euphausia_abundance.isel(bootstrap=0, days=-1)
-#         biomass_stage = prop * mean_abundance * stage_mass_day_final
-#         final_density_noMHWs += biomass_stage
-
-#     # Add metadata
-#     final_density_noMHWs = final_density_noMHWs.assign_attrs({'units': 'mg/m²'})
-    
-#     # Store result to list 
-#     final_density_noMHWs_list.append(final_density_noMHWs)
-
-# # final_biomass_gridcell = final_density * area_Atl_surf_m2 #mg
-# # final_biomass_t = final_biomass_gridcell# * 1e-9
-
-
-# # -- Combine results in Dataset
-# final_density_noMHWs = xr.concat(final_density_noMHWs_list, dim="years")
-# final_density_noMHWs = final_density_noMHWs.assign_coords(years=years)
-# final_density_noMHWs = final_density_noMHWs.to_dataset(name="density_30thApril")
-# final_density_noMHWs.attrs = {'description': 'Final krill biomass on April 30 each year. The 100m-avg temperatures under surface MHWs have been replaced by 100m-avg temperature climatology to simulate a world without MHWs influence.',
-#                            'units': 'mg/m²',
-#                            'abundance': 'CEPHALOPOD'}
-
-
-# %% ======================== Seasonal Differences (30thApril - 1stNov ) ========================
+# %% ======================== Seasonal Differences (30thApril - 1stNov) ========================
 clim_density_diff = density_clim_ds.density - initial_density_ds.initial_density
 density1989_actual_diff = density_actual_ds.isel(years=9).density - initial_density_ds.initial_density
 density2000_actual_diff = density_actual_ds.isel(years=20).density - initial_density_ds.initial_density
@@ -380,18 +312,7 @@ density2000_diff_clim = density_actual_ds.isel(years=20).density - density_clim_
 density2016_diff_clim = density_actual_ds.isel(years=36).density - density_clim_ds.density
 
 # %% ======================== MHWs Differences on 30thApril (season - noMHWs) ========================
-# Todo
 
-# %% ================================= Differences (30thApril - 1stNov )
-# clim_density_diff = final_density_clim - initial_density
-# density1989_diff = final_density_datasets[1989].biomass - initial_density
-# density2000_diff = final_density_datasets[2000].biomass - initial_density
-# density2016_diff = final_density_datasets[2016].biomass - initial_density
-
-# # %% ================================= Differences (30thApril season - Clim)
-# density1989_diff_clim = final_density_datasets[1989].biomass - final_density_clim
-# density2000_diff_clim = final_density_datasets[2000].biomass - final_density_clim
-# density2016_diff_clim = final_density_datasets[2016].biomass - final_density_clim
 
 # %% ================================= Plot density =================================
 # === Layout config ===
@@ -429,9 +350,9 @@ norm_diff_clim = mcolors.TwoSlopeNorm(vmin=-0.25, vcenter=0, vmax=0.25)
 plot_data = [
     # Row 1: Differences year
     (clim_density_diff, "Climatology Change", cmap_biomass, norm_diff),
-    (density1989_diff, "Season Change 1989-1990", cmap_biomass, norm_diff),
-    (density2000_diff, "Season Change 2000-2001", cmap_biomass, norm_diff),
-    (density2016_diff, "Season Change 2016-2017", cmap_biomass, norm_diff),
+    (density1989_actual_diff, "Season Change 1989-1990", cmap_biomass, norm_diff),
+    (density2000_actual_diff, "Season Change 2000-2001", cmap_biomass, norm_diff),
+    (density2016_actual_diff, "Season Change 2016-2017", cmap_biomass, norm_diff),
 
     # Row 2: Differences clim
     (None, 'None',None, None), 
@@ -506,326 +427,97 @@ else:
 
 
 
-# %% ================================= Biomass =================================
+# %% ================================= Total Biomass =================================
 # Multiply by area to get biomass per grid cell and then sum
-
 # ----- Initial Biomass 
-# initial_biomass_mg = initial_density * area_SO  # mg
 initial_biomass_kg = initial_biomass_ds.initial_biomass.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# ----- Final Biomass climatology
-# final_biomass_clim_mg = final_density_clim * area_SO  # mg
-final_biomass_clim_kg = biomass_clim_ds.biomass.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# ----- Final Biomass Yearly 
-final_biomass_actual_kg = biomass_actual_ds.biomass.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# To Dataset
-# final_biomass_actual.name = 'biomass'
-# final_biomass_actual.attrs = {
-#     'description': f'Final krill biomass',
-#     'units': 'mg',
-#     'abundance': 'CEPHALOPOD'
-# }
-
-
-final_biomass1989_kg = final_biomass_actual_kg.isel(years=9)
-final_biomass1991_kg = final_biomass_actual_kg.isel(years=11)
-final_biomass2000_kg = final_biomass_actual_kg.isel(years=20)
-final_biomass2010_kg = final_biomass_actual_kg.isel(years=30)
-final_biomass2016_kg = final_biomass_actual_kg.isel(years=36)
-
-# final_biomass_actual.isel(years=9).sum(dim=['eta_rho', 'xi_rho'])* 1e-6 # Mt = *1e-15, kg = *1e-6
-
-# final_biomass1991 = final_biomass_datasets[1991].biomass * area_SO  # mg
-# final_biomass1991_Mt = final_biomass_actual.isel(years=11).sum(dim=['eta_rho', 'xi_rho'])* 1e-6
-
-# # final_biomass2000 = final_biomass_datasets[2000].biomass * area_SO  # mg
-# final_biomass2000_Mt = final_biomass_actual.isel(years=20).sum(dim=['eta_rho', 'xi_rho'])* 1e-6
-
-# # final_biomass2010 = final_biomass_datasets[2010].biomass * area_SO  # mg
-# final_biomass2010_Mt = final_biomass_actual.isel(years=30).sum(dim=['eta_rho', 'xi_rho'])* 1e-6
-
-# # final_biomass2016 = final_biomass_datasets[2016].biomass * area_SO  # mg
-# final_biomass2016_Mt = final_biomass_actual.isel(years=36).sum(dim=['eta_rho', 'xi_rho'])* 1e-6
-
-# %% ================================= Differences (30thApril - 1stNov )
-clim_biomass_diff = final_biomass_clim_kg - initial_biomass_kg
-biomass1989_diff = final_biomass1989_kg - initial_biomass_kg
-biomass1991_diff = final_biomass1991_kg - initial_biomass_kg
-biomass2000_diff = final_biomass2000_kg - initial_biomass_kg
-biomass2010_diff = final_biomass2010_kg - initial_biomass_kg
-biomass2016_diff = final_biomass2016_kg - initial_biomass_kg
-
-# %% ================================= Differences (30thApril season - Clim)
-biomass1989_diff_clim = final_biomass1989_kg - final_biomass_clim_kg
-biomass1991_diff_clim = final_biomass1991_kg - final_biomass_clim_kg
-biomass2000_diff_clim = final_biomass2000_kg - final_biomass_clim_kg
-biomass2010_diff_clim = final_biomass2010_kg - final_biomass_clim_kg
-biomass2016_diff_clim = final_biomass2016_kg - final_biomass_clim_kg
-
-# %% ================================= Print Results
 print(f"Initial biomass total: {initial_biomass_kg.item():.2f} kg")
+
+# ----- 1. Final Biomass Climatology
+final_biomass_clim_kg = biomass_clim_ds.biomass.sum(dim=['eta_rho', 'xi_rho'])*1e-6
 print(f"Final biomass climatology total: {final_biomass_clim_kg.item():.2f} kg\n")
 
-# for year in selected_years:
-#     final_biomass_Mt = final_biomass_datasets[year].biomass * area_SO
-#     final_biomass_Mt_sum = final_biomass_Mt.sum(dim=['eta_rho', 'xi_rho']) * 1e-6
-#     print(f"Final biomass {year} total: {final_biomass_Mt_sum.item():.2f} Mt")
+# ----- 2. Final Biomass Actual 
+final_biomass_actual_kg = biomass_actual_ds.biomass.sum(dim=['eta_rho', 'xi_rho'])*1e-6
 
+# ----- 3. Final Biomass No MHWs 
+final_biomass_noMHWs_kg = biomass_noMHWs_ds.biomass.sum(dim=['eta_rho', 'xi_rho'])*1e-6
+
+
+# %% ================== Differences (30thApril - 1stNov ) ==================
+clim_biomass_diff = final_biomass_clim_kg - initial_biomass_kg
+biomass1989_diff = final_biomass_actual_kg.isel(years=9) - initial_biomass_kg
+biomass1991_diff = final_biomass_actual_kg.isel(years=11) - initial_biomass_kg
+biomass2000_diff = final_biomass_actual_kg.isel(years=20) - initial_biomass_kg
+biomass2010_diff = final_biomass_actual_kg.isel(years=30) - initial_biomass_kg
+biomass2016_diff = final_biomass_actual_kg.isel(years=36) - initial_biomass_kg
+
+# Print results
 print("\nDifferences (Final - Initial):")
-print(f"Climatology: {clim_biomass_diff.item():.2f} Mt")
-print(f"1989: {biomass1989_diff.item():.2f} Mt")
-print(f"1991: {biomass1991_diff.item():.2f} Mt")
-print(f"2000: {biomass2000_diff.item():.2f} Mt")
-print(f"2010: {biomass2010_diff.item():.2f} Mt")
-print(f"2016: {biomass2016_diff.item():.2f} Mt")
+print(f"Climatology: {clim_biomass_diff.item():.2f} kg")
+print(f"1989: {biomass1989_diff.item():.2f} kg")
+print(f"1991: {biomass1991_diff.item():.2f} kg")
+print(f"2000: {biomass2000_diff.item():.2f} kg")
+print(f"2010: {biomass2010_diff.item():.2f} kg")
+print(f"2016: {biomass2016_diff.item():.2f} kg")
 
-print("\nDifferences (Year - Climatology):")
-print(f"1989: {biomass1989_diff_clim.item():.3f} Mt")
-print(f"1991: {biomass1991_diff_clim.item():.2f} Mt")
-print(f"2000: {biomass2000_diff_clim.item():.2f} Mt")
-print(f"2010: {biomass2010_diff_clim.item():.2f} Mt")
-print(f"2016: {biomass2016_diff_clim.item():.2f} Mt")
+
+# %% ================== Differences (30thApril season - Clim) ==================
+biomass1989_diff_clim = final_biomass_actual_kg.isel(years=9) - final_biomass_clim_kg
+biomass1991_diff_clim = final_biomass_actual_kg.isel(years=11) - final_biomass_clim_kg
+biomass2000_diff_clim = final_biomass_actual_kg.isel(years=20) - final_biomass_clim_kg
+biomass2010_diff_clim = final_biomass_actual_kg.isel(years=30) - final_biomass_clim_kg
+biomass2016_diff_clim = final_biomass_actual_kg.isel(years=36) - final_biomass_clim_kg
+
+# Print results
+print("\nDifferences (actual year - Climatology):")
+print(f"1989: {biomass1989_diff_clim.item():.3f} kg")
+print(f"1991: {biomass1991_diff_clim.item():.2f} kg")
+print(f"2000: {biomass2000_diff_clim.item():.2f} kg")
+print(f"2010: {biomass2010_diff_clim.item():.2f} kg")
+print(f"2016: {biomass2016_diff_clim.item():.2f} kg")
 
 # Percentage of change
-print("\nPercentage of change:")
+print("\nPercentage of change (actual year - Climatology):")
 print(f"1989: {biomass1989_diff_clim.item()/clim_biomass_diff.item()*100:.1f} %")
 print(f"1991: {biomass1991_diff_clim.item()/clim_biomass_diff.item()*100:.1f} %")
 print(f"2000: {biomass2000_diff_clim.item()/clim_biomass_diff.item()*100:.1f} %")
 print(f"2010: {biomass2010_diff_clim.item()/clim_biomass_diff.item()*100:.1f} %")
 print(f"2016: {biomass2016_diff_clim.item()/clim_biomass_diff.item()*100:.1f} %")
 
+
+# %% ================== Differences 30thApril (clim - no MHWs) ==================
+biomass1989_diff_noMHWs_clim = final_biomass_noMHWs_kg.isel(years=9) - final_biomass_clim_kg
+biomass1991_diff_noMHWs_clim = final_biomass_noMHWs_kg.isel(years=11) - final_biomass_clim_kg
+biomass2000_diff_noMHWs_clim = final_biomass_noMHWs_kg.isel(years=20) - final_biomass_clim_kg
+biomass2010_diff_noMHWs_clim  = final_biomass_noMHWs_kg.isel(years=30) - final_biomass_clim_kg
+biomass2016_diff_noMHWs_clim  = final_biomass_noMHWs_kg.isel(years=36) - final_biomass_clim_kg
+
+# Print results
+print("\nDifferences (no MHWs year - Climatology):")
+print(f"1989: {biomass1989_diff_noMHWs_clim .item():.3f} kg")
+print(f"1991: {biomass1991_diff_noMHWs_clim .item():.2f} kg")
+print(f"2000: {biomass2000_diff_noMHWs_clim .item():.2f} kg")
+print(f"2010: {biomass2010_diff_noMHWs_clim .item():.2f} kg")
+print(f"2016: {biomass2016_diff_noMHWs_clim.item():.2f} kg")
+
+# Percentage of change
+print("\nPercentage of change (no MHWs year - Climatology):")
+print(f"1989: {biomass1989_diff_noMHWs_clim.item()/clim_biomass_diff.item()*100:.1f} %")
+print(f"1991: {biomass1991_diff_noMHWs_clim.item()/clim_biomass_diff.item()*100:.1f} %")
+print(f"2000: {biomass2000_diff_noMHWs_clim.item()/clim_biomass_diff.item()*100:.1f} %")
+print(f"2010: {biomass2010_diff_noMHWs_clim.item()/clim_biomass_diff.item()*100:.1f} %")
+print(f"2016: {biomass2016_diff_noMHWs_clim.item()/clim_biomass_diff.item()*100:.1f} %")
+
+
+# Percentage of change due to MHWs
+print("\nPercentage of change due to MHWs:")
+print(f"1989: {(biomass1989_diff_clim.item() - biomass1989_diff_noMHWs_clim.item())/clim_biomass_diff.item()*100:.1f} %")
+print(f"1991: {(biomass1991_diff_clim.item() - biomass1991_diff_noMHWs_clim.item())/clim_biomass_diff.item()*100:.1f} %")
+print(f"2000: {(biomass2000_diff_clim.item() - biomass2000_diff_noMHWs_clim.item())/clim_biomass_diff.item()*100:.1f} %")
+print(f"2010: {(biomass2010_diff_clim.item() - biomass2010_diff_noMHWs_clim.item())/clim_biomass_diff.item()*100:.1f} %")
+print(f"2016: {(biomass2016_diff_clim.item() - biomass2016_diff_noMHWs_clim.item())/clim_biomass_diff.item()*100:.1f} %")
+
+
+
 # %%
-# # Extract final mass for each maturity stage, MHW conditions and year
-# mass_final = {stage: [] for stage in stage_lengths}
-
-# for stage, ds in zip(['juvenile', 'immature', 'mature', 'gravid']):
-#     # Select the last day for each year, assuming 'days' is sorted
-#     final_mass = ds.isel(days=-1)
-    
-#     # Keep only the mass variables (non_mhw and mhw_*)
-#     mass_vars = [v for v in ds.data_vars]
-#     final_mass_vars = final_mass[mass_vars]
-    
-#     mass_final[stage] = final_mass_vars #shape: (39, )
-
-
-
-# # %% ======================== Biomass Calculation ========================
-# # Calculate total biomass (mg) for each year
-# biomass_total = {}
-# for var in ['mass_cat0', 'mass_cat1', 'mass_cat2', 'mass_cat3', 'mass_cat4']:
-#     B_j = area_atl_sect * sum(proportion[stage] * N * mass_final[stage][var] for stage in proportion)
-#     B_j_Mt = B_j * 1e-15  # Convert from mg to Mt
-#     biomass_total[var] = B_j_Mt
-
-
-# # %% ================ Relative Chnages ================
-# delta_biomass_rel = {}
-# for i in range(1, 5):  # Categories 1 to 4
-#     delta_percent = ((biomass_total[f'mass_cat{i}'] - biomass_total['mass_cat0']) / biomass_total['mass_cat0']) * 100
-#     delta_biomass_rel[f'delta_cat{i}'] = delta_percent
-
-# # %% ======================== Area fraction of the MHWs categories ========================
-# # --- Total area
-# def subset_spatial_domain(ds, lat_range=(-80, -60), lon_range=(270, 360)): #, (0, 30)
-#     lat_min, lat_max = lat_range
-#     lon_range1, lon_range2 = lon_range
-
-#     lat_mask = (ds['lat_rho'] >= lat_min) & (ds['lat_rho'] <= lat_max)
-#     lon_mask = ((ds['lon_rho'] >= lon_range1) & (ds['lon_rho'] <= lon_range2)) #| ((ds['lon_rho'] >= lon_range2[0]) & (ds['lon_rho'] <= lon_range2[1]))
-
-#     return ds.where(lat_mask & lon_mask, drop=True)
-
-# # Load data
-# ROMS_area = xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc') # do not contain land cells
-# area_Atl_Sect = subset_spatial_domain(ROMS_area)
-# area_Atl_surf = area_Atl_Sect['area'].isel(z_t=0) # Select surface layer
-
-# # --- Area under MHWs
-# temp_mhw_file = os.path.join(path_growth_inputs, f"atlantic_sector/temp_avg100m_daily_mhw.nc")
-# temp_mhw = xr.open_dataset(temp_mhw_file)
-
-# mhw_area_km2 = {}
-# for deg in range(1, 5):
-#     varname = f'temp_{deg}deg'
-    
-#     # MHW presence mask: True where MHW temp data exists (ocean+land)
-#     mhw_mask = np.isfinite(temp_mhw[varname])  # (years, days, eta_rho, xi_rho)
-    
-#     # Cells that have experienced MHWs
-#     mhw_any = mhw_mask.any(dim='days')  # (years, eta_rho, xi_rho)
-    
-#     # Multiply boolean mask by area of each cell 
-#     area_cells = mhw_any * area_Atl_surf # (years, eta_rho, xi_rho)
-
-#     # Total area affected per year
-#     area_sum = area_cells.sum(dim=['eta_rho', 'xi_rho'])
-    
-#     # Count affected ocean cells
-#     mhw_area_km2[f'cat{deg}'] = area_sum
-
-# # Total ocean area
-# total_ocean_area = area_Atl_surf.sum().item()
-
-# # Sum all MHW areas per year
-# total_mhw_area = sum(mhw_area_km2[f'cat{deg}'] for deg in range(1, 5))
-
-# # Non-MHW ocean area per year
-# mhw_area_km2['cat0'] = total_ocean_area - total_mhw_area
-
-# # --- Calculating area fraction
-# mhw_area_frac = {k: v / total_ocean_area for k, v in mhw_area_km2.items()}
-# print(f"Fraction of ocean under 1°C MHW in 2000: {mhw_area_frac['cat4'][36].values*100:.3f}%")
-
-
-
-# # %% ======================== PLOT ========================
-# years_to_plot = [1989, 2000, 2016]
-# year_indices = [year - 1980 for year in years_to_plot]
-
-# fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharey=True)
-
-# for ax, year, idx in zip(axs, years_to_plot, year_indices):
-#     biomass_year = {var: biomass_total[var].isel(years=idx).item() for var in biomass_total}
-#     bars = ax.bar(biomass_year.keys(), biomass_year.values(), color='teal')
-#     ax.set_title(f"Biomass in {year}")
-#     ax.set_xlabel("MHW Scenario")
-#     ax.set_xticklabels(biomass_year.keys(), rotation=45)
-#     if ax == axs[0]:
-#         ax.set_ylabel("Biomass (Mt)")
-
-#     # Add text labels on top of each bar
-#     for bar in bars:
-#         height = bar.get_height()
-#         ax.text(bar.get_x() + bar.get_width()/2, height,
-#                 f"{height:.3e}", ha='center', va='bottom', fontsize=9)
-
-# plt.tight_layout()
-# plt.show()
-
-# # %% 
-
-# categories = ['Non MHWs', 'MHWs 1°C', 'MHWs 2°C', 'MHWs 3°C', 'MHWs 4°C']
-# # x_pos = np.arange(len(categories))
-# x_pos = np.array([1, 2, 3, 4, 5])  # wider spacing between bars
-
-# years_to_plot = [1989, 2000, 2016]
-# year_indices = [year - 1980 for year in years_to_plot]
-
-
-# # === Layout config ===
-# plot = 'report' #report slides
-
-# if plot == 'report':
-#     fig_width = 6.3228348611
-#     fig_height = fig_width
-    
-# else:
-#     fig_width = 12
-#     fig_height = 8
-  
-# fig, axs = plt.subplots(len(years_to_plot), 3, figsize=(fig_width, fig_height), sharex=True)
-# fig.subplots_adjust(hspace=0.4, wspace = 0.45)  
-
-# title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
-# label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
-# tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
-# suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 10, 'fontweight': 'bold'}
-
-# for row_idx, year in enumerate(years_to_plot):
-#     bar_width = 0.6 if plot == 'report' else 0.8
-
-#     idx = year - 1980  # year index
-
-#     # ------- Panel 1: Absolute Biomass
-#     biomass_vals = [biomass_total[f'mass_cat{i}'].isel(years=idx).item() for i in range(5)]
-#     bars1 = axs[row_idx, 0].bar(x_pos, biomass_vals, color='#168AAD', width=bar_width)
-
-#     # Axis and title
-#     axs[row_idx, 0].set_ylabel("Biomass [Mt]", **label_kwargs)
-#     axs[row_idx, 0].set_title("Biomass" if row_idx == 0 else "", **suptitle_kwargs)
-#     axs[row_idx, 0].set_ylim(0,10)
-#     axs[row_idx, 0].set_xlim(0.4, 5.6)
-
-#     # Add text with the values
-#     for bar in bars1:
-#         h = bar.get_height()
-#         axs[row_idx, 0].text(bar.get_x() + bar.get_width() / 2, h, f"{h:.1f}", ha='center', color='#1A759F', va='bottom', **tick_kwargs)
-
-#     # ------- Panel 2: Relative Biomass Change (% vs cat0)
-#     delta_vals = [0.0] + [delta_biomass_rel[f'delta_cat{i}'].isel(years=idx).item() for i in range(1, 5)]
-#     bars2 = axs[row_idx, 1].bar(x_pos, delta_vals, color='#FFA200', width=bar_width)
-
-#     # Axis and title
-#     axs[row_idx, 1].set_ylabel(r"$\Delta$ [\%]",  **label_kwargs)
-#     axs[row_idx, 1].set_title("Relative\nBiomass Change" if row_idx == 0 else "", **suptitle_kwargs)
-#     axs[row_idx, 1].axhline(0, color='gray', linestyle='--')
-    
-#     # Ylim with some padding
-#     heights = [bar.get_height() for bar in bars2]
-#     ymin = min(heights) - 3  # minimum
-#     ymax = max(heights) + 5  # maximum
-#     axs[row_idx, 1].set_ylim(ymin, ymax)
-#     axs[row_idx, 1].set_xlim(0.4, 5.6)
-
-#     # Add text with the values
-#     for bar in bars2:
-#         h = bar.get_height()
-#         va = 'bottom' if h >= 0 else 'top'
-#         axs[row_idx, 1].text(bar.get_x() + bar.get_width() / 2, h, f"{h:.1f}%", ha='center', color = '#FF9500' ,va=va, **tick_kwargs)
-
-#     # ------- Panel 3: MHW Area Fraction (%)
-#     area_frac_vals = [mhw_area_frac[f'cat{i}'][idx].values * 100 for i in range(5)]
-#     bars3 = axs[row_idx, 2].bar(x_pos, area_frac_vals, color='#55A630', width=bar_width)
-
-#     # Axis and title
-#     axs[row_idx, 2].set_ylabel(r"[\%]", **label_kwargs)
-#     axs[row_idx, 2].set_title("Area Fraction" if row_idx == 0 else "", **suptitle_kwargs)
-
-#     # Ylim with some padding
-#     heights = [bar.get_height() for bar in bars3]
-#     ymin = 0 # minimum
-#     ymax = max(heights) + 10  # maximum
-#     axs[row_idx, 2].set_ylim(ymin, ymax)
-#     axs[row_idx, 2].set_xlim(0.4, 5.6)
-
-#     # Add text with the values
-#     for bar in bars3:
-#         h = bar.get_height()
-#         axs[row_idx, 2].text(bar.get_x() + bar.get_width() / 2, h, f"{h:.1f}%", ha='center', color='#2B9348', va='bottom', **tick_kwargs)
-    
-#     # Set x-ticks & labels only on bottom row for clarity
-#     if row_idx == len(years_to_plot) - 1:
-#         for ax in axs[row_idx, :]:
-#             ax.set_xticks(x_pos)
-#             # ax.set_xticklabels(categories)
-#             ax.set_xticklabels(categories, rotation=45, ha='right', **tick_kwargs)
-
-#     else:
-#         for ax in axs[row_idx, :]:
-#             ax.set_xticks(x_pos)
-#             ax.set_xticklabels([])
-
-#     # Add year label on the left of each row (y-axis label style)
-#     axs[row_idx, 0].annotate(f'{year} - {year+1}' , xy=(-0.5, 0.5), xycoords='axes fraction',
-#                              ha='right', va='center', rotation=90, **suptitle_kwargs)
-
-# # Add a big title if plotting for slides
-# if plot == 'slides':
-#     fig.suptitle("Krill Biomass under MHWs", **suptitle_kwargs, y=1.02)
-
-# # --- Output handling ---
-# if plot == 'report':
-#     outdir = os.path.join(os.getcwd(), 'Biomass/figures_outputs/Biomass/')
-#     os.makedirs(outdir, exist_ok=True)
-#     outfile = f"biomass_3years_{plot}.pdf"
-#     # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
-#     plt.show()
-# else:    
-#     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
-#     plt.show()
-
-
-# # %%
