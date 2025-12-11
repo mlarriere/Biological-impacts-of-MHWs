@@ -95,33 +95,8 @@ mhw_duration_seasonal = mhw_duration_seasonal.rename({'days_of_yr': 'days'}) # r
 temp_clim = temp_avg_100m_SO_allyrs.isel(years=slice(0,30)) #shape: (30, 181, 231, 1442)
 temp_clim_mean = temp_clim.mean(dim=['years']) #shape: (181, 231, 1442)
 
-# %% ======================== Find MHWs and replace by climatology ========================
-#test
-eta_choice = 200
-xi_choice = 1100
-year_choice = 36
-temp_test = temp_avg_100m_SO_allyrs.isel(years=year_choice, eta_rho=eta_choice, xi_rho =xi_choice)
-mhw_test = mhw_duration_seasonal.isel(years=year_choice, eta_rho=eta_choice, xi_rho =xi_choice)
-temp_clim_mean_test = temp_clim_mean.isel(eta_rho=eta_choice, xi_rho =xi_choice)
-print('MHWs duration:', mhw_test.duration.values)
-# print('MHWs 4deg:', mhw_test.det_4deg.values)
 
-# Mask where MHWs occured
-mhw_mask = mhw_test.duration != 0 #shape (181,)
-
-# Mask temp where MHW happend
-temp_mhw = temp_test.where(mhw_test.duration.values!=0).avg_temp #value where MHW happend -- shape (181,)
-print('Temperature during MHWs', temp_mhw.values)
-
-# Where MHWs happend -- replace temperature values by climatological ones
-temp_clim_mhws = temp_clim_mean_test.where(mhw_test.duration.values!=0).avg_temp #value where MHW happend -- shape (181,)
-print('Climatology temperature during MHWs', temp_clim_mhws.values)
-
-# Replace
-temp_replaced_test = temp_test.avg_temp.where(~mhw_mask, temp_clim_mean_test.avg_temp)
-
-
-# %% ======================== All cells Southern Ocean ========================
+# %% ======================== Replacing MHWs by climatology ========================
 def replace_MHW_clim(yr):
     print(f'Processing year {yr+1980}')
 
@@ -207,6 +182,10 @@ def identify_events(data, threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 
     return threshold_events
 
 # %% ======================== Plot before VS after ========================
+eta_choice = 200
+xi_choice = 1100
+year_choice = 36
+
 data_before = temp_avg_100m_SO_allyrs.isel(years=year_choice, eta_rho=eta_choice, xi_rho=xi_choice)
 data_after = temp_without_MHWs_allyrs.isel(years=year_choice, eta_rho=eta_choice, xi_rho=xi_choice)
 mhw_events = mhw_duration_seasonal.isel(years=year_choice, eta_rho=eta_choice, xi_rho=xi_choice)
