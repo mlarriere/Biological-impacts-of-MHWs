@@ -98,8 +98,8 @@ temp_clim_mean = temp_clim.mean(dim=['years']) #shape: (181, 231, 1442)
 # %% ======================== Find MHWs and replace by climatology ========================
 #test
 eta_choice = 200
-xi_choice = 1000
-year_choice=9
+xi_choice = 1100
+year_choice = 36
 temp_test = temp_avg_100m_SO_allyrs.isel(years=year_choice, eta_rho=eta_choice, xi_rho =xi_choice)
 mhw_test = mhw_duration_seasonal.isel(years=year_choice, eta_rho=eta_choice, xi_rho =xi_choice)
 temp_clim_mean_test = temp_clim_mean.isel(eta_rho=eta_choice, xi_rho =xi_choice)
@@ -121,7 +121,7 @@ print('Climatology temperature during MHWs', temp_clim_mhws.values)
 temp_replaced_test = temp_test.avg_temp.where(~mhw_mask, temp_clim_mean_test.avg_temp)
 
 
-# %% All cells Southern Ocean
+# %% ======================== All cells Southern Ocean ========================
 def replace_MHW_clim(yr):
     print(f'Processing year {yr+1980}')
 
@@ -163,9 +163,54 @@ if not os.path.exists(output_file):
 else: 
     temp_without_MHWs_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp_avg100m_noMHWs.nc'))
 
+
+# %% ================== Identify events 1 cell ==================
+from scipy.ndimage import label
+def identify_events(data, threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']):
+    threshold_events = {}
+
+    hobday_mask = data.duration.values > 0  # relative threshold (Hobday)
+    days = np.arange(len(hobday_mask))
+
+    for var in threshold_vars:
+        # var='det_1deg'
+        abs_mask = data[var].fillna(0).astype(bool).values  # absolute threshold
+
+        # Combine relative & absolute thresholds
+        mhw_mask = hobday_mask & abs_mask
+
+        # Label consecutive days
+        labeled_array, num_events = label(mhw_mask)
+
+        events = []
+        for event_id in range(1, num_events + 1):
+            idx = np.where(labeled_array == event_id)[0] #idx of days when MHWs is happening
+            # print(idx)
+            if len(idx) == 0:
+                continue
+            
+            duration = len(idx)
+            # print(duration)
+
+            if duration > 0:
+                events.append({
+                    "event_id": event_id,
+                    "start_day": int(idx[0]),
+                    "end_day": int(idx[-1]),
+                    "duration": duration
+                })
+            # print(event_duration)
+
+            # Store results
+        threshold_events[var] = {"events": events, "days": labeled_array}
+
+    return threshold_events
+
 # %% ======================== Plot before VS after ========================
 data_before = temp_avg_100m_SO_allyrs.isel(years=year_choice, eta_rho=eta_choice, xi_rho=xi_choice)
 data_after = temp_without_MHWs_allyrs.isel(years=year_choice, eta_rho=eta_choice, xi_rho=xi_choice)
+mhw_events = mhw_duration_seasonal.isel(years=year_choice, eta_rho=eta_choice, xi_rho=xi_choice)
+
 # === Prepare time axis ===
 days_xaxis = np.arange(181)
 base_date = datetime(2021, 11, 1)
@@ -174,27 +219,46 @@ date_dict = dict(date_list)
 tick_positions = np.arange(days_xaxis.min(), days_xaxis.max() + 1, 15) #ticks every 15days
 tick_labels = [date_dict.get(day, '') for day in tick_positions]
 
-# === Plot both time series on the SAME graph ===
-fig, ax = plt.subplots(figsize=(15, 6))  # returns fig and ax
+threshold_colors = ['#5A7854', '#8780C6', '#E07800', '#9B2808']
+threshold_labels = ['$\\geq$ 90th perc and 1°C', '$\\geq$ 90th perc and 2°C', '$\\geq$ 90th perc and 3°C', '$\\geq$ 90th perc and 4°C']
 
-ax.plot(days_xaxis, data_before.avg_temp.values, label='Temperature with MHWs', linewidth=1, color='#9D4EDD')
-ax.plot(days_xaxis, data_after.avg_temp.values, label='Temperature without MHWs', linewidth=1, color='#9B2226')
+fig, (ax_timeline, ax_temp) = plt.subplots(2, 1, figsize=(15, 5), sharex=True, gridspec_kw={'height_ratios': [1, 3]})
 
-ax.set_title('Temperature Time Series (100m avg): With vs. Without MHWs', fontsize=15, y=1.1)
-fig.text(0.5, 0.9, "Reminder: MHWs are defined at the surface.", ha='center', fontsize=12)
+# ======= MHW timeline =======
+threshold_events = identify_events(mhw_events)
+threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
+for i, var in enumerate(threshold_vars):
+    color = threshold_colors[i]
+    for ev in threshold_events[var]["events"]:
+        ax_timeline.axvspan(ev["start_day"], ev["end_day"], color=color, alpha=0.8)
 
-ax.set_xlabel('Date', fontsize=12)
-ax.set_ylabel('Temperature [°C]', fontsize=12)
-ax.set_xticks(tick_positions)
-ax.set_xticklabels(tick_labels, rotation=45, fontsize=10)
-ax.tick_params(axis='y', labelsize=10)
-ax.legend(fontsize=12, loc='upper left')
+ax_timeline.set_ylabel("Surface \n MHW Events", fontsize=11)
+ax_timeline.set_yticks([])
+
+# ======= Temp time series =======
+ax_temp.plot(days_xaxis, data_before.avg_temp.values, label='With MHWs', linewidth=1, color='#B10CA1')
+# ax_temp.plot(days_xaxis, data_after.avg_temp.values, label='Without MHWs', linewidth=1, color="black", linestyle='--')
+
+ax_temp.set_ylabel("100m-avg temperature [°C]", fontsize=12)
+ax_temp.set_xlabel("Date", fontsize=12)
+
+# X-axis
+ax_temp.set_xticks(tick_positions)
+ax_temp.set_xticklabels(tick_labels, rotation=45, fontsize=10)
+
+ax_temp.legend(fontsize=12, loc='upper left')
+
+
+# Add thresholds legend
+import matplotlib.patches as mpatches
+patches = [mpatches.Patch(color=threshold_colors[i], label=threshold_labels[i]) for i in range(len(threshold_vars))]
+fig.legend(handles=patches, loc='lower center', ncol=4, fontsize=12, frameon=True, bbox_to_anchor=(0.5, -0.1))
+
+# Common title
+fig.suptitle("Deleting MHWs signal", fontsize=16, y=0.99)
+
+
 plt.tight_layout()
 plt.show()
-
-
-
-
-
 
 # %%
