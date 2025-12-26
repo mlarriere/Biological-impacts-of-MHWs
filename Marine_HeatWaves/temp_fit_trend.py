@@ -417,85 +417,93 @@ plt.title('ROMS temperature (depth=13)\n Slope of Linear trend: mx+b', fontsize=
 # plt.title('ROMS 100m-avg temperature\n Evaluation of Linear trend', fontsize=15)
 plt.show()
 # %% ======================== Removing trend ========================
-# -- Reconstruct the linear fit using coeffs from linear regression 
-# Preparing (linear trend fitted on daily data over 40 years - need to reconstruct time to have trend)
-n_years = temp_avg_100m_SO_allyrs.sizes["year"]
-n_days_per_year = temp_avg_100m_SO_allyrs.sizes["days"]
-total_days = n_years * n_days_per_year
-t_cont = np.arange(total_days) / 365.0  # fractional years
-t_da = xr.DataArray(t_cont, dims=["time"], coords={"time": np.arange(total_days)})
+# Select growth season for each year
+def extract_one_season_pair(args):
+    ds_y, ds_y1, y = args
+    try:
+        days_nov_dec = ds_y.sel(days=slice(304, 364))
+        days_jan_apr = ds_y1.sel(days=slice(0, 119))
 
-intercept = trends_100mavg_ds.intercept
-slope = trends_100mavg_ds.slope
-slope_exp = slope.expand_dims({"time": total_days}).transpose("time", "eta_rho", "xi_rho") 
-intercept_exp = intercept.expand_dims({"time": total_days}).transpose("time", "eta_rho", "xi_rho")
+        combined_days = np.concatenate(
+            [days_nov_dec['days'].values, days_jan_apr['days'].values]
+        )
+        season = xr.concat([days_nov_dec, days_jan_apr],
+                           dim=xr.DataArray(combined_days, dims="days", name="days"))
+        season = season.expand_dims(season_year=[y])
+        return season
 
-# Linear trend (computation time ~10min)
-y_fit_daily = slope_exp * t_da + intercept_exp #shape (14600, 231, 1442)
-y_fit_da = xr.DataArray(y_fit_daily, dims=temp_stacked.avg_temp.dims, coords=temp_stacked.avg_temp.coords)
+    except Exception as e:
+        print(f"Skipping year {y}: {e}")
+        return None
 
-# -- Detrend signal: roms - trend (computation time ~10min)
-roms_detrended_yearly = temp_stacked.avg_temp - y_fit_da #shape (14600, 231, 1442)
+def define_season_all_years_parallel(ds, max_workers=6):
+    from tqdm.contrib.concurrent import process_map
 
-# -- Unstack time (computation time ~6min)
-detrended_unstacked = roms_detrended_yearly.unstack("time").transpose("year", "days", "eta_rho", "xi_rho") #shape(40, 365, 231, 1442)
+    all_years = ds['years'].values
+    all_years = [int(y) for y in all_years if (y + 1) in all_years]
 
+    # Pre-slice only needed years
+    ds_by_year = {int(y): ds.sel(years=y) for y in all_years + [all_years[-1] + 1]}
 
-# -- Select only growth season
-jan_april_detrend = detrended_unstacked.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119: 120days) - last idx excluded
-jan_april_detrend.coords['days'] = jan_april_detrend.coords['days'] #keep info on day
-nov_dec_detrend = detrended_unstacked.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364: 61days) - last idx excluded
-nov_dec_detrend.coords['days'] = np.arange(304, 365) #keep info on day
-detrended_season = xr.concat([nov_dec_detrend, jan_april_detrend], dim="days") #shape: (181, 231, 1442)
+    args = [(ds_by_year[y], ds_by_year[y + 1], y) for y in all_years]
 
-# -- To dataset
-detrended_season_ds = xr.Dataset({"temp_detrend": detrended_season})
-detrended_season_ds["temp_detrend"].attrs["description"] = (
-    "Daily ROMS temperature with linear trend removed at each grid cell. "
-    "Trend estimated using OLS (over daily signal of 40years). "
-)
+    season_list = process_map(extract_one_season_pair, args, max_workers=max_workers, chunksize=1)
 
-# -- Save to file
-detrend_file = os.path.join(path_biomass, f'fake_worlds/trends/temp_detrended.nc')
-if not os.path.exists(detrend_file):
-    detrended_season_ds.to_netcdf(detrend_file)
+    season_list = [s for s in season_list if s is not None]
+    if not season_list:
+        raise ValueError("No valid seasons found.")
 
+    return xr.concat(season_list, dim="season_year", combine_attrs="override")
 
-# # Loop over years and save 
-# for yr in range(39):
-#     print(f'Processing {yr+1980}')
-#     # test
-#     # yr=38
-#     # Extract day
-#     detrended_yr = detrended_unstacked.isel(year=yr)
+detrended_temp_seasons_file = os.path.join(path_biomass, f'fake_worlds/trends/temp_detrended_seasonal.nc')
+if not os.path.exists(detrended_temp_seasons_file):
+    # -- Reconstruct the linear fit using coeffs from linear regression 
+    # Preparing (linear trend fitted on daily data over 40 years - need to reconstruct time to have trend)
+    n_years = temp_avg_100m_SO_allyrs.sizes["year"]
+    n_days_per_year = temp_avg_100m_SO_allyrs.sizes["days"]
+    total_days = n_years * n_days_per_year
+    t_cont = np.arange(total_days) / 365.0  # fractional years
+    t_da = xr.DataArray(t_cont, dims=["time"], coords={"time": np.arange(total_days)})
 
-#     # -- Select only growth season
-#     jan_april_detrend = detrended_yr.sel(days=slice(0, 119)) # 1 Jan to 30 April (Day 0-119: 120days) - last idx excluded
-#     jan_april_detrend.coords['days'] = jan_april_detrend.coords['days'] #keep info on day
-#     nov_dec_detrend = detrended_yr.sel(days=slice(304, 364)) # 1 Nov to 31 Dec (Day 304–364: 61days) - last idx excluded
-#     nov_dec_detrend.coords['days'] = np.arange(304, 365) #keep info on day
-#     detrended_yr_season = xr.concat([nov_dec_detrend, jan_april_detrend], dim="days") #shape: (181, 231, 1442)
+    intercept = trends_100mavg_ds.intercept
+    slope = trends_100mavg_ds.slope
+    slope_exp = slope.expand_dims({"time": total_days}).transpose("time", "eta_rho", "xi_rho") 
+    intercept_exp = intercept.expand_dims({"time": total_days}).transpose("time", "eta_rho", "xi_rho")
 
-#     # -- To dataset
-#     detrended_yr_season_ds = xr.Dataset({"temp_detrend": detrended_yr_season})
-#     detrended_yr_season_ds["temp_detrend"].attrs["description"] = (
-#         "Daily ROMS temperature with linear trend removed at each grid cell. "
-#         "Trend estimated using OLS (over daily signal of 40years). "
-#     )
+    # Linear trend (computation time ~10min)
+    y_fit_daily = slope_exp * t_da + intercept_exp #shape (14600, 231, 1442)
+    y_fit_da = xr.DataArray(y_fit_daily, dims=temp_stacked.avg_temp.dims, coords=temp_stacked.avg_temp.coords)
 
-#     # -- Save to file
-#     detrend_file = os.path.join(path_biomass, f'fake_worlds/trends/temp_detrend_{yr+1980}.nc')
-#     if not os.path.exists(detrend_file):
-#         detrended_yr_season_ds.to_netcdf(detrend_file)
+    # -- Detrend signal: roms - trend (computation time ~10min)
+    roms_detrended_yearly = temp_stacked.avg_temp - y_fit_da #shape (14600, 231, 1442)
 
+    # -- Unstack time (computation time ~6min)
+    detrended_unstacked = roms_detrended_yearly.unstack("time").transpose("year", "days", "eta_rho", "xi_rho") #shape(40, 365, 231, 1442)
 
+    # -- Select only growth season
+    detrended_unstacked = detrended_unstacked.rename({'year':'years'})
+    temp_detrended_seasons = define_season_all_years_parallel(detrended_unstacked, max_workers=6)
+    
+    # -- To dataset
+    temp_detrended_seasons = temp_detrended_seasons.rename({'season_year': 'season_year_temp'})
+    temp_detrended_seasons = temp_detrended_seasons.drop_vars('years')
+    temp_detrended_seasons = temp_detrended_seasons.rename({'season_year_temp': 'years'})
+    temp_detrended_seasons.attrs['description'] = ("Daily ROMS temperature with linear trend removed at each grid cell. "
+                                                    "Trend estimated using OLS (over daily signal of 40years)."
+                                                    "Temporal extent: Growth season (Nov 1 – Apr 30)")
+    temp_detrended_seasons_ds = temp_detrended_seasons.to_dataset(name="avg_temp") #to dataset
+    
+    # -- Save to file
+    temp_detrended_seasons_ds.to_netcdf(detrended_temp_seasons_file)
+else:
+    temp_detrended_seasons_ds = xr.open_dataset(detrended_temp_seasons_file) 
 
 
 # %% ======================== Visualisation ========================
 eta_choice = 200
-xi_choice = 1100
-lat = temp_avg_100m_SO_allyrs.isel(eta_rho=eta_choice, xi_rho=xi_choice).lat_rho.values
-lon = temp_avg_100m_SO_allyrs.isel(eta_rho=eta_choice, xi_rho=xi_choice).lon_rho.values
+xi_choice = 1100#800
+lat = temp_detrended_seasons_ds.isel(eta_rho=eta_choice, xi_rho=xi_choice).lat_rho.values
+lon = temp_detrended_seasons_ds.isel(eta_rho=eta_choice, xi_rho=xi_choice).lon_rho.values
 
 # ------------------ Time Series daily ------------------
 # === ROMS time series ===
@@ -574,60 +582,3 @@ plt.yticks(fontsize=14)
 plt.xlim(1980-1, 2019+1)
 plt.tight_layout()
 plt.show()
-
-
-
-# %%tes
-
-# -----------------------------
-# Time axis
-# -----------------------------
-nyears = 40
-ndays = nyears * 365
-t_days = np.arange(ndays)
-t_years = t_days / 365.0
-
-# -----------------------------
-# Components
-# -----------------------------
-
-# Mean temperature
-T0 = 1.0  # °C
-
-# Linear trend
-trend = -0.1  # °C / year  (~0.1 °C / decade)
-T_trend = trend * t_years
-
-# Seasonal cycle
-season_amp = 1.5  # °C
-season = season_amp * np.sin(2 * np.pi * t_days / 365.0)
-
-# Interannual / weather noise
-np.random.seed(42)
-noise = 0.3 * np.random.randn(ndays)
-
-# Total
-T = T0 + T_trend + season + noise
-
-# detrend
-coeffs = np.polyfit(t_years, T, 1)
-print("Recovered trend (°C/yr):", coeffs[0])
-print("Expected trend (°C/yr):", trend)
-T_fit = coeffs[0] * t_years + coeffs[1]
-T_detrended = T - T_fit + T_fit[0]
-
-plt.figure(figsize=(12, 4))
-plt.plot(t_years, T, color="0.6", linewidth=0.5, label="Daily temperature")
-plt.plot(t_years, T0 + T_trend, color="red", linewidth=2, label="Linear trend")
-plt.plot(t_years, T_detrended, color="green", linewidth=0.5, label="Linear trend")
-
-plt.xlabel("Time (years)")
-plt.ylabel("Temperature (°C)")
-plt.title("Synthetic temperature time series with seasonality and warming")
-plt.legend()
-plt.grid(alpha=0.3)
-plt.tight_layout()
-plt.show()
-
-
-# %%
