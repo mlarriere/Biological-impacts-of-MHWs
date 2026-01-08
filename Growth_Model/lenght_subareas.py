@@ -374,7 +374,7 @@ mhw_north_box = subset_spatial_domain(mhw_duration_seasonal, lat_range=lat_range
 # %% ==================== Mean Temperature =====================
 selected_years = [1989, 2000, 2016]
 selected_years_idx = np.array(selected_years) - 1980  # [9, 20, 36]
-year_idx = selected_years_idx[1]
+year_idx = selected_years_idx[2]
 
 # --- North extent
 temp_north_avg = temp_north.isel(years=year_idx).mean(dim=['eta_rho', 'xi_rho']) #shape (181,)
@@ -539,15 +539,15 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"mhws_subarea_North_{year_idx+1980}_{plot}.pdf"
-    plt.savefig(os.path.join(outdir, outfile), dpi=50, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(outdir, outfile), dpi=50, format='pdf', bbox_inches='tight')
+    plt.show()
 else:    
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
 
 
 # %% ================ LENGTH ================
-from Growth_Model.growth_model import length_Atkison2006  
+from Growth_Model.Atkinson2006_model import length_Atkison2006  
 # == Climatological Drivers -> Mean Chla and T°C  (days, eta, xi)
 temp_clim_atl = temp_north.isel(years=slice(0,30)) #shape: (30, 181, 231, 360)
 temp_clim_atl_mean = temp_clim_atl.mean(dim=['years']) #shape: (181, 231, 360)
@@ -555,19 +555,23 @@ chla_clim_atl = chla_north.isel(years=slice(0,30))
 chla_clim_atl_mean = chla_clim_atl.mean(dim=['years'])
 
 # == Climatological Length
-climatological_length_north = length_Atkison2006(chla=chla_clim_atl_mean.chla, temp=temp_clim_atl_mean.avg_temp, initial_length=35, intermoult_period=10)
+climatological_length_north = length_Atkison2006(chla=chla_clim_atl_mean.chla, temp=temp_clim_atl_mean.avg_temp, initial_length=35, maturity_stage='mature')
+# climatological_length_north = length_Atkison2006(chla=chla_clim_atl_mean.chla, temp=temp_clim_atl_mean.avg_temp, initial_length=35, intermoult_period=5)
 climatological_length_north_mean = climatological_length_north.mean(dim=['eta_rho', 'xi_rho'])
 
 # == Length for north area
 length_north = length_Atkison2006(chla=chla_north.chla.isel(years=year_idx), 
                                    temp=temp_north.avg_temp.isel(years=year_idx), 
-                                   initial_length=35, intermoult_period=10)
+                                   initial_length=35, maturity_stage='mature')
+# length_north = length_Atkison2006(chla=chla_north.chla.isel(years=year_idx), 
+#                                    temp=temp_north.avg_temp.isel(years=year_idx), 
+#                                    initial_length=35, intermoult_period=10)
 length_north_mean = length_north.mean(dim=['eta_rho', 'xi_rho'])
 
 # %% ========== Plot area with final lentgh ==========
 from matplotlib.colors import LinearSegmentedColormap
 # === Layout config ===
-plot = 'report'  # 'report' or 'slides'
+plot = 'slides'  # 'report' or 'slides'
 
 if plot == 'report':
     fig_width = 6.3228348611 / 3  # half-column width in inches
@@ -646,8 +650,8 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"maplength_subarea_North_{year_idx+1980}_{plot}.pdf"
-    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
 else:    
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
@@ -768,8 +772,8 @@ ax3.plot(days_xaxis, climatological_length_north_mean, color='#365896', linewidt
 ax3.set_ylabel("Length [mm]", **label_kwargs)
 ax3.set_xlabel('')  # hide x-axis label since it's shared
 ytick_start = int(np.ceil(length_north_mean.max().item()))
-ytick_end = int(np.floor(length_north_mean.min().item())) - 1
-ax3.set_yticks(np.arange(ytick_start, ytick_end, -1))
+ytick_end = int(np.floor(climatological_length_north_mean.min().item())) - 1
+ax3.set_yticks(np.arange(ytick_start, ytick_end, -2))
 ax3.tick_params(axis='x', labelbottom=False, length=1, width=0.5)
 ax3.tick_params(axis='y', length=2, width=0.5)
 ax3.tick_params(**{k: v for k, v in tick_kwargs.items() if k not in ['length', 'width']})
@@ -850,8 +854,8 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"combined_4plots_subarea_North_{year_idx+1980}_{plot}.pdf"
-    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
 
 else:
     plt.show()
@@ -1146,7 +1150,7 @@ else:
 
 
 # %% ================ LENGTH ================
-from Growth_Model.growth_model import length_Atkison2006  
+from Growth_Model.Atkinson2006_model import length_Atkison2006  
 
 # == Climatological Drivers
 temp_clim_peninsula = temp_peninsula_tilted.isel(years=slice(0,30)) #shape: (30, 181, 231, 360)
@@ -1157,13 +1161,19 @@ chla_clim_peninsula_mean = chla_clim_peninsula.mean(dim=['years'])
 # == Climatological Length
 climatological_length_peninsula = length_Atkison2006(chla=chla_clim_peninsula_mean.chla, 
                                                      temp=temp_clim_peninsula_mean.avg_temp, 
-                                                     initial_length=35, intermoult_period=10)
+                                                     initial_length=35, maturity_stage='mature')
+# climatological_length_peninsula = length_Atkison2006(chla=chla_clim_peninsula_mean.chla, 
+                                                    #  temp=temp_clim_peninsula_mean.avg_temp, 
+                                                    #  initial_length=35, intermoult_period=10)
 climatological_length_peninsula_mean = climatological_length_peninsula.mean(dim=['eta_rho', 'xi_rho'])
 
 # == Length for Peninsula area
 length_peninsula = length_Atkison2006(chla=chla_peninsula_tilted.chla.isel(years=year_idx),
                                       temp=temp_peninsula_tilted.avg_temp.isel(years=year_idx),
-                                      initial_length=35, intermoult_period=10)
+                                      initial_length=35, maturity_stage='mature')
+# length_peninsula = length_Atkison2006(chla=chla_peninsula_tilted.chla.isel(years=year_idx),
+#                                       temp=temp_peninsula_tilted.avg_temp.isel(years=year_idx),
+#                                       initial_length=35, intermoult_period=10)
 length_peninsula_mean = length_peninsula.mean(dim=['eta_rho', 'xi_rho'])
 
 # %% ========== Plot area with final lentgh ==========
@@ -1413,7 +1423,7 @@ ax3.plot(days_xaxis, climatological_length_peninsula_mean, color='#365896', line
 
 ax3.set_ylabel("Length [mm]", **label_kwargs)
 ax3.set_xlabel('')  # hide x-axis label since it's shared
-ax3.set_yticks([35, 36, 37])
+# ax3.set_yticks([35, 36, 37])
 ax3.tick_params(axis='x', labelbottom=False, length=1, width=0.5)
 ax3.tick_params(axis='y', length=2, width=0.5)
 ax3.tick_params(**{k: v for k, v in tick_kwargs.items() if k not in ['length', 'width']})
@@ -1512,8 +1522,8 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"combined_4plots_subarea_Peninsula_{year_idx+1980}_{plot}.pdf"
-    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
 
 else:
     plt.show()
@@ -1522,7 +1532,7 @@ else:
 
 # %% # %%  ================================================ Plot BOTH areas ================================================
 # === Layout config ===
-plot = 'report'  # 'report' or 'slides'
+plot = 'slides'  # 'report' or 'slides'
 
 if plot == 'report':
     fig_width = 6.3228348611 
@@ -1623,8 +1633,8 @@ if plot == 'report':
     outdir = os.path.join(os.getcwd(), 'Growth_Model/figures_outputs/SubAreas/')
     os.makedirs(outdir, exist_ok=True)
     outfile = f"both_areas_{plot}.pdf"
-    plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(outdir, outfile), dpi=300, format='pdf', bbox_inches='tight')
+    plt.show()
 else:    
     # plt.savefig(os.path.join(os.getcwd(), f'Growth_Model/figures_outputs/case_study_AtlanticSector/atlantic_sector{selected_years[yr_chosen]}_{plot}.png'), dpi=500, format='png', bbox_inches='tight')
     plt.show()
