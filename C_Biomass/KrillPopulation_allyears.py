@@ -110,8 +110,6 @@ from B_Growth_Model.Atkinson2006_model import length_Atkinson2006
 
 # --- Parameters
 stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
-# stage_IMP = {'juvenile': 12, 'immature': 24, 'mature': 13, 'gravid': 13} # IMP accorindg to Tarling et al 2006 - graph under 0°C
-# stage_IMP = {'juvenile': 1, 'immature': 1, 'mature': 1, 'gravid': 1} # Remove IMP as temperature dependent (not constant)
 
 def length_to_mass(length_array, p = 10**(-4.19), r=3.89):
     ''' Constants from Atkinson et al (2006)'''
@@ -225,16 +223,16 @@ def save_if_not_exists(ds, filepath, description=None, units=None):
 
 # %%  ================================== Krill Population Southern Ocean ==================================
 path_biomass = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass'
-path_surrogates = os.path.join(path_biomass, f'surrogates')
+path_surrogates_krill = os.path.join(path_biomass, f'surrogates/mass_length')
 
-files = [os.path.join(path_surrogates, "clim_length_stages_SO.nc"),
-         os.path.join(path_surrogates, "clim_mass_stages_SO.nc"),
-         os.path.join(path_surrogates, "actual_length_stages_SO.nc"),
-         os.path.join(path_surrogates, "actual_mass_stages_SO.nc"),
-         os.path.join(path_surrogates, "noMHWs_length_stages_SO.nc"),
-         os.path.join(path_surrogates, "noMHWs_mass_stages_SO.nc"),
-         os.path.join(path_surrogates, "warming_length_stages_SO.nc"),
-         os.path.join(path_surrogates, "warming_mass_stages_SO.nc"),]
+files = [os.path.join(path_surrogates_krill, "clim_length_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "clim_mass_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "actual_length_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "actual_mass_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "noMHWs_length_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "noMHWs_mass_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "warming_length_stages_SO.nc"),
+         os.path.join(path_surrogates_krill, "warming_mass_stages_SO.nc"),]
 
 # Run only if files don't exist
 if all(os.path.exists(f) for f in files):
