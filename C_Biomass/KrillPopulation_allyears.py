@@ -95,7 +95,7 @@ chla_clim_mean = chla_clim.mean(dim=['years'])
 
 
 # ==== Detrended signal
-detrended_temp_seasons_file = os.path.join(path_biomass, f'fake_worlds/trends/temp_detrended_seasonal.nc')
+detrended_temp_seasons_file = os.path.join(path_biomass, f'surrogates/detrended_signal/temp_detrended_seasonal.nc')
 detrended_temp = xr.open_dataset(detrended_temp_seasons_file) #shape (40, 181, 231, 1442)
 
 
