@@ -36,14 +36,14 @@ from tqdm.contrib.concurrent import process_map
 
 from joblib import Parallel, delayed
 
-#%% Server 
+#%% -------------------------------- Server --------------------------------
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 gc.collect()
 print(f"Memory used: {psutil.virtual_memory().percent}%")
 
-# %% Figure settings
+# %% -------------------------------- Figure settings --------------------------------
 import matplotlib as mpl
 mpl.rcParams.update({
     "text.usetex": True,
@@ -68,10 +68,6 @@ ds_roms = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/o
 roms_bathymetry = xr.open_dataset('/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/SO_d025_avg_daily_1979.nc').h
 z_rho = np.load('/home/jwongmeng/work/ROMS/scripts/coords/z_rho.npy')
 
-path_temp = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corrected/eta_chunk/' # drift and bias corrected temperature files
-var = 'temp' #variable of interest
-file_var = 'temp_DC_BC_'
-
 path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_duration = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/mhw_durations'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth'
@@ -81,32 +77,13 @@ path_chla = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/z_TO
 path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
 path_growth = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model'
 path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
+path_biomass = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass'
 
-# Sizes and dimensions
-years = range(1980, 2020)
-nyears = np.size(years)
-months = range(1, 13)
-days = range(0, 365)
-ndays = np.size(days)
-nz = 35  # depths levels
-neta = 434 # lat
-nxi = 1442  # lon
+# %% ====================== Biomass data ======================
+# --- Load biomass from CEPHALOPOD
+# 5 different algorithms, 10 bootstraps per algo
+biomass_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_tot_krill_WOA_2026-01-12 17:27:04.013515/Euphausiacea/tot_krill_biomass.nc') #shape (coords, model, time) = (d1=64800, d2=5*10,  d3=12)
 
-# -- Define Thresholds
-absolute_thresholds = [1, 2, 3, 4] # Fixed absolute threshold
-percentile = 90 
-
-# Handling time
-from datetime import datetime, timedelta
-base_year = 2021  #non-leap year 
-doy_list = list(range(304, 364)) + list(range(0, 121)) #181
-date_list = [(doy, (datetime(base_year, 1, 1) + timedelta(days=doy - 1)).strftime('%b %d')) for doy in doy_list]
-date_dict = dict(date_list)
-
-
-# %% ====================== Load Biomass data ======================
-# --- Biomass
-biomass_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_krill_SO_2025-11-21 16:44:03.790757/236217/euphausia_biomass.nc') #shape (bootstrap=10, northing=64800, time=12)
 
 # --- Reformatting
 nlat, nlon = 180, 360
@@ -114,13 +91,10 @@ lat = np.linspace(-89.5, 89.5, nlat)
 lon = np.linspace(-179.5, 179.5, nlon)
 
 # Raw data
-arr = biomass_data.euphausia_biomass.values  # shape: (bootstrap=10, northing=64800, time=12)
-
-# Transpose to (months, bootstrap, northing)
-arr = arr.transpose(2, 0, 1)  # (12, 10, 64800)
+arr = biomass_data.y_ens.values  # shape: (12, 50, 64800)
 
 # Reshape northing into (lat, lon)
-arr = arr.reshape(12, 10, 180, 360)  # (months, bootstrap, lat, lon)
+arr = arr.reshape(12, 50, 180, 360)  # (months, bootstrap, lat, lon)
 
 # Flip latitude (before it was going from -90 to 90, i.e. from south pole to north pole)
 arr_global = arr[:, :, ::-1, :]  # flip along lat axis
@@ -128,9 +102,9 @@ lat_flipped = lat[::-1]
 
 # Create new Dataset
 biomass_cephalopod = xr.Dataset(
-    data_vars=dict(euphausia_biomass=(["months", "bootstrap", "lat", "lon"], arr_global)), 
+    data_vars=dict(total_krill_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_global)), 
     coords=dict(months=np.arange(1, 13),
-                bootstrap=np.arange(1, 11),
+                algo_bootstrap=np.arange(1, 51),
                 lat=lat_flipped, lon=lon),
     attrs=biomass_data.attrs)
 
@@ -140,14 +114,14 @@ biomass_cephalopod.attrs.update({
     "model_resolution": "1 degree",
     "model_extent": "global",
     "model_inputs": "WOA",
-    "ensemble_member_selection": "RF and SVM",
+    "units":"mg C m-3",
+    "main_predictors": "1. Silicates (correlated with nutrients),\n2. Oxygen (correlated with temperature),\n3. Salinity,\n4. Chla (correlated with PP)",
+    "ensemble_members": "5 models out of 6: GLM, MLP, GAM, SWM, RF. Not passing: BRT.",
     "note": "Under assumption that krill spend most of their time in the 0-100m, all observations are integrated (median concentration on depth)."
 })
 
 # -- Select only the Southern Ocean (south of 60°S)
-arr = biomass_data.euphausia_biomass.values.transpose(2, 0, 1).reshape(12, 10, 180, 360)
 lat = np.linspace(89.5, -89.5, 180)  # north → south
-
 lat_mask = lat <= -60
 arr_60S = arr[:, :, lat_mask, :]
 lat_60S = lat[lat_mask]  # lat_60S: -60.5 → -89.5 (north → south)
@@ -156,156 +130,134 @@ arr_60S_flipped = arr_60S[:, :, ::-1, :]
 lat_60S_flipped = lat_60S[::-1]  # now first row = south pole
 
 biomass_cephalopod_60S = xr.Dataset(
-    data_vars=dict(euphausia_biomass=(["months", "bootstrap", "lat", "lon"], arr_60S_flipped)),
+    data_vars=dict(total_krill_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped)),
     coords=dict(
         months=np.arange(1, 13),
-        bootstrap=np.arange(1, 11),
+        algo_bootstrap=np.arange(1, 51),
         lat=lat_60S_flipped,
         lon=np.linspace(-179.5, 179.5, 360)
     )
 )
-# Save 
-output_path = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass/CEPHALOPOD/1st_run/euphausia_output/'
-output_file_biomass = os.path.join(output_path, "euphausia_biomass_SO.nc")
-if not os.path.exists(output_file_biomass):
-    biomass_cephalopod_60S.to_netcdf(output_file_biomass, engine="netcdf4")
 
-# %% ====================== Plot ======================
-ds_1d = biomass_cephalopod_60S.euphausia_biomass.isel(months=10, bootstrap=8)
-data = ds_1d.values
-lat = ds_1d.lat.values
-lon = ds_1d.lon.values
+# -- Euphausia superba biomass
+# Euphausia = 80% of total krill
+biomass_cephalopod_60S_euphausia = xr.Dataset(
+    data_vars=dict(euphausia_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped * 0.8)),
+    coords=dict(
+        months=np.arange(1, 13),
+        algo_bootstrap=np.arange(1, 51),
+        lat=lat_60S_flipped,
+        lon=np.linspace(-179.5, 179.5, 360)
+    )
+)
 
-# Meshgrid
+# -- Save 
+path_cephalopod = os.path.join(path_biomass, 'CEPHALOPOD')
+output_file_biomass_tot_krill = os.path.join(path_cephalopod, "total_krill_biomass_SO.nc")
+if not os.path.exists(output_file_biomass_tot_krill):
+    biomass_cephalopod_60S.to_netcdf(output_file_biomass_tot_krill, engine="netcdf4")
+
+output_file_biomass_euphausia = os.path.join(path_cephalopod, "euphausia_biomass_SO.nc")
+if not os.path.exists(output_file_biomass_euphausia):
+    biomass_cephalopod_60S_euphausia.to_netcdf(output_file_biomass_euphausia, engine="netcdf4")
+
+# %% ====================== Visualization ======================
+from matplotlib.colors import LinearSegmentedColormap
+
+# ===== Median over bootstraps and models =====
+biomass_med_ensemble = biomass_cephalopod_60S_euphausia.euphausia_biomass.median(dim=["algo_bootstrap"], skipna=True)
+
+# ===== Month selection =====
+growth_season_plot = True #False
+
+if growth_season_plot:
+    months_sel = [10, 11, 0, 1, 2, 3]
+    month_labels = ["Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]
+else:
+    months_sel = [10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8]
+    month_labels = ["Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"]
+
+nplots = len(months_sel)
+
+# ===== Coordinates =====
+lat = biomass_med_ensemble.lat.values
+lon = biomass_med_ensemble.lon.values
 lon2d, lat2d = np.meshgrid(lon, lat)
 
-# Colorbar (using quantile)
-vmin, vmax = np.nanquantile(data, [0.05, 0.95])  # 5th and 95th percentiles
+# ===== Custom colormap =====
+vmax = np.nanpercentile(biomass_med_ensemble, 95)
+norm = mcolors.Normalize(vmin=0, vmax=vmax)
 
-# Figure
-fig = plt.figure(figsize=(5, 5))
-ax = plt.axes(projection=ccrs.SouthPolarStereo())
+# ===== Figure layout =====
+ncols = 3
+nrows = int(np.ceil(nplots / ncols))
+fig, axes = plt.subplots(nrows, ncols, figsize=(3.8 * ncols, 3.2 * nrows), subplot_kw=dict(projection=ccrs.SouthPolarStereo()))
+fig.subplots_adjust(left=0.04, right=0.88, bottom=0.06, top=0.92, wspace=0.05, hspace=0.08)
+axes = np.atleast_1d(axes).flatten()
 
-# Circular boundary
+# ===== Circular boundary =====
 theta = np.linspace(0, 2 * np.pi, 200)
 verts = np.vstack([np.sin(theta), np.cos(theta)]).T
 circle = mpath.Path(verts * 0.5 + 0.5)
-ax.set_boundary(circle, transform=ax.transAxes)
 
-ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
-ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+# ===== Plot loop =====
+for i, (m, label) in enumerate(zip(months_sel, month_labels)):
+    ax = axes[i]
 
-# Plot data
-pcm = ax.pcolormesh(lon2d, lat2d, data, transform=ccrs.PlateCarree(),
-                    cmap='coolwarm', vmin= vmin, vmax = vmax, shading='auto')
-cbar = plt.colorbar(pcm, ax=ax, orientation='vertical', shrink=0.7, pad=0.05, extend='both')
-cbar.set_label('Biomass')
+    data = biomass_med_ensemble.isel(months=m).values
 
-# Gridlines
-gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.7, linestyle='--', linewidth=0.4, zorder=7)
-gl.xlabels_top = False
-gl.ylabels_right = False
-gl.xlabel_style = {'rotation': 0}
-gl.ylabel_style = {'rotation': 0}
+    ax.set_boundary(circle, transform=ax.transAxes)
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
-ax.set_title(f"Euphausia superba biomass\nMonth: {int(ds_1d.months.values)}, Bootstrap: {int(ds_1d.bootstrap.values)}", fontsize=14)
+    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
 
-plt.tight_layout()
+    pcm = ax.pcolormesh(lon2d, lat2d, data, transform=ccrs.PlateCarree(),
+                        cmap='inferno', norm=norm, shading="auto")
+
+    # Gridlines
+    if i == 0:
+        gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+        gl.xlabels_top = False
+        gl.ylabels_right = False
+        gl.xlabel_style = {'size': 7, 'rotation': 0}
+        gl.ylabel_style = {'size': 7, 'rotation': 0}
+    else:
+        ax.gridlines(draw_labels=False, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+
+    ax.set_title(label, fontsize=11)
+
+# ===== Remove unused axes =====
+for ax in axes[nplots:]:
+    ax.remove()
+
+# ===== Shared colorbar & title =====
+cbar = fig.colorbar(pcm, ax=axes[:nplots], orientation="vertical", shrink=0.8, pad=0.05, extend="max")
+cbar.set_label("Biomass [mg C m$^{-3}$]", fontsize=14)
+cbar.ax.tick_params(labelsize=12)
+
+fig.suptitle("Euphausia superba biomass\nMedian over algorithms and bootstraps", fontsize=16, y=1.02, x=0.4)
 plt.show()
+
 
 
 # %% ====================== Initial Biomass ======================
 # Biomass in November = Initial Biomass (growth season)
-biomass_nov = biomass_cephalopod_60S.euphausia_biomass.isel(months=10)
+biomass_nov = biomass_cephalopod_60S_euphausia.euphausia_biomass.isel(months=10)
 
-# Mean over all bootstraps
-mean_biomass_nov = biomass_cephalopod_60S.euphausia_biomass.mean(dim='bootstrap')
-std_biomass_nov = biomass_nov.std(dim='bootstrap')
-
-# %% ====================== Load abundance data ======================
-# --- Load
-abundance_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_krill_SO_2025-11-21 16:44:03.790757/236217/euphausia_abundance.nc') #shape (bootstrap=10, northing=64800, time=12)
-
-# --- Reformatting
-nlat, nlon = 180, 360
-lat = np.linspace(-89.5, 89.5, nlat)
-lon = np.linspace(-179.5, 179.5, nlon)
-
-# Raw data
-arr = abundance_data.euphausia_abundance.values  # shape: (bootstrap=10, northing=64800, time=12)
-
-# Transpose to (months, bootstrap, northing)
-arr = arr.transpose(2, 0, 1)  # (12, 10, 64800)
-
-# Reshape northing into (lat, lon)
-arr = arr.reshape(12, 10, 180, 360)  # (months, bootstrap, lat, lon)
-
-# Flip latitude (before it was going from -90 to 90, i.e. from south pole to north pole)
-arr_global = arr[:, :, ::-1, :]  # flip along lat axis
-lat_flipped = lat[::-1]
-
-# Create new Dataset
-abundance_cephalopod = xr.Dataset(
-    data_vars=dict(euphausia_abundance=(["months", "bootstrap", "lat", "lon"], arr_global)), 
-    coords=dict(months=np.arange(1, 13),
-                bootstrap=np.arange(1, 11),
-                lat=lat_flipped, lon=lon),
-    attrs=abundance_data.attrs)
-
-# Add info in attributed
-abundance_cephalopod.attrs.update({
-    "model_name": "Cephalopod",
-    "model_resolution": "1 degree",
-    "model_extent": "global",
-    "model_inputs": "WOA",
-    "ensemble_member_selection": "RF and SVM",
-    "note": "Under assumption that krill spend most of their time in the 0-100m, all observations are integrated (median concentration on depth)."
-})
-
-# -- Select only the Southern Ocean (south of 60°S)
-arr = abundance_data.euphausia_abundance.values.transpose(2, 0, 1).reshape(12, 10, 180, 360)
-lat = np.linspace(89.5, -89.5, 180)  # north → south
-
-lat_mask = lat <= -60
-arr_60S = arr[:, :, lat_mask, :]
-lat_60S = lat[lat_mask]  # lat_60S: -60.5 → -89.5 (north → south)
-
-arr_60S_flipped = arr_60S[:, :, ::-1, :]
-lat_60S_flipped = lat_60S[::-1]  # now first row = south pole
-
-abundance_cephalopod_60S = xr.Dataset(
-    data_vars=dict(euphausia_abundance=(["months", "bootstrap", "lat", "lon"], arr_60S_flipped)),
-    coords=dict(
-        months=np.arange(1, 13),
-        bootstrap=np.arange(1, 11),
-        lat=lat_60S_flipped,
-        lon=np.linspace(-179.5, 179.5, 360)
-    )
-)
-
-# Save 
-output_path = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass/CEPHALOPOD/1st_run/euphausia_output/'
-output_file_abundance = os.path.join(output_path, "euphausia_abundance_SO.nc")
-if not os.path.exists(output_file_abundance):
-    abundance_cephalopod_60S.to_netcdf(output_file_abundance, engine="netcdf4")
+# # Mean over all bootstraps
+# mean_biomass_nov = biomass_cephalopod_60S.euphausia_biomass.mean(dim='bootstrap')
+# std_biomass_nov = biomass_nov.std(dim='bootstrap')
 
 # %% ====================== Regridding Biomass and Abundance to ROMS grid ======================
 import xesmf as xe
+output_file_biomass_regrid= os.path.join(path_cephalopod, "euphausia_biomass_SO_regridded.nc")
 
-# Run only if file don't exist already
-output_file_regrid = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass/CEPHALOPOD/1st_run/euphausia_output/regridded_outputs'
-output_file_abundance_regridd= os.path.join(output_file_regrid, "euphausia_abundance_SO_regridded.nc")
-output_file_biomass_regridd= os.path.join(output_file_regrid, "euphausia_biomass_SO_regridded.nc")
-
-if not (os.path.exists(output_file_abundance_regridd) and os.path.exists(output_file_biomass_regridd)):
+if not os.path.exists(output_file_biomass_regrid):
     
     # -- Load dataset with correct grid
     area_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc')['area'].isel(z_t=0)
     area_SO = area_roms.where(area_roms['lat_rho'] <= -60, drop=True) #shape (231, 1442)
-
-    # Select bootstrap
-    # abundance_SO_1bootstrap = abundance_cephalopod_60S.isel(bootstrap=0)
 
     # -- From monthly to daily dataset
     # Repeat monthly value for each day of the month
@@ -313,36 +265,30 @@ if not (os.path.exists(output_file_abundance_regridd) and os.path.exists(output_
     day_index = np.concatenate([np.repeat(month, days_in_month[month-1]) for month in range(1, 13)])
     assert day_index.shape[0] == 365
     day_index_xr = xr.DataArray(day_index, dims="days", name="month")
-    abundance_daily = abundance_cephalopod_60S.sel(months=day_index_xr) #shape: (365, 10, 30, 360)
-    biomass_daily = biomass_cephalopod_60S.sel(months=day_index_xr) #shape: (365, 10, 30, 360)
+    biomass_daily = biomass_cephalopod_60S_euphausia.sel(months=day_index_xr) #shape: (365, 50, 30, 360)
+    
+    # Check if the same 
+    diff = biomass_daily.isel(days=304) - biomass_daily.isel(days=304+14)
+    print(float(diff.euphausia_biomass.max()), float(diff.euphausia_biomass.min()))
 
     # -- Select only austral summer and early spring
-    jan_april_abund = abundance_daily.sel(days=slice(0, 120)) # 1 Jan to 30 April (Day 0-119) - last idx excluded
-    jan_april_abund.coords['days'] = jan_april_abund.coords['days'] #keep info on day
-    nov_dec_abund = abundance_daily.sel(days=slice(304, 366)) # 1 Nov to 31 Dec (Day 304–364) - last idx excluded
-    nov_dec_abund.coords['days'] = np.arange(304, 365) #keep info on day
-
-    abundance_daily_austral = xr.concat([nov_dec_abund, jan_april_abund], dim="days") #shape: (181, 10, 30, 360)
-
     jan_april_biomass = biomass_daily.sel(days=slice(0, 120))
     jan_april_biomass.coords['days'] = jan_april_biomass.coords['days'] 
     nov_dec_biomass = biomass_daily.sel(days=slice(304, 366))
     nov_dec_biomass.coords['days'] = np.arange(304, 365)
-        
-    biomass_daily_austral = xr.concat([nov_dec_biomass, jan_april_biomass], dim="days") #shape: (181, 10, 30, 360)
+    biomass_daily_austral = xr.concat([nov_dec_biomass, jan_april_biomass], dim="days") #shape: (181, 50, 30, 360)
 
     # -- Fix longitudes
     # ROMS (24.125, 383.875) - put to (0, 360)
-    roms_fixed = area_SO.assign_coords(lon_rho=(area_SO.lon_rho % 360))
+    roms_fixed = area_SO.assign_coords(lon_rho=(area_SO.lon_rho % 360)) #min lon_rho = 0.125 
 
     # CEPHALOPOD longitude (-180, 180) - put to (0, 360)
-    abundance_fixed = abundance_daily_austral.assign_coords(lon=((abundance_daily_austral.lon % 360))).sortby("lon")
-    biomass_fixed = biomass_daily_austral.assign_coords(lon=((biomass_daily_austral.lon % 360))).sortby("lon")
+    biomass_fixed = biomass_daily_austral.assign_coords(lon=((biomass_daily_austral.lon % 360))).sortby("lon") #min long = 0.5
 
     # -- Target grids
     in_ds = xr.Dataset(
-        {"lon": (("lon",), abundance_fixed.lon.values),
-        "lat": (("lat",), abundance_fixed.lat.values),})
+        {"lon": (("lon",), biomass_fixed.lon.values),
+        "lat": (("lat",), biomass_fixed.lat.values),})
 
     out_ds = xr.Dataset(
         {"lon": (("eta_rho", "xi_rho"), roms_fixed.lon_rho.values),
@@ -354,258 +300,176 @@ if not (os.path.exists(output_file_abundance_regridd) and os.path.exists(output_
         in_ds,
         out_ds,
         method="bilinear", #weighted avg of the 4 nearest neighbors
-        periodic=True, 
+        periodic=True, # if global grid put periodic=True, otherwise the edges of the grid won’t line up with each other
         extrap_method="nearest_s2d"  # fill edges with nearest valid neighbor (otherwise, invalid data -> since do not have 4 neighbors)
     ) 
-
+    
     # Perform regridding
-    abundance_regridded = regridder(abundance_fixed) #shape (181, 10, 231, 1442)
-    biomass_regridded = regridder(biomass_fixed) #shape (181, 10, 231, 1442)
+    biomass_regridded = regridder(biomass_fixed) #shape (181, 50, 231, 1442)
 
     # -- Add coordinates (lat, lon) from ROMS
-    abundance_regridded = abundance_regridded.assign_coords(
-        lon_rho=(("eta_rho", "xi_rho"), area_SO.lon_rho.values),
-        lat_rho=(("eta_rho", "xi_rho"), area_SO.lat_rho.values))
-    
     biomass_regridded = biomass_regridded.assign_coords(
         lon_rho=(("eta_rho", "xi_rho"), area_SO.lon_rho.values),
         lat_rho=(("eta_rho", "xi_rho"), area_SO.lat_rho.values))
 
+
     # -- Save to file 
-    abundance_regridded.to_netcdf(output_file_abundance_regridd, engine="netcdf4")
-    biomass_regridded.to_netcdf(output_file_biomass_regridd, engine="netcdf4")
+    biomass_regridded.to_netcdf(output_file_biomass_regrid, engine="netcdf4")
 
     # ====================== Plot regridded product ======================
     show_differences=True
 
     if show_differences:
+        # ----------------- Median over bootstrap and models -----------------
+        biomass_before_med = biomass_fixed.euphausia_biomass.isel(days=0).median(dim="algo_bootstrap", skipna=True)
+        biomass_after_med = biomass_regridded.euphausia_biomass.isel(days=0).median(dim="algo_bootstrap", skipna=True)
+
+        # ----------------- Figure -----------------
+        fig, axes = plt.subplots(1, 2, figsize=(9, 7), subplot_kw=dict(projection=ccrs.SouthPolarStereo()))
+        fig.subplots_adjust(left=0.05, right=0.88, bottom=0.06, top=0.92, wspace=0.05)
+        axes = np.atleast_1d(axes).flatten()
 
         # ----------------- Circular boundary -----------------
         theta = np.linspace(0, 2*np.pi, 200)
         verts = np.vstack([np.sin(theta), np.cos(theta)]).T
         circle = mpath.Path(verts * 0.5 + 0.5)
 
-        # ----------------- Figure -----------------
-        fig, axes = plt.subplots(2, 2, figsize=(10, 10), subplot_kw={'projection': ccrs.SouthPolarStereo()})
+        # ----------------- Colorscale -----------------
+        vmax = np.nanpercentile(biomass_before_med, 95)
+        norm = mcolors.Normalize(vmin=0, vmax=vmax)
+        # norm = mcolors.Normalize(*np.nanpercentile(biomass_before_med, [5, 95]))
 
-        # ----------------- Titles -----------------
-        fig.text(0.27, 0.95, "BEFORE regridding (1°)", ha='center', fontsize=18)
-        fig.text(0.73, 0.95, "AFTER regridding (ROMS 0.25°)", ha='center', fontsize=18)
-        fig.text(0.02, 0.72, "Biomass [ind/m²]", va='center', rotation='vertical', fontsize=18)
-        fig.text(0.02, 0.27, "Abundance [ind/m³]", va='center', rotation='vertical', fontsize=18)
-        fig.text(0.5, 0.92, "1st November — Bootstrap N°0", ha='center', fontsize=16)
-
-        # ----------------- Color norms -----------------
-        norm_biomass = mcolors.Normalize(*np.nanpercentile(biomass_daily_austral.euphausia_biomass.isel(days=0, bootstrap=0), [5, 95]))
-        norm_abundance = mcolors.Normalize(*np.nanpercentile(abundance_daily_austral.euphausia_abundance.isel(days=0, bootstrap=0), [5, 95]))
-
-        # ----------------- Helper function -----------------
-        def plot_panel(ax, lon, lat, data, cmap, norm):
+        # ----------------- PLOT LOOP -----------------
+        for i, ax in enumerate(axes):
+            ax.set_extent([0, 360, -90, -60], crs=ccrs.PlateCarree())
             ax.set_boundary(circle, transform=ax.transAxes)
-            ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=2)
+            ax.set_anchor('C')
+
+            ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
             ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
-            ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
-            return ax.pcolormesh(lon, lat, data, cmap=cmap, norm=norm, transform=ccrs.PlateCarree(), zorder=1)
+            # Gridlines
+            gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+            gl.xlabel_style = {'size': 7}
+            gl.ylabel_style = {'size': 7}
 
-        # ----------------- Row 0: Biomass -----------------
-        mesh_biomass_before = plot_panel(axes[0,0],
-                                        biomass_daily_austral.lon,
-                                        biomass_daily_austral.lat,
-                                        biomass_daily_austral.euphausia_biomass.isel(days=0, bootstrap=0),
-                                        cmap='coolwarm', norm=norm_biomass)
-        mesh_biomass_after = plot_panel(axes[0,1],
-                                        biomass_regridded.lon_rho,
-                                        biomass_regridded.lat_rho,
-                                        biomass_regridded.euphausia_biomass.isel(days=0, bootstrap=0),
-                                        cmap='coolwarm', norm=norm_biomass)
+            if i == 0:
+                gl.xlabels_top = False
+                gl.ylabels_right = False
+                data = biomass_before_med
+                lon = biomass_fixed.lon
+                lat = biomass_fixed.lat
+                title = "BEFORE regridding (1°)"
+            else:
+                gl.xlabels_top = False
+                gl.ylabels_left = False
+                gl.ylabels_right = False
+                data = biomass_after_med
+                lon = biomass_regridded.lon_rho
+                lat = biomass_regridded.lat_rho
+                title = "AFTER regridding (ROMS 0.25°)"
 
-        # ----------------- Row 1: Abundance -----------------
-        mesh_abundance_before = plot_panel(axes[1,0],
-                                        abundance_daily_austral.lon,
-                                        abundance_daily_austral.lat,
-                                        abundance_daily_austral.euphausia_abundance.isel(days=0, bootstrap=0),
-                                        cmap='viridis', norm=norm_abundance)
-        mesh_abundance_after = plot_panel(axes[1,1],
-                                        abundance_regridded.lon_rho,
-                                        abundance_regridded.lat_rho,
-                                        abundance_regridded.euphausia_abundance.isel(days=0, bootstrap=0),
-                                        cmap='viridis', norm=norm_abundance)
+            pcm = ax.pcolormesh(lon, lat, data, transform=ccrs.PlateCarree(),
+                                cmap='inferno', norm=norm, shading='auto', zorder=1)
+            ax.set_title(title, fontsize=11)
 
-        # ----------------- Colorbars on the right -----------------
-        cbar_ax_biomass = fig.add_axes([0.93, 0.52, 0.015, 0.35])  # top row
-        cbar = fig.colorbar(mesh_biomass_before, cax=cbar_ax_biomass, orientation='vertical', extend='both')
-        cbar.set_label('[ind/m²]', fontsize=14)
-        cbar.ax.tick_params(labelsize=12)
+        # ----------------- Colorbar -----------------
+        cbar = fig.colorbar(pcm, ax=axes, orientation='vertical', shrink=0.6, pad=0.05, extend='max')
+        cbar.set_label("Biomass [mg C m$^{-3}$]", fontsize=12)
+        cbar.ax.tick_params(labelsize=10)
 
-        cbar_ax_abundance = fig.add_axes([0.93, 0.09, 0.015, 0.35])  # bottom row
-        cbar = fig.colorbar(mesh_abundance_before, cax=cbar_ax_abundance, orientation='vertical', extend='both')
-        cbar.set_label('[ind/m³]', fontsize=14)
-        cbar.ax.tick_params(labelsize=12)
-        
-        # ----------------- Adjust spacing -----------------
-        fig.subplots_adjust(left=0.05, right=0.9, top=0.9, bottom=0.05, hspace=0.1, wspace=0.1)
-
+        # ----------------- Title -----------------
+        fig.suptitle("Euphausia superba biomass\nMedian over algorithms and bootstraps", fontsize=16, y=0.9, x=0.4)
         plt.show()
 
 else:
-    abundance_regridded = xr.open_dataset(output_file_abundance_regridd)
-    biomass_regridded = xr.open_dataset(output_file_biomass_regridd)
+    biomass_regridded = xr.open_dataset(output_file_biomass_regrid)
 
 
 
-# %% ====================== MONTHLY plots ======================
-# Months to plot
-months_idx = [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3]
-month_names = ['May', 'June', 'July', 'August', 
-               'September', 'October', 'November', 
-               'December', 'January', 'February', 
-               'March', 'April']
+# %% ====================== Spread of models ======================
+# --- Prepare data 
+# biomass_spatial_mean = biomass_regridded.euphausia_biomass.mean(dim=("eta_rho", "xi_rho"))  # shape (181, 50)
 
-# Mean across bootstrap
-mean_abundance = abundance_cephalopod_60S.euphausia_abundance.mean(dim='bootstrap')
+# Total Biomass
+layer_thickness = 100 # meters
+total_biomass_mg = (biomass_regridded.euphausia_biomass * roms_fixed).sum(dim=("eta_rho","xi_rho")) * layer_thickness
 
-# Colors Settings
-epsilon = 1e-3
-# log_data_all = [np.log10(mean_abundance.isel(months=m).values + epsilon) for m in months_idx] # Log-transform 
-log_data_all = [mean_abundance.isel(months=m).values for m in months_idx]
-vmin, vmax = np.nanpercentile(np.array(log_data_all), [5, 95])
-norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+# Convert to metric tons
+total_biomass_tons = total_biomass_mg / 1e9
 
-fig, axes = plt.subplots(3, 4, figsize=(15, 10), subplot_kw={'projection': ccrs.SouthPolarStereo()})
-axes = axes.flatten()
+days_in_month = [30, 31, 31, 28, 30, 31]  # Nov, Dec, Jan, Feb, Mar, Apr
+month_labels = ["Nov","Dec","Jan","Feb","Mar","Apr"]
+month_edges = np.cumsum([0]+days_in_month)
 
-for i, ax in enumerate(axes):
-    ds_1d = mean_abundance.isel(months=months_idx[i])
-    # data = np.log10(ds_1d.values + epsilon)
-    data = ds_1d.values
-    lon2d, lat2d = np.meshgrid(ds_1d.lon.values, ds_1d.lat.values)
+# Assign month index to each day
+month_idx = np.zeros(total_biomass_tons.days.size, dtype=int)
+for i in range(len(days_in_month)):
+    start = month_edges[i]
+    end = month_edges[i+1]
+    month_idx[start:end] = i
 
-    # Circular boundary
-    theta = np.linspace(0, 2 * np.pi, 200)
-    verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-    circle = mpath.Path(verts * 0.5 + 0.5)
-    ax.set_boundary(circle, transform=ax.transAxes)
+# --- Compute medians
+n_models = 5
+boot_per_model = 10
+model_colors = ['#F94144', '#F8961E', '#90BE6D', '#9E1A6B', '#277DA1']
 
-    # Base map
-    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+month_violin_data = []        # all bootstraps per month (for violin)
+month_model_medians = []      # list of median per model per month
 
-    # Plot data
-    pcm = ax.pcolormesh(lon2d, lat2d, data, transform=ccrs.PlateCarree(),
-                        cmap='viridis', norm=norm, shading='auto')
+for m in range(len(days_in_month)):
+    days_sel = np.where(month_idx == m)[0]
+    all_bootstraps = []
+    medians = []
+    for model in range(n_models):
+        start = model * boot_per_model
+        end = (model+1) * boot_per_model
+        data = total_biomass_tons.isel(days=days_sel, algo_bootstrap=slice(start, end)).values.flatten()
+        all_bootstraps.extend(data)
+        medians.append(np.median(data))
+    month_violin_data.append(all_bootstraps)
+    month_model_medians.append(medians)
 
-    # Gridlines
-    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.7,
-                      linestyle='--', linewidth=0.4, zorder=7)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
-    gl.xlabel_style = {'rotation': 0}
-    gl.ylabel_style = {'rotation': 0}
+# --- Violin plot 
+fig, ax = plt.subplots(figsize=(8,5))
+vp = ax.violinplot(month_violin_data, showmeans=False, showmedians=True, showextrema=False)
+for pc in vp['bodies']:
+    pc.set_facecolor('lightgray')
+    pc.set_alpha(0.6)
+    pc.set_edgecolor('black')
+if 'cmedians' in vp:
+    vp['cmedians'].set_color('black')
+    vp['cmedians'].set_linewidth(2)
 
-    ax.set_title(f"{month_names[i]}", fontsize=14)
+model_names = ['GLM', 'MLP', 'GAM', 'SVM', 'RF']
+for i, medians in enumerate(month_model_medians):
+    for j, median in enumerate(medians):
+        ax.scatter(i+1, median, color=model_colors[j], s=10, zorder=3, label=model_names[j] if i==0 else "")
 
-# Shared colorbar
-cbar_ax = fig.add_axes([0.92, 0.15, 0.02, 0.7])
-cbar = fig.colorbar(pcm, cax=cbar_ax, extend='both')
-# cbar.set_label('log$_{10}$(Abundance)', fontsize=12)
-cbar.set_label('Abundance [ind/m2]', fontsize=12)
+# Add legend for the ensemble median
+from matplotlib.lines import Line2D
+median_handle = Line2D([0], [0], color='black', lw=2, label='Ensemble')
 
-plt.subplots_adjust(wspace=0.1, hspace=0.25)
-plt.show()
+handles, labels = ax.get_legend_handles_labels()
+handles.append(median_handle)
+labels.append('Ensemble')
 
+# X-axis labels
+ax.set_xticks(range(1, len(month_labels)+1))
+ax.set_xticklabels(month_labels)
 
-# %% ====================== BoxPlots monthly ======================
-# Prepare data
-months_idx = [5, 6, 7, 8, 9, 10, 11, 12, 1, 2, 3, 4]
-month_names = ['May','June','July','August',
-               'September','October','November','December',
-               'January','February','March','April']
+ax.tick_params(axis='both', which='major', labelsize=12)
 
-monthly_data = []
-for m in months_idx:
-    # Select all days that belong to month m
-    da_month = mean_abundance.where(mean_abundance['months'] == m, drop=True)
-    
-    # Flatten daily 2D field → 1D vector of daily values
-    vals = da_month.values.reshape(-1)
-    
-    # Remove NaNs
-    vals = vals[~np.isnan(vals)]
-    
-    monthly_data.append(vals)
+# Labels and title
+ax.set_ylabel("Total Biomass [ton C]", fontsize=12)
+ax.set_xlabel("Months", fontsize=12)
+ax.set_title("Euphausia superba total biomass in the Southern Ocean\nSpread of models and bootstraps per month", fontsize=14)
 
-# ---- Boxplot ----
-plt.figure(figsize=(12, 5))
-plt.boxplot(monthly_data, labels=month_names, showfliers=False)  # hide outliers for cleaner plot
-
-plt.title("Krill abundance distribution - CEPHALOPOD\nSouthern Ocean (south 60°S)", fontsize=16)
-plt.ylabel("Abundance [ind/m2]", fontsize=14)
-plt.xticks(rotation=45, fontsize=12)
+# Legend
+ax.legend(handles=handles, loc='upper center', title="Medians", fontsize=11, ncol=3, title_fontsize=12)
 
 plt.tight_layout()
 plt.show()
 
-
-# %% ====================== Mean Map ======================
-# Months to average (Nov → Apr)
-months_idx = [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3]
-
-# Mean across bootstrap
-mean_abundance = abundance_cephalopod_60S.euphausia_abundance.mean(dim='bootstrap')
-
-# Mean across selected months
-mean_over_months = mean_abundance.isel(months=months_idx).median(dim='months')
-
-# Prepare data
-epsilon = 1e-3
-# data = np.log10(mean_over_months.values + epsilon)
-data = mean_over_months.values
-
-lon2d, lat2d = np.meshgrid(mean_over_months.lon.values,
-                           mean_over_months.lat.values)
-
-# Compute color scale from *all* values
-vmin, vmax = np.nanpercentile(data, [5, 95])
-norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-
-# ---- Plot ----
-fig = plt.figure(figsize=(6, 6))
-ax = plt.axes(projection=ccrs.SouthPolarStereo())
-
-# Circular boundary
-theta = np.linspace(0, 2 * np.pi, 200)
-verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-circle = mpath.Path(verts * 0.5 + 0.5)
-ax.set_boundary(circle, transform=ax.transAxes)
-
-# Map features
-ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
-ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
-# Plot
-pcm = ax.pcolormesh(lon2d, lat2d, data,
-                    transform=ccrs.PlateCarree(),
-                    cmap='viridis', norm=norm,
-                    shading='auto')
-
-# Gridlines
-gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.7,
-                  linestyle='--', linewidth=0.4, zorder=7)
-gl.xlabels_top = False
-gl.ylabels_right = False
-gl.xlabel_style = {'rotation': 0}
-gl.ylabel_style = {'rotation': 0}
-
-ax.set_title("Median Euphausia abundance (Nov–Apr)", fontsize=13)
-
-# Colorbar
-cbar = plt.colorbar(pcm, ax=ax, orientation='vertical', shrink=0.7, pad=0.05, extend='both')
-cbar.set_label('Abundance', fontsize=12)
-
-plt.tight_layout()
-plt.show()
 
 # %%
