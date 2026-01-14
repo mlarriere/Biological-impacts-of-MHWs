@@ -83,7 +83,8 @@ path_biomass = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass'
 # --- Load biomass from CEPHALOPOD
 # 5 different algorithms, 10 bootstraps per algo
 biomass_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_tot_krill_WOA_2026-01-12 17:27:04.013515/Euphausiacea/tot_krill_biomass.nc') #shape (coords, model, time) = (d1=64800, d2=5*10,  d3=12)
-
+print(f'max: {biomass_data.max()} mgC/m3') #7426.0 mgC/m3
+print(f'min: {biomass_data.min()} mgC/m3') #-6.576 mgC/m3
 
 # --- Reformatting
 nlat, nlon = 180, 360
@@ -391,19 +392,33 @@ else:
 # --- Prepare data 
 # biomass_spatial_mean = biomass_regridded.euphausia_biomass.mean(dim=("eta_rho", "xi_rho"))  # shape (181, 50)
 
-# Total Biomass
-layer_thickness = 100 # meters
-total_biomass_mg = (biomass_regridded.euphausia_biomass * roms_fixed).sum(dim=("eta_rho","xi_rho")) * layer_thickness
+# Volume grid cells (ROMS)
+volume_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/volume.nc') #in km3
 
-# Convert to metric tons
-total_biomass_tons = total_biomass_mg / 1e9
+# Mean volume on the first 100m depth
+# volume_roms_surf = volume_roms['volume'].isel(z_rho=0)
+volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho') 
+
+# Mask latitudes south of 60°S
+volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
+print(f'Maximum grid cell volume: {volume_60S_SO_100m.max().values:.3f} km3')
+print(f'Average grid cell volume: {volume_60S_SO_100m.mean().values:.3f} km3')
+print(f'Median grid cell volume: {volume_60S_SO_100m.median().values:.3f} km3')
+print(f'Minimum grid cell volume: {volume_60S_SO_100m.min().values:.3f} km3')
+
+# Total Biomass
+total_biomass_mgC = (biomass_regridded.euphausia_biomass * volume_60S_SO_100m * 1e9).sum(dim=("eta_rho","xi_rho")) #shape: (days:181, algo_bootstrap:50)
+
+# Convert metric 
+total_biomass_tons = total_biomass_mgC / (1e9)
+total_biomass_Mt = total_biomass_mgC / (1e9*1e6)
 
 days_in_month = [30, 31, 31, 28, 30, 31]  # Nov, Dec, Jan, Feb, Mar, Apr
 month_labels = ["Nov","Dec","Jan","Feb","Mar","Apr"]
 month_edges = np.cumsum([0]+days_in_month)
 
 # Assign month index to each day
-month_idx = np.zeros(total_biomass_tons.days.size, dtype=int)
+month_idx = np.zeros(total_biomass_Mt.days.size, dtype=int)
 for i in range(len(days_in_month)):
     start = month_edges[i]
     end = month_edges[i+1]
@@ -424,7 +439,7 @@ for m in range(len(days_in_month)):
     for model in range(n_models):
         start = model * boot_per_model
         end = (model+1) * boot_per_model
-        data = total_biomass_tons.isel(days=days_sel, algo_bootstrap=slice(start, end)).values.flatten()
+        data = total_biomass_Mt.isel(days=days_sel, algo_bootstrap=slice(start, end)).values.flatten()
         all_bootstraps.extend(data)
         medians.append(np.median(data))
     month_violin_data.append(all_bootstraps)
@@ -461,7 +476,7 @@ ax.set_xticklabels(month_labels)
 ax.tick_params(axis='both', which='major', labelsize=12)
 
 # Labels and title
-ax.set_ylabel("Total Biomass [ton C]", fontsize=12)
+ax.set_ylabel("Total Biomass [Mt C]", fontsize=12)
 ax.set_xlabel("Months", fontsize=12)
 ax.set_title("Euphausia superba total biomass in the Southern Ocean\nSpread of models and bootstraps per month", fontsize=14)
 
