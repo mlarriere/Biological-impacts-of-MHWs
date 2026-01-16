@@ -78,8 +78,11 @@ path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
 path_growth = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model'
 path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
 path_biomass = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass'
+path_surrogates = os.path.join(path_biomass, f'surrogates')
+path_masslength = os.path.join(path_surrogates, f'mass_length')
+path_cephalopod = os.path.join(path_biomass, 'CEPHALOPOD')
 
-# %% ====================== Biomass data ======================
+# %% ====================== Prepare biomass data ======================
 # --- Load biomass from CEPHALOPOD
 # 5 different algorithms, 10 bootstraps per algo
 biomass_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_tot_krill_WOA_2026-01-12 17:27:04.013515/Euphausiacea/tot_krill_biomass.nc') #shape (coords, model, time) = (d1=64800, d2=5*10,  d3=12)
@@ -153,7 +156,6 @@ biomass_cephalopod_60S_euphausia = xr.Dataset(
 )
 
 # -- Save 
-path_cephalopod = os.path.join(path_biomass, 'CEPHALOPOD')
 output_file_biomass_tot_krill = os.path.join(path_cephalopod, "total_krill_biomass_SO.nc")
 if not os.path.exists(output_file_biomass_tot_krill):
     biomass_cephalopod_60S.to_netcdf(output_file_biomass_tot_krill, engine="netcdf4")
@@ -161,6 +163,131 @@ if not os.path.exists(output_file_biomass_tot_krill):
 output_file_biomass_euphausia = os.path.join(path_cephalopod, "euphausia_biomass_SO.nc")
 if not os.path.exists(output_file_biomass_euphausia):
     biomass_cephalopod_60S_euphausia.to_netcdf(output_file_biomass_euphausia, engine="netcdf4")
+
+# %% ===================================================
+#       Interpolating NAs values in CEPHALOPOD 
+# ======================================================
+# ---- Test with smaller extent
+biomass_cephalopod_small_extent = biomass_cephalopod_60S_euphausia.isel(months=1,algo_bootstrap=0,lat=slice(25, 30), lon=slice(100,130))
+methods = {
+    "Original": None,
+    "Linear": dict(method="linear"),
+    "Nearest": dict(method="nearest"),
+    "Poly (order=2)": dict(method="polynomial", order=2),
+    "Spline (order=3)": dict(method="spline", order=3),
+}
+
+
+datasets = {}
+for name, kwargs in methods.items():
+    if kwargs is None:
+        datasets[name] = biomass_cephalopod_small_extent
+    else:
+        datasets[name] = biomass_cephalopod_small_extent.interpolate_na(dim="lon", use_coordinate=True, max_gap=10, **kwargs)
+        
+# -- plot the different methods
+fig, axes = plt.subplots(nrows=1, ncols=len(datasets), figsize=(4 * len(datasets), 3), sharey=True)
+vmin = biomass_cephalopod_small_extent.euphausia_biomass.min()
+vmax = biomass_cephalopod_small_extent.euphausia_biomass.max()
+
+for ax, (name, ds) in zip(axes, datasets.items()):
+    pcm = ax.pcolormesh(ds.lon, ds.lat, ds.euphausia_biomass,
+                        shading="nearest", vmin=vmin, vmax=vmax)
+    ax.set_title(name)
+    ax.set_xlabel("Lon")
+
+axes[0].set_ylabel("Lat")
+
+plt.tight_layout()
+plt.show()
+
+
+
+# ---- Detect small NAs patches
+# Interpolation= weighted avg of nighboring values, i.e. neighboring pixels lat and lon
+interp_lon = biomass_cephalopod_small_extent.interpolate_na(dim="lon", method="linear", use_coordinate=True, max_gap=10)
+interp_lat = biomass_cephalopod_small_extent.interpolate_na(dim="lat", method="linear", use_coordinate=True, max_gap=5)
+biomass_interp = xr.where(
+    biomass_cephalopod_small_extent.euphausia_biomass.isnull(),
+    0.5 * (interp_lon.euphausia_biomass + interp_lat.euphausia_biomass),
+    biomass_cephalopod_small_extent.euphausia_biomass
+)
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True)
+
+# Original
+pcm0 = axes[0].pcolormesh(biomass_cephalopod_small_extent.lon, biomass_cephalopod_small_extent.lat,
+                          biomass_cephalopod_small_extent.euphausia_biomass, shading="nearest", cmap="viridis")
+axes[0].set_title("Original")
+axes[0].set_xlabel("Lon")
+axes[0].set_ylabel("Lat")
+
+# Interpolated
+pcm1 = axes[1].pcolormesh(biomass_interp.lon, biomass_interp.lat, biomass_interp, shading="nearest", cmap="viridis")
+axes[1].set_title("Weighted interpolation")
+axes[1].set_xlabel("Lon")
+
+plt.tight_layout()
+plt.show()
+
+# %% =============================== Full Dataset ===============================
+interp_lon = biomass_cephalopod_60S_euphausia.interpolate_na(dim="lon", method="linear", use_coordinate=True, max_gap=10)
+interp_lat = biomass_cephalopod_60S_euphausia.interpolate_na(dim="lat", method="linear", use_coordinate=True, max_gap=5)
+biomass_interp = xr.where(
+    biomass_cephalopod_60S_euphausia.euphausia_biomass.isnull(),
+    0.5 * (interp_lon.euphausia_biomass + interp_lat.euphausia_biomass),
+    biomass_cephalopod_60S_euphausia.euphausia_biomass
+)
+# T Datase
+biomass_interp_ds = biomass_interp.to_dataset(name='euphausia_biomass')
+
+# Add metadata
+biomass_interp_ds.attrs = {"description": "Monthly biomass product with small NaN gaps filled using weighted interpolation along lon and lat.",}
+biomass_interp_ds['euphausia_biomass'].attrs = {"units": "mg C m-3",
+                                                "description": "Monthly biomass interpolated for small NaN gaps (<10° longitude, <5° latitude)",}
+
+output_file_biomass_interpolated = os.path.join(path_cephalopod, "euphausia_biomass_SO_interp.nc")
+if not os.path.exists(output_file_biomass_interpolated):
+    biomass_interp_ds.to_netcdf(output_file_biomass_interpolated, engine="netcdf4")
+
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 4), subplot_kw=dict(projection=ccrs.SouthPolarStereo()), constrained_layout=True)
+
+# ----------------- Circular boundary -----------------
+theta = np.linspace(0, 2*np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+
+# ----------------- Data -----------------
+original_data = biomass_cephalopod_60S_euphausia.isel(months=1, algo_bootstrap=0)
+interp_data = biomass_interp.isel(months=1, algo_bootstrap=0)
+
+# color scale
+vmin = np.nanmin(original_data.euphausia_biomass)
+vmax = np.nanmax(original_data.euphausia_biomass)
+
+for ax, data, title in zip(axes, [original_data.euphausia_biomass, interp_data], ["Original", "Weighted interpolation"]):
+    # Map setup
+    ax.set_extent([0, 360, -90, -60], crs=ccrs.PlateCarree())
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
+
+    gl = ax.gridlines( draw_labels=False, color="gray", alpha=0.6, linestyle="--", linewidth=0.4)
+
+    # Plot
+    pcm = ax.pcolormesh(original_data.lon, original_data.lat, data, 
+                        transform=ccrs.PlateCarree(), shading="nearest", 
+                        cmap="viridis", vmin=vmin, vmax=vmax, zorder=1)
+    ax.set_title(title, fontsize=10)
+
+# Colorbar
+cbar = fig.colorbar(pcm, ax=axes, orientation="vertical", shrink=0.85, pad=0.04)
+cbar.set_label("Biomass [mgC.$m^{-3}$]", fontsize=9)
+plt.show()
+
+
 
 # %% ====================== Visualization ======================
 from matplotlib.colors import LinearSegmentedColormap
@@ -240,16 +367,6 @@ cbar.ax.tick_params(labelsize=12)
 fig.suptitle("Euphausia superba biomass\nMedian over algorithms and bootstraps", fontsize=16, y=1.02, x=0.4)
 plt.show()
 
-
-
-# %% ====================== Initial Biomass ======================
-# Biomass in November = Initial Biomass (growth season)
-biomass_nov = biomass_cephalopod_60S_euphausia.euphausia_biomass.isel(months=10)
-
-# # Mean over all bootstraps
-# mean_biomass_nov = biomass_cephalopod_60S.euphausia_biomass.mean(dim='bootstrap')
-# std_biomass_nov = biomass_nov.std(dim='bootstrap')
-
 # %% ====================== Regridding Biomass and Abundance to ROMS grid ======================
 import xesmf as xe
 output_file_biomass_regrid= os.path.join(path_cephalopod, "euphausia_biomass_SO_regridded.nc")
@@ -266,8 +383,9 @@ if not os.path.exists(output_file_biomass_regrid):
     day_index = np.concatenate([np.repeat(month, days_in_month[month-1]) for month in range(1, 13)])
     assert day_index.shape[0] == 365
     day_index_xr = xr.DataArray(day_index, dims="days", name="month")
-    biomass_daily = biomass_cephalopod_60S_euphausia.sel(months=day_index_xr) #shape: (365, 50, 30, 360)
-    
+    # biomass_daily = biomass_cephalopod_60S_euphausia.sel(months=day_index_xr) #shape: (365, 50, 30, 360)
+    biomass_daily = biomass_interp_ds.sel(months=day_index_xr) #shape: (365, 50, 30, 360)
+
     # Check if the same 
     diff = biomass_daily.isel(days=304) - biomass_daily.isel(days=304+14)
     print(float(diff.euphausia_biomass.max()), float(diff.euphausia_biomass.min()))
@@ -322,8 +440,8 @@ if not os.path.exists(output_file_biomass_regrid):
 
     if show_differences:
         # ----------------- Median over bootstrap and models -----------------
-        biomass_before_med = biomass_fixed.euphausia_biomass.isel(days=0).median(dim="algo_bootstrap", skipna=True)
-        biomass_after_med = biomass_regridded.euphausia_biomass.isel(days=0).median(dim="algo_bootstrap", skipna=True)
+        biomass_before_med = biomass_fixed.euphausia_biomass.isel(days=0).median(dim="algo_bootstrap", skipna=True) #shape (30, 360)
+        biomass_after_med = biomass_regridded.euphausia_biomass.isel(days=0).median(dim="algo_bootstrap", skipna=True) #shape (231, 1442) 
 
         # ----------------- Figure -----------------
         fig, axes = plt.subplots(1, 2, figsize=(9, 7), subplot_kw=dict(projection=ccrs.SouthPolarStereo()))
@@ -386,12 +504,8 @@ if not os.path.exists(output_file_biomass_regrid):
 else:
     biomass_regridded = xr.open_dataset(output_file_biomass_regrid)
 
-
-
 # %% ====================== Spread of models ======================
 # --- Prepare data 
-# biomass_spatial_mean = biomass_regridded.euphausia_biomass.mean(dim=("eta_rho", "xi_rho"))  # shape (181, 50)
-
 # Volume grid cells (ROMS)
 volume_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/volume.nc') #in km3
 
@@ -401,10 +515,10 @@ volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho
 
 # Mask latitudes south of 60°S
 volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
-print(f'Maximum grid cell volume: {volume_60S_SO_100m.max().values:.3f} km3')
-print(f'Average grid cell volume: {volume_60S_SO_100m.mean().values:.3f} km3')
-print(f'Median grid cell volume: {volume_60S_SO_100m.median().values:.3f} km3')
-print(f'Minimum grid cell volume: {volume_60S_SO_100m.min().values:.3f} km3')
+# print(f'Maximum grid cell volume: {volume_60S_SO_100m.max().values:.3f} km3')
+# print(f'Average grid cell volume: {volume_60S_SO_100m.mean().values:.3f} km3')
+# print(f'Median grid cell volume: {volume_60S_SO_100m.median().values:.3f} km3')
+# print(f'Minimum grid cell volume: {volume_60S_SO_100m.min().values:.3f} km3')
 
 # Total Biomass
 total_biomass_mgC = (biomass_regridded.euphausia_biomass * volume_60S_SO_100m * 1e9).sum(dim=("eta_rho","xi_rho")) #shape: (days:181, algo_bootstrap:50)
@@ -485,6 +599,94 @@ ax.legend(handles=handles, loc='upper center', title="Medians", fontsize=11, nco
 
 plt.tight_layout()
 plt.show()
+
+
+
+# %% ================================= Convert to Density =================================
+# --- Set up and data
+proportion = {'juvenile': 0.20, 'immature': 0.3, 'mature': 0.3, 'gravid':0.2}
+clim_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "clim_mass_stages_SO.nc")) #shape (181, 231, 1442)
+
+# --- Area ROMS south 60°S
+area_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc') #in km2
+area_SO_surf = area_roms['area'].isel(z_t=0)
+area_60S_SO = area_SO_surf.where(area_roms['lat_rho'] <= -60, drop=True)
+
+# --- Volume ROMS south 60°S
+volume_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/volume.nc') #in km3
+volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho') 
+volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
+
+
+# --- Conversion
+# Krill mean mass
+mean_mass = sum(clim_krillmass_SO[stage] * proportion[stage] for stage in proportion) # shape (181, 231, 1442)
+# To mg/m2
+biomass_mgm2 = biomass_regridded.euphausia_biomass * (volume_60S_SO_100m * 1e9) / (area_60S_SO * 1e6) #shape (181, 50, 231, 1442)
+# Mean over algorithms
+biomass_mgm2_mean = biomass_mgm2.mean(dim="algo_bootstrap")# shape (181, 231, 1442)
+
+# To ind/m2
+krill_density_daily = biomass_mgm2_mean / mean_mass
+krill_density_monthly = krill_density_daily.groupby("months").mean(dim="days") # shape (months: 6, 231, 1442)
+
+# %% ================================= Plot Density concentration =================================
+# ===== Month selection =====
+months_sel = [11, 12, 1, 2, 3, 4]
+month_labels = ["Nov", "Dec", "Jan", "Feb", "Mar", "Apr"]
+nplots = len(months_sel)
+
+# ===== Custom colormap =====
+vmin, vmax= np.nanpercentile(krill_density_monthly, [5, 95])
+
+# ===== Figure layout =====
+ncols = 3
+nrows = int(np.ceil(nplots / ncols))
+fig, axes = plt.subplots(nrows, ncols, figsize=(3.8 * ncols, 3.2 * nrows), subplot_kw=dict(projection=ccrs.SouthPolarStereo()))
+fig.subplots_adjust(left=0.04, right=0.88, bottom=0.06, top=0.92, wspace=0.05, hspace=0.1)
+axes = np.atleast_1d(axes).flatten()
+
+# ===== Circular boundary =====
+theta = np.linspace(0, 2 * np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+
+# ===== Plot =====
+for i, (m, label) in enumerate(zip(months_sel, month_labels)):
+    ax = axes[i]
+
+    data = krill_density_monthly.sel(months=m)
+
+    ax.set_boundary(circle, transform=ax.transAxes)
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
+
+    pcm = ax.pcolormesh(data.lon_rho, data.lat_rho, data.values, transform=ccrs.PlateCarree(),
+                        cmap='YlGnBu_r', vmin=vmin, vmax=vmax, shading="auto")
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+    gl.xlabels_top = False
+    gl.ylabels_right = False
+    gl.xlabel_style = {'size': 7, 'rotation': 0}
+    gl.ylabel_style = {'size': 7, 'rotation': 0}
+
+    ax.set_title(label, fontsize=11)
+
+# ===== Remove unused axes =====
+for ax in axes[nplots:]:
+    ax.remove()
+
+# ===== Shared colorbar & title =====
+cbar = fig.colorbar(pcm, ax=axes[:nplots], orientation="vertical", shrink=0.8, pad=0.05, extend="both")
+cbar.set_label("Density [ind$\cdot$ $m^{-2}$]", fontsize=14)
+cbar.ax.tick_params(labelsize=12)
+
+fig.suptitle("Euphausia superba density (approximation)\nMedian over algorithms and bootstraps", fontsize=16, y=1.03, x=0.4)
+plt.show()
+
 
 
 # %%
