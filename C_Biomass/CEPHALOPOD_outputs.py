@@ -231,26 +231,29 @@ plt.tight_layout()
 plt.show()
 
 # %% =============================== Full Dataset ===============================
-interp_lon = biomass_cephalopod_60S_euphausia.interpolate_na(dim="lon", method="linear", use_coordinate=True, max_gap=10)
-interp_lat = biomass_cephalopod_60S_euphausia.interpolate_na(dim="lat", method="linear", use_coordinate=True, max_gap=5)
-biomass_interp = xr.where(
-    biomass_cephalopod_60S_euphausia.euphausia_biomass.isnull(),
-    0.5 * (interp_lon.euphausia_biomass + interp_lat.euphausia_biomass),
-    biomass_cephalopod_60S_euphausia.euphausia_biomass
-)
-# T Datase
-biomass_interp_ds = biomass_interp.to_dataset(name='euphausia_biomass')
-
-# Add metadata
-biomass_interp_ds.attrs = {"description": "Monthly biomass product with small NaN gaps filled using weighted interpolation along lon and lat.",}
-biomass_interp_ds['euphausia_biomass'].attrs = {"units": "mg C m-3",
-                                                "description": "Monthly biomass interpolated for small NaN gaps (<10° longitude, <5° latitude)",}
-
 output_file_biomass_interpolated = os.path.join(path_cephalopod, "euphausia_biomass_SO_interp.nc")
 if not os.path.exists(output_file_biomass_interpolated):
+    # Weighted interpolation
+    interp_lon = biomass_cephalopod_60S_euphausia.interpolate_na(dim="lon", method="linear", use_coordinate=True, max_gap=10)
+    interp_lat = biomass_cephalopod_60S_euphausia.interpolate_na(dim="lat", method="linear", use_coordinate=True, max_gap=5)
+    biomass_interp = xr.where(biomass_cephalopod_60S_euphausia.euphausia_biomass.isnull(),
+                            0.5 * (interp_lon.euphausia_biomass + interp_lat.euphausia_biomass),
+                            biomass_cephalopod_60S_euphausia.euphausia_biomass)
+
+    # To Dataset
+    biomass_interp_ds = biomass_interp.to_dataset(name='euphausia_biomass')
+
+    # Add metadata
+    biomass_interp_ds.attrs = {"description": "Monthly biomass product with small NaN gaps filled using weighted interpolation along lon and lat.",}
+    biomass_interp_ds['euphausia_biomass'].attrs = {"units": "mg C m-3",
+                                                    "description": "Monthly biomass interpolated for small NaN gaps (<10° longitude, <5° latitude)",}
+
+    # Save file
     biomass_interp_ds.to_netcdf(output_file_biomass_interpolated, engine="netcdf4")
 
-
+else:
+    biomass_interp_ds = xr.open_dataset(output_file_biomass_interpolated)
+    
 fig, axes = plt.subplots(1, 2, figsize=(9, 4), subplot_kw=dict(projection=ccrs.SouthPolarStereo()), constrained_layout=True)
 
 # ----------------- Circular boundary -----------------
@@ -619,15 +622,35 @@ volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=
 
 
 # --- Conversion
-# Krill mean mass
+print(f'Original: {biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mgC/m3')
+# Step1. Carbon fraction in Euphausia Superba -- Data from Farber-Lorda et al. (2009)
+C_frac_stage = {'juvenile': (0.4989, 0.0250), 'males': (0.4756, 0.0266), 'mature females': (0.4756, 0.0297), 'spent females': (0.5299, 0.0267),} # [fraction C / mg biomass]
+mean_C_fraction = np.mean(np.array([v[0] for v in C_frac_stage.values()]))
+propagated_sd = np.sqrt(np.sum(np.array([v[1] for v in C_frac_stage.values()])**2) / len(np.array([v[1] for v in C_frac_stage.values()])))
+print(f"Mean C fraction: {mean_C_fraction:.4f}")
+print(f"Propagated SD: {propagated_sd:.4f}")
+
+# From carbon mass to dry mass
+dry_biomass = biomass_regridded / mean_C_fraction #[mg/m3]
+print(f'Step1: {dry_biomass.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mg/m3')
+
+# Step2. Volume and area
+# From mg/m3 to mg/m2
+biomass_mgm2 = dry_biomass.euphausia_biomass * (volume_60S_SO_100m * 1e9) / (area_60S_SO * 1e6) #shape (181, 50, 231, 1442)
+print(f'Step2: {biomass_mgm2.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).values:.3f} mg/m2')
+
+
+# Step3. Krill mass
+# Krill mean mass [mg]
 mean_mass = sum(clim_krillmass_SO[stage] * proportion[stage] for stage in proportion) # shape (181, 231, 1442)
-# To mg/m2
-biomass_mgm2 = biomass_regridded.euphausia_biomass * (volume_60S_SO_100m * 1e9) / (area_60S_SO * 1e6) #shape (181, 50, 231, 1442)
+
 # Mean over algorithms
 biomass_mgm2_mean = biomass_mgm2.mean(dim="algo_bootstrap")# shape (181, 231, 1442)
 
 # To ind/m2
 krill_density_daily = biomass_mgm2_mean / mean_mass
+print(f'Step3: {krill_density_daily.isel(days=0, eta_rho=200, xi_rho=1000).values:.3f} ind/m2')
+
 krill_density_monthly = krill_density_daily.groupby("months").mean(dim="days") # shape (months: 6, 231, 1442)
 
 # %% ================================= Plot Density concentration =================================
