@@ -1,7 +1,7 @@
 """
 Created on Tue 30 July 17:04:45 2025
 
-Calcuating the Biomass of E. Superba
+Calculating the Biomass of E. Superba
 
 @author: Marguerite Larriere (mlarriere)
 """
@@ -101,18 +101,12 @@ area_60S_SO = area_SO_surf.where(area_roms['lat_rho'] <= -60, drop=True)
 # %% ======================== Roms grid cell volume ========================
 # --- Load data
 volume_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/volume.nc') #in km3
-
-# Volume on the first 100m depth
-# volume_roms_surf = volume_roms['volume'].isel(z_rho=0)
-volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho') 
+volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho') #volume first 100m
 
 # --- Southern Ocean south of 60°S
 volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
-# volume_60S_SO_surf = volume_roms_surf.where(volume_roms['lat_rho'] <= -60, drop=True)
 
 # %% ======================== Biomass from CEPHALOPOD ========================
-# N = 17.85 # Abundance ind/m2
-
 # -- Load data
 # Biomass are climatological products [mgC/m3]
 biomass_regridded = xr.open_dataset(os.path.join(path_cephalopod, 'euphausia_biomass_SO_regridded.nc')) #shape (181, 50, 231, 1442)
@@ -123,12 +117,10 @@ original_product = xr.open_dataset(os.path.join(path_cephalopod, 'total_krill_bi
 # --- Load mass data [mg] for each maturity stage -- Southern Ocean  
 # 1. Climatology
 clim_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "clim_mass_stages_SO.nc")) #shape (181, 231, 1442)
-# clim_krilllength_SO = xr.open_dataset(os.path.join(path_masslength, "clim_length_stages_SO.nc")) #shape (181, 231, 1442)
 
 # 2. Actual
 actual_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "actual_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
 actual_krillmass_SO = actual_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
-# actual_krilllength_SO = xr.open_dataset(os.path.join(path_masslength, "actual_length_stages_SO.nc")) #shape (39, 181, 231, 1442)
 
 # 3. No MHWs (MHWs replaced by clim)
 noMHWs_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "noMHWs_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
@@ -139,10 +131,6 @@ clim_trended_krillmass_SO = clim_trended_krillmass_SO.rename({"lat": "lat_rho", 
 # 3. No warming (temperature signal detrended)
 nowarming_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "nowarming_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
 nowarming_krillmass_SO = nowarming_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
-
-# Check - should be True
-# print(f'Is initial length identical? {(clim_krilllength_SO.immature.isel(days=0).values == actual_krilllength_SO.immature.isel(days=0, years=0).values).all()}')
-# print(f'Is initial mass identical (3dec)? {np.isclose(clim_krillmass_SO.immature.isel(days=0).values, actual_krillmass_SO.immature.isel(days=0, years=0).values, rtol=1e-6).all()}')
 
 
 # %% ======================== Defining Functions ========================
@@ -467,10 +455,11 @@ plt.show()
 
 # %% ================================= Plot Biomass concentration =================================
 # --- Prepare data
-dataset_interest =  actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
+dataset_interest =  nomhw_biomass_interp #actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
 # title = "Environmental conditions without MHWs\nClimatological signal trended"
+title = "Environmental conditions without MHWs"
 # title = "Environmental conditions without global warming"
-title = "Actual environmental conditions"
+# title = "Actual environmental conditions"
 
 # Years to show
 years_to_plot = [1980, 1989, 2000, 2010, 2016]
