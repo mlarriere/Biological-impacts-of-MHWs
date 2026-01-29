@@ -73,91 +73,74 @@ path_chla = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/z_TO
 path_growth_inputs = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs'
 path_growth = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model'
 path_growth_inputs_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/growth_model/inputs/austral_summer'
-path_biomass= '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass'
+path_biomass = '/nfs/sea/work/mlarriere/mhw_krill_SO/biomass'
 path_surrogates = os.path.join(path_biomass, f'surrogates')
-path_biomass_surrogates = os.path.join(path_surrogates, f'biomass_timeseries')
+path_biomass_ts = os.path.join(path_surrogates, f'biomass_timeseries')
+path_biomass_ts_SO = os.path.join(path_biomass_ts, f'SouthernOcean')
+path_biomass_ts_MPAs = os.path.join(path_biomass_ts, f'mpas')
+path_masslength = os.path.join(path_surrogates, f'mass_length')
+path_cephalopod = os.path.join(path_biomass, 'CEPHALOPOD')
 
 
 # %% ======================== Defining MPAs ========================
-# == Load data
+# ---- Load data
 mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
 
-# == Fix extent 
+# ---- Fix extent 
 # South of 60°S
 south_mask = (mpas_ds['lat_rho'] <= -60)
 mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
 
 # == Settings plot
-mpa_dict = {
-    "Ross Sea": (mpas_ds.mask_rs, "#5F0F40"),
-    "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#FFBA08"),
-    "East Antarctic": (mpas_ds.mask_ea, "#E36414"),
-    "Weddell Sea": (mpas_ds.mask_ws, "#4F772D"),
-    "Antarctic Peninsula": (mpas_ds.mask_ap, "#0A9396")
-}
+mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#5F0F40"),
+            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#FFBA08"),
+            "East Antarctic": (mpas_ds.mask_ea, "#E36414"),
+            "Weddell Sea": (mpas_ds.mask_ws, "#4F772D"),
+            "Antarctic Peninsula": (mpas_ds.mask_ap, "#0A9396")}
 
 
-# # %% ======================== Plot MPAs ========================
-# fig = plt.figure(figsize=(5, 8))
-# gs = gridspec.GridSpec(nrows=1, ncols=1)
-# ax = fig.add_subplot(gs[0], projection=ccrs.SouthPolarStereo())
+# ---- Plot MPAs
+fig = plt.figure(figsize=(5, 8))
+gs = gridspec.GridSpec(nrows=1, ncols=1)
+ax = fig.add_subplot(gs[0], projection=ccrs.SouthPolarStereo())
 
-# # Circular boundary
-# theta = np.linspace(0, 2 * np.pi, 200)
-# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-# circle = mpath.Path(verts * 0.5 + 0.5)
-# ax.set_boundary(circle, transform=ax.transAxes)
+# Circular boundary
+theta = np.linspace(0, 2 * np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+ax.set_boundary(circle, transform=ax.transAxes)
 
-# # Base map
-# ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-# ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
+# Base map
+ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
-# ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+# Plot
+lon = mpas_ds.lon_rho
+lat = mpas_ds.lat_rho
+for name, (mask, color) in mpa_dict.items():
+    # Mask lon/lat
+    lon_masked = lon.where(mask)
+    lat_masked = lat.where(mask)
+    ax.scatter(lon_masked.values, lat_masked.values,
+               s=2, color=color, transform=ccrs.PlateCarree(), 
+               label=name, alpha=0.8, zorder=1)
 
-# # == Plot MPA
-# lon = mpas_ds.lon_rho
-# lat = mpas_ds.lat_rho
-# for name, (mask, color) in mpa_dict.items():
+    # Add name of the MPA
+    # Center of the box
+    lon_centroid = float(lon_masked.mean().values)+10
+    lat_centroid = float(lat_masked.mean().values)
 
-#     # Mask lon/lat
-#     lon_masked = lon.where(mask)
-#     lat_masked = lat.where(mask)
+    # Add text box with colored border
+    ax.text(lon_centroid, lat_centroid, name, transform=ccrs.PlateCarree(), zorder=5, 
+            fontsize=10, fontweight='bold', ha='center', va='center',
+            bbox=dict( facecolor="white", edgecolor=color, linewidth=1.5, boxstyle="round,pad=0.3", alpha=0.9))
 
-#     ax.scatter(lon_masked.values, lat_masked.values,
-#                s=2, color=color, transform=ccrs.PlateCarree(), 
-#                label=name, alpha=0.8, zorder=1)
+# Legend and title
+ax.set_title("Southern Ocean MPAs", fontsize=12)
 
-#     # == Add name of the MPA
-#     # Center of the box
-#     lon_centroid = float(lon_masked.mean().values)+10
-#     lat_centroid = float(lat_masked.mean().values)
-
-#     # Add text box with colored border
-#     ax.text(
-#         lon_centroid,
-#         lat_centroid,
-#         name,
-#         transform=ccrs.PlateCarree(),
-#         fontsize=10,
-#         fontweight='bold',
-#         ha='center',
-#         va='center',
-#         bbox=dict(
-#             facecolor="white",
-#             edgecolor=color,
-#             linewidth=1.5,
-#             boxstyle="round,pad=0.3",
-#             alpha=0.9
-#         ),
-#         zorder=5
-#     )
-
-# # Legend and title
-# # ax.legend(loc="lower left", fontsize=9)
-# ax.set_title("Southern Ocean MPAs", fontsize=12)
-
-# plt.tight_layout()
-# plt.show()
+plt.tight_layout()
+plt.show()
 
 # %% ======================== Areas and volume MPAs ========================
 # --- Load data
@@ -189,70 +172,85 @@ for abbrv, (name, mask) in mpa_masks.items():
     volume_mpa[name] = volume_60S_SO_100m.where(mask)
 
 # %% ======================== Biomass data ========================
-mass = xr.open_dataset(os.path.join(path_surrogates, "mass_length/clim_mass_stages_SO.nc"))
+path_biomass_ts_SO_regridd = os.path.join(path_biomass_ts_SO, 'biomass_regridded')
+path_biomass_ts_SO_interp = os.path.join(path_biomass_ts_SO, 'biomass_interpolated')
+
 # ==== Load data ====
 # -- Southern Ocean (from Biomass_calculations.py)
-biomass_clim = xr.open_dataset(os.path.join(path_biomass_surrogates, "biomass_clim.nc"))
-biomass_clim=biomass_clim.assign_coords(lon_rho=(("eta_rho", "xi_rho"), mass.lon_rho.data), lat_rho=(("eta_rho", "xi_rho"), mass.lat_rho.data),)
-biomass_clim=biomass_clim.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_clim = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_clim.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_clim_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_clim.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
 
-biomass_actual = xr.open_dataset(os.path.join(path_biomass_surrogates, "biomass_actual.nc"))
-biomass_actual=biomass_actual.assign_coords(lon_rho=(("eta_rho", "xi_rho"), mass.lon_rho.data), lat_rho=(("eta_rho", "xi_rho"), mass.lat_rho.data),)
-biomass_actual=biomass_actual.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_actual = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_actual.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_actual_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_actual.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
 
-biomass_noMHWs = xr.open_dataset(os.path.join(path_biomass_surrogates, "biomass_nomhws.nc"))
-biomass_noMHWs=biomass_noMHWs.assign_coords(lon_rho=(("eta_rho", "xi_rho"), mass.lon_rho.data), lat_rho=(("eta_rho", "xi_rho"), mass.lat_rho.data),)
-biomass_noMHWs=biomass_noMHWs.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_noMHWs = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_nomhws.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_noMHWs_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_nomhws.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
 
-biomass_nowarming = xr.open_dataset(os.path.join(path_biomass_surrogates, "biomass_nowarming.nc"))
-biomass_nowarming=biomass_nowarming.assign_coords(lon_rho=(("eta_rho", "xi_rho"), mass.lon_rho.data), lat_rho=(("eta_rho", "xi_rho"), mass.lat_rho.data),)
-biomass_nowarming=biomass_nowarming.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_clim_trended = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_clim_trend.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_clim_trended_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_clim_trend.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
 
-biomass_ds = {"clim": biomass_clim, "actual": biomass_actual, "nomhws": biomass_noMHWs, "nowarming": biomass_nowarming,}
-surrogate_names = {"clim": "Climatology", "actual": "Actual Conditions", "nomhws": "No Marine Heatwaves", "nowarming": "No Warming"}
+biomass_nowarming = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_nowarming.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_nowarming_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_nowarming.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+
+# Put together in dictionnary
+biomass_ds = {"clim": biomass_clim, "actual": biomass_actual, "nomhws": biomass_noMHWs, "climtrend": biomass_clim_trended, "nowarming": biomass_nowarming,}
+biomass_ds_interp = {"clim": biomass_clim_interp, "actual": biomass_actual_interp, "nomhws": biomass_noMHWs_interp, "climtrend": biomass_clim_trended_interp, "nowarming": biomass_nowarming_interp,}
+
+surrogate_names = {"clim": "Climatology", "actual": "Actual Conditions", "nomhws": "No Marine Heatwaves", "climtrend":"Climatology wih trend", "nowarming": "No Warming"}
 mpa_names = list(mpa_dict.keys())
 mpa_abbrs = list(mpa_masks.keys())
 
-# %% ======================== Mask MPAs ========================
-from functools import partial
+# %% ======================== Functions ========================
 from tqdm.contrib.concurrent import process_map 
 
 # --- Function to mask one surrogate for one MPA
 def mask_one_surrogate(args):
-    surrog, ds, mpa_name, mpa_abbrv, mpa_mask = args
+    # Extract arguments
+    surrog, ds, mpa_name, mpa_abbrv, mpa_mask, interp = args
 
-    # Expand mask dimensions
-    mask = mpa_mask
-    if "years" in ds.dims:
-        mask = mask.expand_dims({"years": ds.years.size}, axis=1)
-    if "days" in ds.dims:
-        mask = mask.expand_dims({"days": ds.days.size}, axis=2)
+    # 2cases, regridded only or with interpolation
+    if interp:
+        file_path = os.path.join(path_biomass_ts_MPAs_interp, f"{surrog}_biomass_{mpa_abbrv}.nc")
+    else:
+        file_path = os.path.join(path_biomass_ts_MPAs_regridd, f"{surrog}_biomass_{mpa_abbrv}.nc")
+
+    # RUn only if file doesn't already exist
+    if not os.path.exists(file_path):
+        # Expand mask dimensions
+        mask = mpa_mask
+        if "years" in ds.dims:
+            mask = mask.expand_dims({"years": ds.years.size}, axis=1)
+        if "days" in ds.dims:
+            mask = mask.expand_dims({"days": ds.days.size}, axis=2)
+        
+        # Mask biomass to MPAs
+        biomass_masked = ds.biomass_median.where(mask)
+        std_masked = ds.biomass_std.where(mask)
+        
+        # To Dataset
+        ds_mpa = xr.Dataset({"biomass_median": biomass_masked, "biomass_std": std_masked},
+                            coords={"years": ds.years if "years" in ds.dims else None,
+                                    "days": ds.days,
+                                    "lon_rho": (("eta_rho", "xi_rho"), ds.lon_rho.data),
+                                    "lat_rho": (("eta_rho", "xi_rho"), ds.lat_rho.data),},
+                            attrs={"mpa_name": mpa_name})
+        
+        # Save
+        ds_mpa.to_netcdf(file_path)
+        return f"Saved {mpa_name}"
     
-    # Mask biomass to MPAs
-    biomass_masked = ds.biomass_median.where(mask)
-    std_masked = ds.biomass_std.where(mask)
-    
-    # To Dataset
-    ds_mpa = xr.Dataset({"biomass_median": biomass_masked, "biomass_std": std_masked},
-                        coords={"years": ds.years if "years" in ds.dims else None,
-                                "days": ds.days,
-                                "lon_rho": (("eta_rho", "xi_rho"), ds.lon_rho.data),
-                                "lat_rho": (("eta_rho", "xi_rho"), ds.lat_rho.data),},
-                        attrs={"mpa_name": mpa_name})
-    
-    # Save
-    file_path = os.path.join(path_biomass_surrogates, f"mpas/{surrog}_biomass_{mpa_abbrv}.nc")
-    ds_mpa.to_netcdf(file_path)
+    else:
+        return 'MPAs already saved to file.'
 
-    return f"Saved {mpa_name}"
+# %% ==================================== Mask MPAs - Regridded ====================================
+print('\nInitial biomass: Regridded')
 
-# %% ======================== Mask MPAs ========================
-output_folder=os.path.join(path_surrogates, f'biomass_timeseries/mpas')
-files = [os.path.join(output_folder, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
+path_biomass_ts_MPAs_regridd = os.path.join(path_biomass_ts_MPAs, 'biomass_regridded')
+files_regrid = [os.path.join(path_biomass_ts_MPAs_regridd, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
 
-if not all(os.path.exists(f) for f in files):
+if not all(os.path.exists(f) for f in files_regrid):
     print('Masking biomass to MPAs and writing to file...')
-
+    interp=False
     # --- Loop over MPAs
     for abbrv, (mpa_name, mpa_mask) in mpa_masks.items():
         # Test
@@ -263,7 +261,7 @@ if not all(os.path.exists(f) for f in files):
         print(f"\nProcessing MPA: {mpa_name} ({abbrv})")
 
         # Prepare arguments for function
-        args_list = [(surrog, ds, mpa_name, abbrv, mpa_mask) for surrog, ds in biomass_ds.items()]
+        args_list = [(surrog, ds, mpa_name, abbrv, mpa_mask, interp) for surrog, ds in biomass_ds.items()]
         
         # Run in parallel
         results = process_map(mask_one_surrogate, args_list, max_workers=4,  desc=f"{abbrv} | Mask ")
@@ -276,532 +274,366 @@ else:
         biomass_mpas[abbrv] = {}
 
         for surrog in surrogate_names.keys():
-            fname = os.path.join(output_folder, f"{surrog}_biomass_{abbrv}.nc")
+            fname = os.path.join(path_biomass_ts_MPAs_regridd, f"{surrog}_biomass_{abbrv}.nc")
             biomass_mpas[abbrv][surrog] = xr.open_dataset(fname)
 
     
+# %% ==================================== Mask MPAs - Regridded and interpolated ====================================
+print('\nInitial biomass: Regridded and Interpolated')
 
-# # --- Apply for all surrogates
-# biomass_mpa_ds = {}
-# for surrog, ds in biomass_ds.items():
-#     print(f"Masking {surrogate_names[surrog]}")
-#     biomass_mpa_ds[surrog] = mask_one_surrogate(ds, mpa_mask)
+path_biomass_ts_MPAs_interp = os.path.join(path_biomass_ts_MPAs, 'biomass_interpolated')
+files_interp = [os.path.join(path_biomass_ts_MPAs_interp, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
 
-# # -- To Dataset
-# biomass_mpa_combined = {}
-# for surrog, masked_ds in biomass_mpa_ds.items():
-#     biomass_mpa_combined[surrog] = xr.Dataset({"biomass_median": masked_ds.biomass_median,
-#                                             "biomass_std": masked_ds.biomass_std},
-#                                             coords={"years": masked_ds.years if "years" in masked_ds.dims else None,
-#                                                     "days": masked_ds.days,
-#                                                     "lon_rho": (("eta_rho", "xi_rho"), masked_ds.lon_rho.data),
-#                                                     "lat_rho": (("eta_rho", "xi_rho"), masked_ds.lat_rho.data)},
-#                                             attrs={"mpa_name": mpa_name})
-# # -- Save to file
-# save_dir = os.path.join(path_biomass_surrogates, "mpas")
-# for surrog, ds in biomass_mpa_combined.items():
-#     file_path = os.path.join(save_dir, f"{surrog}_biomass_AP.nc")
-#     print(f"Saving {surrog} biomass dataset to {file_path}")
-#     ds.to_netcdf(file_path)
+if not all(os.path.exists(f) for f in files_interp):
+    print('Masking biomass to MPAs and writing to file...')
+    interp=True
+    # --- Loop over MPAs
+    for abbrv, (mpa_name, mpa_mask) in mpa_masks.items():
+        # Test
+        # abbrv='RS'
+        # mpa_name='Ross Sea'
+        # mpa_mask=mpa_masks['RS'][1]
 
-# print(biomass_mpa_ds["actual"])
+        print(f"\nProcesssing MPA: {mpa_name} ({abbrv})")
 
-# %% ================================= Plot Biomass concentration =================================
-# --- Prepare data
-mpa="Antarctic Peninsula"
-dataset_interest =  biomass_mpa_ds['nowarming'] #actual, nomhws, nowarming
-dataset_ref = biomass_mpa_ds['clim']
-# title = "Actual environmental conditions"
-# title = "Environmental conditions without surface MHWs"
-title = "Environmental conditions without global warming"
+        # Prepare arguments for function
+        args_list = [(surrog, ds, mpa_name, abbrv, mpa_mask, interp) for surrog, ds in biomass_ds_interp.items()]
+        
+        # Run in parallel
+        results = process_map(mask_one_surrogate, args_list, max_workers=4,  desc=f"{abbrv} | Mask ")
 
-# Years to show
-years_to_plot = [1980, 1989, 2000, 2010, 2016]
+else:
+    print('Loading files...')
+    biomass_mpas_interp = {}
 
-# Row 1: Biomass 
-biomass_actual_30Apr = [dataset_interest.biomass_median.isel(years=i, days=-1) for i in range(len(years_to_plot))]  #biomass_actual_30Apr[0].shape: (231, 1440)
+    for abbrv, (mpa_name, _) in mpa_masks.items():
+        biomass_mpas_interp[abbrv] = {}
 
-# Row 2: Difference (end of season)
-diff_actual = [biomass_actual_30Apr[i] - dataset_ref.biomass_median.isel(days=-1) for i in range(len(years_to_plot))] #diff_actual[0].shape: (231, 1440)
+        for surrog in surrogate_names.keys():
+            fname = os.path.join(path_biomass_ts_MPAs_interp, f"{surrog}_biomass_{abbrv}.nc")
+            biomass_mpas_interp[abbrv][surrog] = xr.open_dataset(fname)
+
+# %% ================================= Plot Biomass concentration =================================    
+# Year to plot
+years_to_plot = 1989
+year_idx = years_to_plot - 1980
 
 # --- Figure setup
-ncols = len(biomass_actual_30Apr)
-fig = plt.figure(figsize=(20, 8))
-gs = gridspec.GridSpec(nrows=2, ncols=ncols, wspace=0.08, hspace=0.3)
+fig = plt.figure(figsize=(15, 8))
+gs = gridspec.GridSpec(2, 4, hspace=0.09, wspace=0.09)
+proj = ccrs.SouthPolarStereo()
 
 # --- Circular boundary
-theta = np.linspace(np.pi/2, np.pi , 100)  # from 0° to -90° clockwise - Quarter-circle sector boundary
-center, radius = [0.5, 0.51], 0.5 # centered at 0.5,0.5
-arc = np.vstack([np.cos(theta), np.sin(theta)]).T
-verts = np.concatenate([[center], arc * radius + center, [center]])
-circle = mpath.Path(verts)
+theta = np.linspace(0, 2*np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+
+titles = ["Climatology", "Actual (2016)", "No MHWs", "No Warming",
+          "", "Actual − Clim", "No MHWs − Clim", "No Warming − Clim"]
 
 # --- Color Setup
-# Row 1: biomass
-vmin_row1, vmax_row1 = np.nanpercentile(np.stack([d.values for d in biomass_actual_30Apr]), [5, 95])
-cmap_row1 = 'Reds'
+color_data=biomass_mpas_interp['AP']['actual'].biomass_median.isel(years=year_idx).values
+vmin_bio, vmax_bio = np.nanpercentile(color_data, [5, 95])
+cmap_bio = 'Reds'
 
-# Row 2: actual - clim
-diff_stack2 = np.stack([d.values for d in diff_actual])
-max_abs_diff2 = np.nanmax(np.abs(diff_stack2))
-vmin_row2, vmax_row2 = -max_abs_diff2, max_abs_diff2
-cmap_row2 = 'bwr'
+diff_data= color_data - biomass_mpas_interp['AP']['clim'].biomass_median
+max_abs_diff = np.nanmax(np.abs(diff_data))
+vmin_diff, vmax_diff = -max_abs_diff, max_abs_diff
+cmap_diff = 'bwr'
 
-# --- Row 1: Biomass
-for i, data in enumerate(biomass_actual_30Apr):
-    ax = fig.add_subplot(gs[0, i], projection=ccrs.SouthPolarStereo())
+# --- Prepare axis
+axes = []
+for i in range(8):
+    ax = fig.add_subplot(gs[i], projection=proj)  
+
+    if i == 4:  # row 2, first column → blank
+        ax.axis("off")
+        axes.append(ax)
+        continue
+
     ax.set_boundary(circle, transform=ax.transAxes)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
     ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.coastlines(color='black', linewidth=0.7, zorder=3)
-
-    im1 = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
-                        cmap=cmap_row1, vmin=vmin_row1, vmax=vmax_row1,
-                        transform=ccrs.PlateCarree(), zorder=1)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
+    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
 
     gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
     gl.xlabels_top = False
     gl.ylabels_right = False
     gl.xlabel_style = {'size': 7, 'rotation': 0}
     gl.ylabel_style = {'size': 7, 'rotation': 0}
-    
-    ax.set_title(f'{years_to_plot[i]}', fontsize=14)
 
-# --- Row 2: Difference
-for i, diff in enumerate(diff_actual):
-    ax = fig.add_subplot(gs[1, i], projection=ccrs.SouthPolarStereo())
-    ax.set_boundary(circle, transform=ax.transAxes)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.coastlines(color='black', linewidth=0.7, zorder=3)
+    ax.set_title(titles[i], fontsize=12)
+    axes.append(ax)
 
-    im2 = ax.pcolormesh(diff.lon_rho, diff.lat_rho, diff,
-                        cmap=cmap_row2, vmin=vmin_row2, vmax=vmax_row2,
-                        transform=ccrs.PlateCarree(), zorder=1)
+# --- Loop over MPAs
+pcm_bio  = None
+pcm_diff = None
 
-    gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
-    gl.xlabel_style = {'size': 7, 'rotation': 0}
-    gl.ylabel_style = {'size': 7, 'rotation': 0}
+for abbrv, mpa_data in biomass_mpas_interp.items():
+    # Prepare data
+    ds_clim = mpa_data["clim"]
+    ds_actual = mpa_data["actual"]
+    ds_clim_trend = mpa_data["climtrend"]
+    ds_nowarm = mpa_data["nowarming"]
+
+    # Row 1: Biomass at the end of the season
+    bio_clim = ds_clim.biomass_median.isel(days=-1)
+    bio_actual = ds_actual.biomass_median.isel(years=year_idx, days=-1)
+    bio_clim_trend = ds_clim_trend.biomass_median.isel(years=year_idx, days=-1)
+    bio_nowarm = ds_nowarm.biomass_median.isel(years=year_idx, days=-1)
+
+    # Row 2: Difference w.r.t clim at the end of the season
+    diff_actual  = bio_actual - bio_clim
+    diff_clim_trend  = bio_clim_trend - bio_clim
+    diff_nowarm  = bio_nowarm - bio_clim
+
+    # Together
+    data_to_plot = [bio_clim, bio_actual, bio_clim_trend, bio_nowarm,
+                    None, diff_actual, bio_clim_trend, diff_nowarm]
+
+    for i, data_i in enumerate(data_to_plot):
+        if data_i is None:
+                    continue
+        
+        # --- Row 1: Biomass
+        if i < 4:
+            pcm_bio = axes[i].pcolormesh(ds_clim.lon_rho, ds_clim.lat_rho, data_i, transform=ccrs.PlateCarree(),
+                                cmap=cmap_bio, vmin=vmin_bio, vmax=vmax_bio, zorder=1)
+            
+        # --- Row 2: Difference
+        else:
+            pcm_diff = axes[i].pcolormesh(ds_clim.lon_rho, ds_clim.lat_rho, data_i, transform=ccrs.PlateCarree(),
+                                cmap=cmap_diff, vmin=-max_abs_diff, vmax=max_abs_diff, zorder=1)
 
 # --- Colorbars
-cbar_ax1 = fig.add_axes([0.92, 0.55, 0.01, 0.35])
-plt.colorbar(im1, cax=cbar_ax1, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
+cbar_ax1 = fig.add_axes([0.92, 0.58, 0.01, 0.27]) #(left, bottom, width, height)
+plt.colorbar(pcm_bio, cax=cbar_ax1, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
 
-cbar_ax2 = fig.add_axes([0.92, 0.1, 0.01, 0.35])
-plt.colorbar(im2, cax=cbar_ax2, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
+cbar_ax2 = fig.add_axes([0.92, 0.15, 0.01, 0.27]) #(left, bottom, width, height)
+plt.colorbar(pcm_diff, cax=cbar_ax2, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
 
-# --- Row titles
-fig.text(0.52, 0.95, title, ha='center', fontsize=16)
-fig.text(0.52, 0.5, "Comparison with Climatology ", ha='center', fontsize=16)
-
-# --- Overall figure title
-plt.suptitle(f"Krill Biomass on 30th April\n{mpa}", fontsize=18, y=1.1, x=0.52)
+fig.suptitle(f"Krill Biomass on 30th April ({years_to_plot}) in the MPAs", fontsize=14, x=0.52)
 plt.show()
 
-# 
-# %% ================================= MAsk MHW to match Biomass =================================
-# Biomass and MHW datasets
-biomass_data = biomass_mpa_ds['actual'].biomass_median  # shape (39, 181, 231, 1440)
-mhw_ap = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/duration_AND_thresh_AP.nc')) #shape (39, 181, 231, 1440)
 
-# --- Create mask: True where at least one day has biomass
-biomass_valid_mask = biomass_data.notnull().any(dim='days')  # shape (39, 231, 1440)
-biomass_valid_mask_expanded = biomass_valid_mask.expand_dims({'days': mhw_ap.sizes['days']}, axis=1) #shape (39, 181, 231, 1440)
+# %% ================================= Longest MHW per MPA and per threshold =================================
+import pandas as pd
 
-# --- Mask MHW variables
-mhw_vars = ['duration', 'det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']
-mhw_masked_vars = {}
-for var in mhw_vars:
-    mhw_masked_vars[var] = mhw_ap[var].where(biomass_valid_mask_expanded)
+# ---- Select threshold ----
+thresholds = {"1deg": "det_1deg", "2deg": "det_2deg", "3deg": "det_3deg", "4deg": "det_4deg",}
 
-# --- To Dataset
-mhw_masked_ds = xr.Dataset(mhw_masked_vars,
-                           coords={'years': mhw_ap.years, 'days': mhw_ap.days,
-                                   'lon_rho': (('eta_rho', 'xi_rho'), mhw_ap.lon_rho.data),
-                                   'lat_rho': (('eta_rho', 'xi_rho'), mhw_ap.lat_rho.data),},
-                                   attrs=mhw_ap.attrs)
-mhw_masked_ds = mhw_masked_ds.assign_attrs(mpa_name=mhw_ap.attrs.get('mpa_name', 'AP'))
+out_csv = os.path.join(path_combined_thesh, "mpas/longest_MHW_in_MPA_per_threshold.csv")
+if not os.path.exists(out_csv):
+    # Longest event per MPAs and treshold
+    longest_mhw = {}
 
-# Save
-mhw_masked_ds.to_netcdf(os.path.join(path_combined_thesh, 'mpas/mhws_AP_masked.nc')) 
+    for abbrv, (mpa_name, _) in mpa_masks.items():
 
-mhw_masked_ds = mhw_masked_ds.assign_attrs(mpa_name=mhw_data.attrs.get('mpa_name', 'Unknown'))
-# %% ================================= Location with longest MHWs events =================================
-# Select threshold
-det3deg = False #True #False
-det4deg = True #False #True 
-det1deg = False #False #True 
-if det3deg:
-    threshold= 'det_3deg'
-if det4deg:
-    threshold= 'det_4deg'
-if det1deg:
-    threshold= 'det_1deg'
+        print(f"\nProcessing {mpa_name} ({abbrv})")
 
-# Threshold mask
-duration_filtered = mhw_ap['duration'].where(mhw_ap[threshold]) #shape (39, 181, 231, 1440)
+        biomass_data = biomass_mpas_interp[abbrv]["actual"].biomass_median
+        mhw_ds = xr.open_dataset(os.path.join(path_combined_thesh, f"mpas/duration_AND_thresh_{abbrv}.nc"))
 
-# Find when and where
-index = np.unravel_index(np.nanargmax(duration_filtered.values), duration_filtered.shape)
-year_idx, day_idx, eta_idx, xi_idx = index
-year = ds['years'].values[year_idx]
-day = ds['days'].values[day_idx]
-lat = ds['lat_rho'].values[eta_idx, xi_idx]
-lon = ds['lon_rho'].values[eta_idx, xi_idx]
-duration = duration_filtered.values[index]
+        longest_mhw[abbrv] = {"mpa_name": mpa_name}
 
-print(f"Longest {threshold} MHW lasted {duration:.1f} days")
-print(f"Year: {year}, Day-of-year: {day}")
-print(f"Location: lat={lat:.2f}, lon={lon:.2f}")
+        for label, thresh_var in thresholds.items():
 
-# ==== 1°C ====
-# Longest det_1deg MHW lasted 142.0 days
-# Year: 20, Day-of-year: 38
-# Location: lat=-65.33, lon=295.38
+            print(f"  Threshold: {label}")
 
-# ==== 3°C ====
-# Longest det_3deg MHW lasted 142.0 days
-# Year: 20, Day-of-year: 59
-# Location: lat=-65.33, lon=295.38
+            if thresh_var not in mhw_ds:
+                print("    → threshold not found")
+                longest_mhw[abbrv][label] = None
+                continue
 
-# ==== 4°C ====
-# Longest det_4deg MHW lasted 142.0 days
-# Year: 20, Day-of-year: 71
-# Location: lat=-65.33, lon=295.38
+            duration_filt = mhw_ds["duration"].where(mhw_ds[thresh_var])
 
-# %% ================================= Biomass timeseries =================================
+            if not duration_filt.notnull().any():
+                print("    → no events")
+                longest_mhw[abbrv][label] = None
+                continue
+
+            idx = np.unravel_index(np.nanargmax(duration_filt.values), duration_filt.shape)
+
+            year_idx, day_idx, eta_idx, xi_idx = idx
+            duration = duration_filt.values[idx]
+
+            lat = biomass_data["lat_rho"].values[eta_idx, xi_idx]
+            lon = biomass_data["lon_rho"].values[eta_idx, xi_idx]
+            day = biomass_data["days"].values[day_idx]
+
+            longest_mhw[abbrv][label] = {"duration_days": float(duration),
+                                        "year": int(1980 + year_idx),
+                                        "day_of_year": int(day),
+                                        "eta_idx": int(eta_idx),
+                                        "xi_idx": int(xi_idx),
+                                        "lat": float(lat),
+                                        "lon": float(lon),}
+
+            print(f"    {duration:.1f} days | {1980+year_idx} | DOY {day}")
+
+
+    # Put results to CSV
+    rows = []
+
+    for abbrv, mpa_dict in longest_mhw.items():
+        mpa_name = mpa_dict["mpa_name"]
+
+        for thresh_label in ["1deg", "2deg", "3deg", "4deg"]:
+            event = mpa_dict.get(thresh_label)
+
+            if event is None:
+                continue
+
+            rows.append({"mpa_abbrv": abbrv, "mpa_name": mpa_name, "threshold": thresh_label,
+                         "duration_days": event["duration_days"],
+                         "year": event["year"], "day_of_year": event["day_of_year"],
+                         "eta_idx": event["eta_idx"], "xi_idx": event["xi_idx"],
+                         "lat": event["lat"], "lon": event["lon"],})
+
+    df_longest = pd.DataFrame(rows)
+
+    # Save
+    df_longest.to_csv(out_csv, index=False)
+    print(f"Saved: {out_csv}")
+
+else:
+    df_longest_mhw = pd.read_csv(out_csv)
+
+
+# %% ================================= Select MHW event to plot =================================
+mpa_choice = 'AP'
+threshold_choice = '4deg'
+mhw_event_choice = df_longest_mhw.loc[(df_longest_mhw["mpa_abbrv"] == mpa_choice) & (df_longest_mhw["threshold"] == threshold_choice)].iloc[0]
+
+year_idx=mhw_event_choice["year"]-1980
+eta_idx=mhw_event_choice["eta_idx"]
+xi_idx=mhw_event_choice["xi_idx"]
+
+# Extract data at that location
+biomass_mhw_actual = biomass_mpas_interp[mpa_choice]['actual'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+biomass_mhw_clim = biomass_mpas_interp[mpa_choice]['clim'].biomass_median.isel(eta_rho=eta_idx, xi_rho=xi_idx)
+biomass_mhw_nomhw = biomass_mpas_interp[mpa_choice]['nomhws'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+biomass_mhw_climtrend = biomass_mpas_interp[mpa_choice]['climtrend'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+biomass_mhw_nowarming = biomass_mpas_interp[mpa_choice]['nowarming'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+mhw_timeseries = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/duration_AND_thresh_{mpa_choice}.nc')).isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+
+chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
+chla_surf_SO_allyrs_event = chla_surf_SO_allyrs.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+
+# %% ================================= Identify MHW in that cell over the growth season =================================
+def label_events(boolean_array):
+    labels = np.zeros(len(boolean_array), dtype=int)
+    event_id = 0
+    in_event = False
+
+    for i, val in enumerate(boolean_array):
+        if val and not in_event:
+            event_id += 1
+            in_event = True
+        if not val:
+            in_event = False
+        labels[i] = event_id if val else 0
+
+    return labels
+
+threshold_events = {}
+threshold_map = {'$\\geq$ 90th perc and 1°C': 'det_1deg', '$\\geq$ 90th perc and 2°C': 'det_2deg',
+                 '$\\geq$ 90th perc and 3°C': 'det_3deg', '$\\geq$ 90th perc and 4°C': 'det_4deg'}
+
+for label, var in threshold_map.items():
+    if var not in mhw_timeseries:
+        continue
+
+    bool_days = mhw_timeseries[var].values.astype(bool)
+
+    if not np.any(bool_days):
+        continue  # no events at this threshold
+
+    threshold_events[label] = {'days': label_events(bool_days)}
+
+for k, v in threshold_events.items():
+    print(k, "→ number of events:", v['days'].max())
+
+
+# %% ================================= Plot biomass timeserie ================================= 
 # Look at the shap of biomass evlution -- see if biomass influence the progretion of biomass increase over the season
-# Flatten the grid and compute the distance
-lat_grid = biomass_mpa_ds['clim'].lat_rho.values
-lon_grid = biomass_mpa_ds['clim'].lon_rho.values
-
-# Compute squared distance to target location
-dist2 = (lat_grid - lat)**2 + (lon_grid - lon)**2
-
-# Find index of minimum distance
-eta_idx, xi_idx = np.unravel_index(dist2.argmin(), dist2.shape)
-
-print("Grid indices:", eta_idx, xi_idx)
-print("Grid location:", lat_grid[eta_idx, xi_idx], lon_grid[eta_idx, xi_idx])
-
-# Extract biomass
-biomass_mhw = biomass_mpa_ds['actual'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
-
-# Find nearest eta_rho/xi_rho index
-eta_idx = np.abs(biomass_mpa_ds['clim'].lat_rho[:,0] - lat).argmin()
-xi_idx  = np.abs(biomass_mpa_ds['clim'].lon_rho[0,:] - lon).argmin()
-
-biomass_mhw = biomass_mpa_ds['actual'].biomass_median.isel(years=20, eta_rho=eta_idx, xi_rho=xi_idx)
+okabe_ito = ["#000000", "#009E73", "#0072B2", "#56B4E9", "#F0E442", "#E69F00", "#D55E00", "#CC79A7"]
 
 
-# Mean number of MHWs days per year
-mhw_duration_avg = mhw_event_masked_ds.duration.mean(dim='years')
-
-# %% 
-# --- Figure setup
-fig = plt.figure(figsize=(20, 8))
-gs = gridspec.GridSpec(nrows=1, ncols=1, wspace=0.08, hspace=0.3)
-
-# --- Circular boundary
-theta = np.linspace(np.pi/2, np.pi , 100)  # from 0° to -90° clockwise - Quarter-circle sector boundary
-center, radius = [0.5, 0.51], 0.5 # centered at 0.5,0.5
-arc = np.vstack([np.cos(theta), np.sin(theta)]).T
-verts = np.concatenate([[center], arc * radius + center, [center]])
-circle = mpath.Path(verts)
-
-# --- Color Setup
-# Row 1: biomass
-vmin_row1, vmax_row1 = np.nanpercentile(np.stack([d.values for d in biomass_actual_30Apr]), [5, 95])
-cmap_row1 = 'Reds'
-
-# Row 2: actual - clim
-diff_stack2 = np.stack([d.values for d in diff_actual])
-max_abs_diff2 = np.nanmax(np.abs(diff_stack2))
-vmin_row2, vmax_row2 = -max_abs_diff2, max_abs_diff2
-cmap_row2 = 'bwr'
-
-# --- Row 1: Biomass
-for i, data in enumerate(biomass_actual_30Apr):
-    ax = fig.add_subplot(gs[0, i], projection=ccrs.SouthPolarStereo())
-    ax.set_boundary(circle, transform=ax.transAxes)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-
-    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.coastlines(color='black', linewidth=0.7, zorder=3)
-
-    im1 = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
-                        cmap=cmap_row1, vmin=vmin_row1, vmax=vmax_row1,
-                        transform=ccrs.PlateCarree(), zorder=1)
-
-    gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
-    gl.xlabel_style = {'size': 7, 'rotation': 0}
-    gl.ylabel_style = {'size': 7, 'rotation': 0}
-    
-    ax.set_title(f'{years_to_plot[i]}', fontsize=14)
-
-# --- Row 2: Difference
-for i, diff in enumerate(diff_actual):
-    ax = fig.add_subplot(gs[1, i], projection=ccrs.SouthPolarStereo())
-    ax.set_boundary(circle, transform=ax.transAxes)
-    ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
-    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.coastlines(color='black', linewidth=0.7, zorder=3)
-
-    im2 = ax.pcolormesh(diff.lon_rho, diff.lat_rho, diff,
-                        cmap=cmap_row2, vmin=vmin_row2, vmax=vmax_row2,
-                        transform=ccrs.PlateCarree(), zorder=1)
-
-    gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
-    gl.xlabel_style = {'size': 7, 'rotation': 0}
-    gl.ylabel_style = {'size': 7, 'rotation': 0}
-
-# --- Colorbars
-cbar_ax1 = fig.add_axes([0.92, 0.55, 0.01, 0.35])
-plt.colorbar(im1, cax=cbar_ax1, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
-
-cbar_ax2 = fig.add_axes([0.92, 0.1, 0.01, 0.35])
-plt.colorbar(im2, cax=cbar_ax2, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
-
-# --- Row titles
-fig.text(0.52, 0.95, title, ha='center', fontsize=16)
-fig.text(0.52, 0.5, "Comparison with Climatology ", ha='center', fontsize=16)
-
-# --- Overall figure title
-plt.suptitle(f"Krill Biomass on 30th April\n{mpa}", fontsize=18, y=1.1, x=0.52)
-plt.show()
-
-# %% Look at the biomass total over MPAs evolution in time (season line and color=years)
-
-# %%
-# ==== MPAs mask for biomass ====
-mpa_names = list(mpa_dict.keys())
-mpa_abbrs = list(mpa_masks.keys())
-# --- Stack MPA masks into 1 DataArray
-mpa_masks_stack = xr.concat([mpas_south60S[mpa_dict[name][0].name] for name in mpa_dict.keys()], dim="mpa")
-mpa_masks_stack = mpa_masks_stack.assign_coords(mpa=list(mpa_dict.keys()))
-
-# --- MPAs mask biomass
-biomass_mpa_ds = {}
-for surrog, ds in biomass_ds.items():
-    # test
-    # surrog = 'actual'
-    # ds = biomass_ds[surrog]
-
-    print(f'Computing {surrog}...')
-
-    # Create mpa dimension and expand biomass along this dimension
-    biomass_expanded = ds.biomass_median.expand_dims({"mpa": list(mpa_dict.keys())}, axis=0) #shape (5, 39, 181, 231, 1440)
-    std_expanded = ds.biomass_std.expand_dims({"mpa": list(mpa_dict.keys())}, axis=0)
-    
-    # Broadcast MPA mask over years/days
-    mask_broadcast = mpa_masks_stack
-    if 'years' in ds.dims:
-        mask_broadcast = mask_broadcast.expand_dims({"years": ds.years.size}, axis=1)
-    if 'days' in ds.dims:
-        mask_broadcast = mask_broadcast.expand_dims({"days": ds.days.size}, axis=2) #shape (5, 39, 181, 231, 1440)
-    
-    # Apply mask
-    biomass_masked = biomass_expanded.where(mask_broadcast)
-    std_masked = std_expanded.where(mask_broadcast)
-    
-    # To dataset
-    biomass_mpa_ds[surrog] = xr.Dataset({"biomass_median": biomass_masked,
-                                         "biomass_std": std_masked},
-                                         coords={"mpa": list(mpa_dict.keys()),
-                                                 "years": ds.years,
-                                                 "days": ds.days,
-                                                 "lon_rho": (("eta_rho", "xi_rho"), ds.lon_rho.data),
-                                                 "lat_rho": (("eta_rho", "xi_rho"), ds.lat_rho.data),})
-    
-biomass_mpa_ds = {}
-for surrog, ds in biomass_ds.items():
-    print(f'Computing {surrog}...')
-    # test
-    surrog = 'actual'
-    ds = biomass_actual
-
-    # Add mpa dimension
-    ds = ds.assign_coords(
-        lon_rho=(("eta_rho", "xi_rho"), area_60S_SO.lon_rho.data),
-        lat_rho=(("eta_rho", "xi_rho"), area_60S_SO.lat_rho.data)
-    )
-    biomass_expanded = ds.biomass_median.expand_dims({"mpa": mpa_names}, axis=0) #shape (5, 181, 231, 1440) for clim, (5, 39, 181, 231, 1440) for others
-    mask_expanded = mpa_masks_stack
-    
-    # Apply mask -- shape (5, 181, 231, 1440) for clim, (5, 39, 181, 231, 1440) for others
-    biomass_masked = biomass_expanded.where(mask_expanded)
-    std_masked = ds.biomass_std.expand_dims({"mpa": mpa_names}, axis=0).where(mask_expanded) 
-    
-    # To Dataset
-    biomass_mpa_ds[surrog] = xr.Dataset({"biomass_median": biomass_masked,
-                                         "biomass_std": std_masked})
-
-
-# Check
-print(biomass_mpa_ds["actual"]["biomass_median"].sel(mpa="Antarctic Peninsula"))
-
-
-
-
-
-# %%
-
-
-# %% ==== Total Biomass ====
-for mpa_name, mpa_abbr in zip(mpa_names, mpa_abbrs):
-    mpa_name=mpa_names[0]
-    mpa_abbr=mpa_abbrs[0]
-    print(f"Processing MPA: {mpa_name}")
-
-    # --- Geometry masked to this MPA
-    mask = mpa_masks[mpa_abbr]  # (eta_rho, xi_rho)
-
-    area_mpa = area_60S_SO.where(mask)
-    volume_mpa = volume_60S_SO_100m.where(mask)
-
-    # Dataset that will contain ALL surrogates for this MPA
-    ds_mpa = xr.Dataset()
-
-    for surrog, ds in biomass_mpa_ds.items():
-        # surrog='clim'
-        # ds=biomass_mpa_ds[surrog]
-        print(f"  Surrogate: {surrog}")
-
-        # --- Select this MPA
-        biomass_med = ds["biomass_median"].sel(mpa=mpa_name)
-        biomass_std = ds["biomass_std"].sel(mpa=mpa_name)
-
-        # --- Biomass per grid cell - shape (39, 181, 231, 1440)
-        total_med = biomass_med * (volume_mpa*1e9)/ (area_mpa*1e6)
-        total_std = biomass_std * (volume_mpa*1e9)/ (area_mpa*1e6)
-
-        # --- Sum - shape (39, 181)
-        med_sum = total_med.sum(dim=("eta_rho", "xi_rho"), skipna=True)
-        std_sum = total_std.sum(dim=("eta_rho", "xi_rho"), skipna=True)
-
-        # --- Store with surrogate-specific names
-        ds_mpa[f"tot_{surrog}_median"] = med_sum
-        ds_mpa[f"tot_{surrog}_std"] = std_sum
-
-    # --- Dataset-level attributes
-    ds_mpa.attrs = {
-        "MPA": mpa_name,
-        "description": (
-            "Total biomass over the MPA.\n "
-            "Biomass time series were calculated for five models with ten bootstrap runs each.\n "
-            "Initial biomass conditions were provided by CEPHALOPOD.\n"
-            "Biomass was propagated using the growth model of Atkinson et al. (2006).\n "
-            "Median and standard deviation were calculated across all models and bootstraps "
-            "after the biomass time series had been computed."
-        ),
-        "surrogates": ", ".join([surrogate_names[s] for s in biomass_mpa_ds.keys()]),
-    }
-
-
-# Multiply by area to get biomass per grid cell and then sum
-# ----- Initial Biomass 
-initial_biomass_kg = biomass_initial_MPAs.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# ----- 1. Final Biomass Climatology
-final_biomass_clim_kg = biomass_clim_MPAs.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# ----- 2. Final Biomass Actual 
-final_biomass_actual_kg = biomass_actual_MPAs.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# ----- 3. Final Biomass No MHWs 
-final_biomass_noMHWs_kg = biomass_noMHWs_MPAs.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# ----- 4. Final Biomass No Warming 
-final_biomass_nowarming_kg = biomass_nowarming_MPAs.sum(dim=['eta_rho', 'xi_rho'])*1e-6
-
-# %% ================== Seasonal Biomass Gains ==================
-DeltaB_clim = final_biomass_clim_kg - initial_biomass_kg
-DeltaB_actual = final_biomass_actual_kg - initial_biomass_kg
-DeltaB_noMHWs = final_biomass_noMHWs_kg - initial_biomass_kg
-DeltaB_nowarming = final_biomass_nowarming_kg - initial_biomass_kg
-
-# %% ================== Differences in seasonal biomass gains ==================
-# -- Percentage change in seasonal krill biomass gain relative to climatology:
-# 1. In the 'real' world
-perc_actual = (DeltaB_actual-DeltaB_clim)/DeltaB_clim *100
-
-# 2. In a world without MHWs
-perc_noMHWs = (DeltaB_noMHWs-DeltaB_clim)/DeltaB_clim *100
-
-# 3. In a world without warming (variability-only)
-perc_nowarming = (DeltaB_nowarming-DeltaB_clim)/DeltaB_clim *100
-
-# -- Contributions [%]
-perc_MHW = perc_actual - perc_noMHWs
-perc_warming = perc_actual - perc_nowarming
-
-# mean_MHW_influence = (perc_MHW.to_array(dim="MPA").mean(dim=["MPA", "years"]))
-# mean_warming_influence = (perc_warming.to_array(dim="MPA").mean(dim=["MPA", "years"]))
-# print(f"Mean MHW influence (over years and MPAs) on seasonal gain: {mean_MHW_influence:.3f} %")
-# print(f"Mean warming influence (over years and MPAs) on seasonal gain: {mean_warming_influence:.3f} %")
-
-# -- Normalize, i.e. actual gain = 100% and then reduce and add relative to it
-perc_MHW_norm = (DeltaB_actual - DeltaB_noMHWs) / DeltaB_actual * 100
-perc_warming_norm = (DeltaB_actual - DeltaB_nowarming) / DeltaB_actual * 100
-
-# %% ================== Plots ==================
-MPA_dict = {
-    "biomass_rs": ("Ross Sea", "#5F0F40"),
-    "biomass_o": ("South Orkney Islands", "#FFBA08"),
-    "biomass_ea": ("East Antarctic", "#E36414"),
-    "biomass_ws": ("Weddell Sea", "#4F772D"),
-    "biomass_ap": ("Antarctic Peninsula", "#0A9396")
+title_kwargs = {'fontsize': 15} 
+label_kwargs = {'fontsize': 12} 
+tick_kwargs = {'labelsize': 10} 
+suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'}
+lw = 0.9
+# === Threshold colors ===
+threshold_colors = {
+    '$\geq$ 90th perc and 1°C': '#5A7854',
+    '$\geq$ 90th perc and 2°C': '#8780C6',
+    '$\geq$ 90th perc and 3°C': '#E07800',
+    '$\geq$ 90th perc and 4°C': '#9B2808'
 }
 
-plt.figure(figsize=(12,6))
+# --- Prepare time axis 
+days_xaxis = biomass_mhw_actual['days'].values
+base_date = datetime(2021, 11, 1)
+date_list = [(i, (base_date + timedelta(days=i)).strftime('%b %d')) for i in range(len(days_xaxis))]
+date_dict = dict(date_list)
+tick_positions = np.arange(days_xaxis.min(), days_xaxis.max() + 1, 15)
+tick_labels = [date_dict.get(day, '') for day in tick_positions]
 
-plt.plot(perc_MHW_norm.years, perc_MHW_norm.biomass_rs)
-plt.plot(perc_MHW_norm.years, perc_warming_norm.biomass_rs)
+# --- Setup figure
+fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, figsize=(12, 6), sharex=True, constrained_layout=True)
 
-plt.axhline(0, color='gray', linestyle='--', alpha=0.6)
-plt.title("Change in Krill Seasonal Biomass Gain: Actual vs Climatology", fontsize=14, weight='bold')
-plt.xlabel("Year", fontsize=13)
-plt.ylabel("$\Delta$ [\%]", fontsize=13)
-plt.grid(True, linestyle='--', alpha=0.35)
-plt.legend(frameon=False)
-plt.tight_layout()
+# --- 1. Biomass timeseries 
+ax1.plot(days_xaxis, biomass_mhw_clim.values, color=okabe_ito[0],  linewidth=lw, label='Climatology')
+ax1.plot(days_xaxis, biomass_mhw_actual.values, color=okabe_ito[1],linewidth=lw, label='Actual')
+ax1.plot(days_xaxis, biomass_mhw_nomhw.values, color=okabe_ito[3],  linestyle='--', linewidth=1.3, label='No MHWs')
+ax1.plot(days_xaxis, biomass_mhw_climtrend.values, color=okabe_ito[5],  linestyle='--', linewidth=1.3, label='No MHWs (Clim with trend)')
+ax1.plot(days_xaxis, biomass_mhw_nowarming.values, color=okabe_ito[-1],  linestyle='--', linewidth=1.3, label='No Warming')
+ax1.set_ylabel("Biomass [mg C/m³]", **label_kwargs)
+ax1.set_title(f"{mhw_event_choice['mpa_name']} in {year_idx+1980}\n" f"Lat {biomass_mhw_actual.lat_rho.values:.2f}, Lon {biomass_mhw_actual.lon_rho.values:.2f}", **title_kwargs)
+ax1.tick_params(axis='y', length=2, width=0.5, **tick_kwargs)
+ax1.tick_params(axis='x', labelbottom=False)
+ax1.grid(alpha=0.3)
+ax1.legend(loc='upper left', frameon=True, fontsize=9)
+
+
+# --- 2. Chla timeseries 
+ax2.plot(days_xaxis, chla_surf_SO_allyrs_event.chla.values, color='green',  linewidth=lw)
+ax2.set_ylabel("Chla [mg /m³]", **label_kwargs)
+ax1.tick_params(axis='y', length=2, width=0.5, **tick_kwargs)
+ax1.tick_params(axis='x', labelbottom=False)
+ax1.grid(alpha=0.3)
+
+# --- 3. MHW Event Timeline 
+ax3.set_ylim(0, len(threshold_events))
+ax3.set_yticks([])
+ax3.set_ylabel("Detected MHW", rotation=90, labelpad=15, **label_kwargs)
+
+for i, (label, info) in enumerate(threshold_events.items()):
+    color = threshold_colors[label]
+    active_days = info['days'][:len(days_xaxis)]
+    unique_events = np.unique(active_days[active_days > 0])
+    for event_id in unique_events:
+        idx = np.where(active_days == event_id)[0]
+        if len(idx) == 0:
+            continue
+        x_start = days_xaxis[idx[0]]
+        x_end   = days_xaxis[idx[-1]]
+        ax3.axvspan(x_start, x_end, color=color, alpha=0.8)
+
+ax3.set_xlabel("Date", **label_kwargs)
+ax3.set_xticks(tick_positions)
+ax3.set_xticklabels(tick_labels, rotation=45, ha='right')
+ax3.tick_params(axis='x', **tick_kwargs, length=2, width=0.5)
+ax3.tick_params(axis='y', **tick_kwargs, length=2, width=0.5)
+
+# --- Legend ---
+handles = [Patch(facecolor=color, edgecolor='black', lw=0.5) for label, color in threshold_colors.items() if label in threshold_events]
+labels = [label for label in threshold_colors.keys() if label in threshold_events]
+fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.07), ncol=len(handles), frameon=True, **label_kwargs)
+
 plt.show()
 
 
 # %%
-
-years = DeltaB_actual.years.values 
-warming_arr = (DeltaB_actual - DeltaB_nowarming).biomass_rs
-mhw_arr = (DeltaB_nowarming - DeltaB_noMHWs).biomass_rs
-
-actual_arr = DeltaB_actual.biomass_rs  # total gain
-
-# ---- Plot ----
-fig, ax = plt.subplots(figsize=(14,6))
-
-# Stacked bars: MHWs at bottom, Warming on top
-ax.bar(years, mhw_arr, label="MHWs", color="skyblue")
-ax.bar(years, warming_arr, bottom=mhw_arr, label="Warming", color="tomato")
-
-ax.plot(years, actual_arr, color="black", lw=2, label="Actual seasonal gain")
-
-ax.set_title("Southern Ocean Krill Seasonal Biomass Gain (Nov → Apr)\nMPA: Ross Sea", fontsize=14, weight='bold')
-ax.set_xlabel("Year", fontsize=13)
-ax.set_ylabel("Seasonal gain [kg]", fontsize=13)
-ax.grid(True, linestyle='--', alpha=0.35)
-ax.legend(frameon=False)
-plt.tight_layout()
-plt.show()
-
-
-
-# %%
-
-%%
