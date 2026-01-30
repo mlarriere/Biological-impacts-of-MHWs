@@ -105,8 +105,7 @@ arr_global = arr[:, :, ::-1, :]  # flip along lat axis
 lat_flipped = lat[::-1]
 
 # Create new Dataset
-biomass_cephalopod = xr.Dataset(
-    data_vars=dict(total_krill_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_global)), 
+biomass_cephalopod = xr.Dataset(data_vars=dict(total_krill_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_global)), 
     coords=dict(months=np.arange(1, 13),
                 algo_bootstrap=np.arange(1, 51),
                 lat=lat_flipped, lon=lon),
@@ -133,27 +132,19 @@ lat_60S = lat[lat_mask]  # lat_60S: -60.5 → -89.5 (north → south)
 arr_60S_flipped = arr_60S[:, :, ::-1, :]
 lat_60S_flipped = lat_60S[::-1]  # now first row = south pole
 
-biomass_cephalopod_60S = xr.Dataset(
-    data_vars=dict(total_krill_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped)),
-    coords=dict(
-        months=np.arange(1, 13),
-        algo_bootstrap=np.arange(1, 51),
-        lat=lat_60S_flipped,
-        lon=np.linspace(-179.5, 179.5, 360)
-    )
-)
+biomass_cephalopod_60S = xr.Dataset(data_vars=dict(total_krill_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped)),
+                                    coords=dict( months=np.arange(1, 13), algo_bootstrap=np.arange(1, 51), lat=lat_60S_flipped, lon=np.linspace(-179.5, 179.5, 360)))
+
+biomass_cephalopod_60S.attrs = biomass_cephalopod.attrs.copy()
+biomass_cephalopod_60S.attrs.update({"model_extent": "Southern Ocean",})
 
 # -- Euphausia superba biomass
 # Euphausia = 80% of total krill
-biomass_cephalopod_60S_euphausia = xr.Dataset(
-    data_vars=dict(euphausia_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped * 0.8)),
-    coords=dict(
-        months=np.arange(1, 13),
-        algo_bootstrap=np.arange(1, 51),
-        lat=lat_60S_flipped,
-        lon=np.linspace(-179.5, 179.5, 360)
-    )
-)
+biomass_cephalopod_60S_euphausia = xr.Dataset(data_vars=dict(euphausia_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped * 0.8)),
+                                              coords=dict(months=np.arange(1, 13), algo_bootstrap=np.arange(1, 51), lat=lat_60S_flipped, lon=np.linspace(-179.5, 179.5, 360)))
+
+biomass_cephalopod_60S_euphausia.attrs = {"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
+                                          "units": "mg C m-3",}
 
 # -- Save 
 output_file_biomass_tot_krill = os.path.join(path_cephalopod, "total_krill_biomass_SO.nc")
@@ -338,7 +329,9 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     # Add Attributes
     if 'regrid_method' in biomass_regridded.attrs:
         del biomass_regridded.attrs['regrid_method']
-    biomass_regridded.attrs.update({"regridding": "Nearest neighbors, using bilinear method."})
+    biomass_regridded.attrs.update({"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
+                                    "regridding": "Nearest neighbors, using bilinear method.",
+                                    "units": "mg C m-3",})
 
     # Save to file 
     biomass_regridded.to_netcdf(output_file_biomass_regrid, engine="netcdf4")
@@ -423,10 +416,12 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     # To Dataset
     biomass_interp_daily_ds = biomass_interp_daily.to_dataset(name="euphausia_biomass")
     biomass_interp_daily_ds = biomass_interp_daily_ds.reset_index(["algo_bootstrap"])
-    biomass_interp_daily_ds.attrs.update({"regridding": "Nearest neighbors, using bilinear method.",
+    biomass_interp_daily_ds.attrs.update({"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
+                                          "regridding": "Nearest neighbors, using bilinear method.",
                                           "interpolation": "Nan values filled using linear trend fits along latitude and longitude.\n"
                                                            "Latitude- and longitude-based estimated values are combined with inverse distance weighting.\n"
-                                                           "Finally, Gaussian smoothing (with sigma = 1)."})
+                                                           "Finally, Gaussian smoothing (with sigma = 1).",
+                                          "units": "mg C m-3",})
 
     # Save to file
     biomass_interp_daily_ds.to_netcdf(output_file_biomass_regrid_interp, engine="netcdf4")
