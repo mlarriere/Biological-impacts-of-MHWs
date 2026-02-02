@@ -113,6 +113,20 @@ biomass_regridded = xr.open_dataset(os.path.join(path_cephalopod, 'euphausia_bio
 biomass_regrid_interp = xr.open_dataset(os.path.join(path_cephalopod, 'euphausia_biomass_SO_regrid_interp.nc')) #shape (181, 50, 231, 1442)
 original_product = xr.open_dataset(os.path.join(path_cephalopod, 'total_krill_biomass_SO.nc'))
 
+# -- Convert biomass from [mgC/m3] to [mg/m3]
+# Carbon fraction in Euphausia Superba -- Data from Farber-Lorda et al. (2009)
+C_frac_stage = {'juvenile': (0.4989, 0.0250), 'males': (0.4756, 0.0266), 'mature females': (0.4756, 0.0297), 'spent females': (0.5299, 0.0267),} # [fraction C / mg biomass]
+mean_C_fraction = np.mean(np.array([v[0] for v in C_frac_stage.values()]))
+propagated_sd = np.sqrt(np.sum(np.array([v[1] for v in C_frac_stage.values()])**2) / len(np.array([v[1] for v in C_frac_stage.values()])))
+# print(f"Mean C fraction: {mean_C_fraction:.4f}")
+# print(f"Propagated SD: {propagated_sd:.4f}")
+
+biomass_regridded_dry = biomass_regridded / mean_C_fraction #[mg/m3]
+biomass_regrid_interp_dry = biomass_regrid_interp / mean_C_fraction #[mg/m3]
+print(f'Before: {biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mgC/m3')
+print(f'After: {biomass_regridded_dry.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mg/m3')
+
+
 # %% ======================== Load data ========================
 # --- Load mass data [mg] for each maturity stage -- Southern Ocean  
 # 1. Climatology
@@ -143,9 +157,9 @@ def biomass_k(k, growth_fact_pop, B0_interp=False):
     n_days = 181
     
     if B0_interp:
-        B0 = biomass_regrid_interp.euphausia_biomass.isel(days=0, algo_bootstrap=k).values
+        B0 = biomass_regrid_interp_dry.euphausia_biomass.isel(days=0, algo_bootstrap=k).values
     else:
-        B0 = biomass_regridded.euphausia_biomass.isel(days=0, algo_bootstrap=k).values
+        B0 = biomass_regridded_dry.euphausia_biomass.isel(days=0, algo_bootstrap=k).values
 
     B_k = np.empty((n_days, *B0.shape), dtype=np.float32)
     B_k[0] = B0
@@ -198,9 +212,9 @@ def evolution_biomass_yr(year_idx, ds_mass, proportion, B0_interp=False):
 
     # Add attributes
     biomass_stats_ds.biomass_median.attrs.update({"description": "Median over the 5 models × 10 bootstraps of Cephalopod.",
-                                                  "units": "g C m-3",})
+                                                  "units": "mg m-3",})
     biomass_stats_ds.biomass_std.attrs.update({"description": "Spread over 5 models × 10 bootstraps of Cephalopod.",
-                                               "units": "g C m-3",})
+                                               "units": "mg m-3",})
 
     # Clean memory
     del B_all, biomass_ds
@@ -252,7 +266,7 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
                                                "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
                                                "Initial Biomass": initial_biomass_description,
                                                "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
-                                               "Units": "mgC/m3",})
+                                               "Units": "mg/m3",})
             
             # Save to file
             B_algo_median_all_ds.to_netcdf(output_file, mode="w", engine="netcdf4")
@@ -282,7 +296,8 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
                                                "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
                                                "Initial Biomass": initial_biomass_description,
                                                "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
-                                               "Units": "mgC/m3",})
+                                               "Units": "mg/m3",
+                                               'Conversion to dry weight': f"Using mean C fraction of {mean_C_fraction:.4f} (SD: {propagated_sd:.4f}) from Farber-Lorda et al. (2009).",})
 
             # Save to file
             B_algo_median_all_ds.to_netcdf(output_file)

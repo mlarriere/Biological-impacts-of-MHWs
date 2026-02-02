@@ -208,6 +208,14 @@ def mask_one_surrogate(args):
     # Extract arguments
     surrog, ds, mpa_name, mpa_abbrv, mpa_mask, interp = args
 
+    # test
+    # surrog ='clim'
+    # ds = biomass_ds['clim']
+    # mpa_name = 'Ross Sea'
+    # mpa_abbrv = 'RS'
+    # mpa_mask = mpa_masks['RS'][1]
+    # interp = False
+
     # 2cases, regridded only or with interpolation
     if interp:
         file_path = os.path.join(path_biomass_ts_MPAs_interp, f"{surrog}_biomass_{mpa_abbrv}.nc")
@@ -232,9 +240,11 @@ def mask_one_surrogate(args):
                             coords={"years": ds.years if "years" in ds.dims else None,
                                     "days": ds.days,
                                     "lon_rho": (("eta_rho", "xi_rho"), ds.lon_rho.data),
-                                    "lat_rho": (("eta_rho", "xi_rho"), ds.lat_rho.data),},
-                            attrs={"mpa_name": mpa_name})
+                                    "lat_rho": (("eta_rho", "xi_rho"), ds.lat_rho.data),},)
         
+        ds_mpa.attrs.update({"mpa_name": mpa_name,
+                             **{k: ds.attrs[k] for k in ["Description", "Units"] if k in ds.attrs}})
+
         # Save
         ds_mpa.to_netcdf(file_path)
         return f"Saved {mpa_name}"
