@@ -71,8 +71,8 @@ path_mhw = '/nfs/meso/work/jwongmeng/ROMS/model_runs/hindcast_2/output/avg/corre
 joel_path ='/home/jwongmeng/work/ROMS/scripts/mhw_krill/' #codes joel
 output_path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth'
-
-output_path = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
+path_fixed_baseline = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
+path_duration = os.path.join(path_fixed_baseline, 'mhw_durations')
 
 # Sizes and dimensions
 years = range(1980, 2020)
@@ -130,11 +130,67 @@ def compute_mhw_durations(arr):
     return mhw_durations, non_mhw_durations
 
 
+def apply_hobday_rules(bool_event):
+    # test
+    # bool_event = mhw_rel_only.values
+
+    print(bool_event[38*365: 38*365 + 30, 224, 583]) #test
+
+    ntime, neta, nxi = bool_event.shape
+
+    # --- Calculate initial durations
+    # Initialization
+    reshaped = bool_event.reshape(ntime, neta * nxi) #shape (14600, 625828)
+    mhw_dur = np.zeros_like(reshaped, dtype=np.int32) # ~30s
+    non_mhw_dur = np.zeros_like(reshaped, dtype=np.int32) #~7min
+
+    for i in range(reshaped.shape[1]):
+        mhw_dur[:, i], non_mhw_dur[:, i] = compute_mhw_durations(reshaped[:, i]) # ~30min
+    print(mhw_dur[38*365: 38*365 + 30, 224 * nxi + 583]) #test
+
+    # Reshape
+    mhw_dur = mhw_dur.reshape(ntime, neta, nxi) 
+    non_mhw_dur = non_mhw_dur.reshape(ntime, neta, nxi) 
+
+    # --- Apply Hobday rules
+    # MHW last at least 5 days
+    mhw_event = mhw_dur >= 5 
+
+    # Detecting gaps of 1 day 
+    mhw_prev = np.roll(mhw_event, 1, axis=0)
+    mhw_next = np.roll(mhw_event, -1, axis=0)
+    mhw_prev[0] = False
+    mhw_next[-1] = False
+
+    gap_1 = (non_mhw_dur == 1) & mhw_prev & mhw_next #~1min
+    print(gap_1[38*365: 38*365 + 30, 224, 583]) #test
+
+    # Detecting gaps of 2 days 
+    mhw_prev2 = np.roll(mhw_event, 2, axis=0)
+    mhw_next2 = np.roll(mhw_event, -2, axis=0)
+    mhw_prev2[:2] = False
+    mhw_next2[-2:] = False
+
+    gap_2 = (non_mhw_dur == 2) & mhw_prev2 & mhw_next2 #~7min
+    print(gap_2[38*365: 38*365 + 30, 224, 583]) #test
+
+    # Combine events, i.e. allowing gaps of 1 and 2 days between 2 MHW events lasting more than 5 days
+    mhw_combined = mhw_event | gap_1 | gap_2 #~5min
+
+    # --- Recompute final durations
+    reshaped = mhw_combined.reshape(ntime, neta * nxi)
+    mhw_final = np.zeros_like(reshaped, dtype=np.int32) #~13min
+
+    for i in range(reshaped.shape[1]):
+        mhw_final[:, i], _ = compute_mhw_durations(reshaped[:, i]) #~min
+
+    return mhw_final.reshape(ntime, neta, nxi)
+
+
 ds = xr.open_dataset(path_mhw + file_var + 'eta200.nc') #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
 all_depths= ds['z_rho'].values
 
 def mhw_duration(depth_idx):
-# for depth_idx in range(14): # computing time ~10min per depth
     depth_idx=0
 
     print(f'---------DEPTH{depth_idx}---------')
@@ -142,24 +198,90 @@ def mhw_duration(depth_idx):
     start_time = time.time()
     
     # Read data - only relative threshold
-    det_ds_depth= xr.open_dataset(os.path.join(output_path, f"det_depth/det_{-all_depths[depth_idx]}m.nc")) #read each depth
+    det_ds_depth= xr.open_dataset(os.path.join(path_fixed_baseline, f"det_depth/det_{-all_depths[depth_idx]}m.nc")) #read each depth
+
+    # ----- MHW DURATION BASED ON ONLY RELATIVE THRESHOLDS (90th percentile)-----
+    output_file_rel = os.path.join(path_duration, f"mhw_duration_90th_{-all_depths[depth_idx]}m.nc")
+    if os.path.exists(output_file_rel):
+        print(f"File already exists for depth {depth_idx} (90th percentile only).")
+        return
+    
+    # Relative-only MHWs
+    det_rel_thres = det_ds_depth.mhw_rel_threshold # shape: (40, 365, 434, 1442). Boolean
+    print(det_rel_thres.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+    mhw_rel_only = det_rel_thres.stack(time=('years', 'days')).transpose('time','eta_rho','xi_rho') #shape (14000, 434, 1442)
+    mhw_rel_only_final = apply_hobday_rules(mhw_rel_only.values)
+
+    # Reformat with years and days in dim
+    mhw_rel_recalc_reshaped = mhw_rel_only_final.reshape((40, 365, neta, nxi))
+
+    # To dataset
+    ds_intermediate_rel = xr.Dataset({"duration": (("years", "days", "eta_rho", "xi_rho"), mhw_rel_recalc_reshaped)},
+                                     coords={"lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+                                             "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values)}),  # (434, 1442)
+    
+    # Save to file
+    ds_intermediate_rel.to_netcdf(output_file_rel, engine="netcdf4")
+    print(f"File written (90th percentile only): {depth_idx}")
+
+    # mhw_rel_thresholds_stacked = det_rel_thres.stack(time=('years', 'days')) #consider time as continuous
+    # mhw_rel_thresholds_stacked = mhw_rel_thresholds_stacked.transpose('time', 'eta_rho', 'xi_rho') #time as first dim
+    # print(det_rel_thres.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+
+    # # Initialization
+    # ntime, neta, nxi = mhw_rel_thresholds_stacked.shape
+    # mhw_rel_thresh_reshaped = mhw_rel_thresholds_stacked.values.reshape(ntime, neta * nxi) #(14600, 625828)
+    # mhw_durations_rel = np.zeros_like(mhw_rel_thresh_reshaped, dtype=np.int32)
+    # non_mhw_durations_rel = np.zeros_like(mhw_rel_thresh_reshaped, dtype=np.int32)
+    
+    # Calculating duration
+    # print('Calculating duration')
+    # for i in range(mhw_rel_thresh_reshaped.shape[1]): # Loop over grid points (1D)
+    #     mhw_durations_rel[:, i], non_mhw_durations_rel[:, i] = compute_mhw_durations(mhw_rel_thresh_reshaped[:, i])
+
+
+    # To dataset
+    # ds_intermediate_rel = xr.Dataset({"mhw_durations": (("time", "eta_rho", "xi_rho"), mhw_durations_rel),
+    #                               "non_mhw_durations": (("time", "eta_rho", "xi_rho"), non_mhw_durations_rel),}, 
+    #                               coords={"lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+    #                                       "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values)}),  # (434, 1442)
+    # print(ds_intermediate_rel.mhw_durations.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
+
+
+    # ----- MHW DURATION BASED ON BOTH RELATIVE AND ABSOLUTE THRESHOLDS (1°C)-----
+    output_file = os.path.join(path_duration, f"mhw_duration_{-all_depths[depth_idx]}m.nc")
+    if os.path.exists(output_file):
+        print(f"File already exists for depth {depth_idx} (90th percentile and 1°C).")
+        return
 
     # Intersection between relative and 1°C threshold (min abs thresh) to define mhw duration
-    det_rel_thres = det_ds_depth.mhw_rel_threshold # shape: (40, 365, 434, 1442). Boolean
     det_abs_1deg = det_ds_depth.mhw_abs_threshold_1_deg # shape: (40, 365, 434, 1442). Boolean
     mhw_both_thresholds = np.logical_and(det_rel_thres, det_abs_1deg) #rel thresh is True if >1°C else False ~1min computing
     print(mhw_both_thresholds.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
+    mhw_rel_abs = mhw_both_thresholds.stack(time=('years', 'days')).transpose('time','eta_rho','xi_rho')
+    mhw_rel_abs_final = apply_hobday_rules(mhw_rel_abs.values)
 
-    mhw_both_thresholds_stacked = mhw_both_thresholds.stack(time=('years', 'days')) #consider time as continuous
-    mhw_both_thresholds_stacked = mhw_both_thresholds_stacked.transpose('time', 'eta_rho', 'xi_rho') #time as first dim
+    # Reformat with years and days in dim
+    mhw_rel_abs_final = mhw_rel_abs_final.reshape((40, 365, neta, nxi))
+
+    # To dataset
+    ds_intermediate = xr.Dataset({ "duration": (("years", "days", "eta_rho", "xi_rho"), mhw_rel_abs_final)},
+                                 coords={"lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+                                         "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values)}),  # (434, 1442)
+    
+    # Save to file
+    ds_intermediate.to_netcdf(output_file, engine="netcdf4")
+
+    # mhw_both_thresholds_stacked = mhw_both_thresholds.stack(time=('years', 'days')) #consider time as continuous
+    # mhw_both_thresholds_stacked = mhw_both_thresholds_stacked.transpose('time', 'eta_rho', 'xi_rho') #time as first dim
 
     # Initialization ~10s
-    ntime, neta, nxi = mhw_both_thresholds_stacked.shape
-    # mhw_stacked = np.zeros((ntime, neta, nxi), dtype=np.int32)
-    # non_mhw_stacked = np.zeros((ntime, neta, nxi), dtype=np.int32)
-    mhw_both_thresh_reshaped = mhw_both_thresholds_stacked.values.reshape(ntime, neta * nxi) #(14600, 625828)
-    mhw_durations_all = np.zeros_like(mhw_both_thresh_reshaped, dtype=np.int32)
-    non_mhw_durations_all = np.zeros_like(mhw_both_thresh_reshaped, dtype=np.int32)
+    # ntime, neta, nxi = mhw_both_thresholds_stacked.shape
+    # # mhw_stacked = np.zeros((ntime, neta, nxi), dtype=np.int32)
+    # # non_mhw_stacked = np.zeros((ntime, neta, nxi), dtype=np.int32)
+    # mhw_both_thresh_reshaped = mhw_both_thresholds_stacked.values.reshape(ntime, neta * nxi) #(14600, 625828)
+    # mhw_durations_all = np.zeros_like(mhw_both_thresh_reshaped, dtype=np.int32)
+    # non_mhw_durations_all = np.zeros_like(mhw_both_thresh_reshaped, dtype=np.int32)
 
     # Calculating duration -- ~ 11min per depth
     # for ixi in range(nxi):
@@ -172,13 +294,13 @@ def mhw_duration(depth_idx):
     #         non_mhw_stacked[:, ieta,ixi] = non_mhw_dur
 
     # Calculating duration -- ~ 4min per depth
-    print('Calculating duration')
-    for i in range(mhw_both_thresh_reshaped.shape[1]): # Loop over grid points (1D)
-        mhw_durations_all[:, i], non_mhw_durations_all[:, i] = compute_mhw_durations(mhw_both_thresh_reshaped[:, i])
+    # print('Calculating duration')
+    # for i in range(mhw_both_thresh_reshaped.shape[1]): # Loop over grid points (1D)
+    #     mhw_durations_all[:, i], non_mhw_durations_all[:, i] = compute_mhw_durations(mhw_both_thresh_reshaped[:, i])
 
-    # Reshape to (eta, xi)
-    mhw_durations = mhw_durations_all.reshape(ntime, neta, nxi)
-    non_mhw_durations = non_mhw_durations_all.reshape(ntime, neta, nxi)
+    # # Reshape to (eta, xi)
+    # mhw_durations = mhw_durations_all.reshape(ntime, neta, nxi)
+    # non_mhw_durations = non_mhw_durations_all.reshape(ntime, neta, nxi)
 
     # Check
     # np.all(mhw_durations == mhw_stacked) #True
@@ -188,101 +310,26 @@ def mhw_duration(depth_idx):
     # assert np.all(np.isfinite(non_mhw_stacked)), "non_mhw_durations has non-finite values"
 
     # To dataset
-    ds_intermediate = xr.Dataset({
-        "mhw_durations": (("time", "eta_rho", "xi_rho"), mhw_durations),
-        "non_mhw_durations": (("time", "eta_rho", "xi_rho"), non_mhw_durations),
-    }, coords={
-        "lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
-        "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
-    })
-    print(ds_intermediate.mhw_durations.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
+    # ds_intermediate = xr.Dataset({
+    #     "mhw_durations": (("time", "eta_rho", "xi_rho"), mhw_durations),
+    #     "non_mhw_durations": (("time", "eta_rho", "xi_rho"), non_mhw_durations),
+    # }, coords={
+    #     "lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
+    #     "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values),  # (434, 1442)
+    # })
+    # print(ds_intermediate.mhw_durations.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
 
 
     # print(ds_intermediate.mhw_durations.isel(time=slice(38*365+70, 39*365-70), eta_rho=200, xi_rho=1000).values)
     # print(ds_intermediate.non_mhw_durations.isel(time=slice(38*365+70, 39*365-70), eta_rho=200, xi_rho=1000).values)
           
-    # Clean memory
-    del non_mhw_durations, mhw_durations, det_ds_depth #,non_mhw_stacked, mhw_stacked
-    gc.collect()
-    print(f"Memory used: {psutil.virtual_memory().percent}%")
+    # # Clean memory
+    # del non_mhw_durations, mhw_durations, det_ds_depth #,non_mhw_stacked, mhw_stacked
+    # gc.collect()
+    # print(f"Memory used: {psutil.virtual_memory().percent}%")
 
 
-    # --- Rules on duration
-    print('Rules duration')
-
-    # MHW last at least 5 days
-    mhw_event = ds_intermediate['mhw_durations'] >= 5 
-    print(mhw_event.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
-
-    # Gap of 1 day -- ~15min
-    # gap_1_day = (ds_intermediate['non_mhw_durations'] == 1) & (mhw_event.shift(time=1).astype(bool)) & (mhw_event.shift(time=-1).astype(bool))
-    # gap_1_day = gap_1_day.astype(bool)
-
-    # # Gap of 2 days -- ~15min
-    # gap_2_day = (ds_intermediate['non_mhw_durations'] == 2) & (mhw_event.shift(time=2).astype(bool)) & (mhw_event.shift(time=-2).astype(bool))
-    # gap_2_day = gap_2_day.astype(bool)
-
-    # Extract arrays
-    mhw_array = mhw_event.values  # (time, eta_rho, xi_rho)
-    non_mhw_array = ds_intermediate['non_mhw_durations'].values  # (time, eta_rho, xi_rho)
-    gap_1_day = np.zeros_like(mhw_array, dtype=bool)
-    gap_2_day = np.zeros_like(mhw_array, dtype=bool)
-
-    # Gap of 1 day -- ~1min
-    mhw_prev = np.roll(mhw_array, shift=1, axis=0)
-    mhw_next = np.roll(mhw_array, shift=-1, axis=0)
-    mhw_prev[0, :, :] = False  # First timestep invalid (1 January 1980)
-    mhw_next[-1, :, :] = False  # Last timestep invalid (31 Dec 2019)
-    gap_1_day = (non_mhw_array == 1) & mhw_prev & mhw_next
-    print(gap_1_day[38*365: 38*365 + 30, 224, 583])
-
-    # np.all(gap_1_day==gap_1_day_test) #True
     
-    # Gap of 2 days -- ~1min
-    mhw_prev2 = np.roll(mhw_array, shift=2, axis=0)
-    mhw_next2 = np.roll(mhw_array, shift=-2, axis=0)
-    mhw_prev2[0:2, :, :] = False  # First two timesteps invalid
-    mhw_next2[-2:, :, :] = False  # Last two timesteps invalid
-    gap_2_day = (non_mhw_array == 2) & mhw_prev2 & mhw_next2
-    print(gap_2_day[38*365: 38*365 + 30, 224, 583])
-
-    # np.all(gap_2_day==gap_2_day_test) #True
-
-    # Combine events
-    mhw_event_combined_stacked = mhw_event | gap_1_day | gap_2_day
-    mhw_event_combined_stacked = mhw_event_combined_stacked.astype(bool)
-    print(mhw_event_combined_stacked.isel(eta_rho=224, xi_rho=583, time=slice(38*365, 38*365 + 30)).values)
-
-    # Initialization
-    ntime, neta, nxi = mhw_event_combined_stacked.shape
-    # mhw_recalc = np.zeros((ntime, neta, nxi), dtype=np.int32)
-    # non_mhw_recalc = np.zeros((ntime, neta, nxi), dtype=np.int32)
-    mhw_event_combined_reshaped = mhw_event_combined_stacked.values.reshape(ntime, neta * nxi) #(14600, 625828)
-    mhw_durations_recalc_all = np.zeros_like(mhw_event_combined_reshaped, dtype=np.int32)
-    non_mhw_durations_recalc_all = np.zeros_like(mhw_event_combined_reshaped, dtype=np.int32)
-
-    # Recalculating duration -- ~11min
-    # for ixi in range(nxi):
-    #     for ieta in range(neta):
-    #         bool_series = mhw_event_combined_stacked[:,ieta,ixi].values  # 1D time series
-    #         mhw_dur_ext, non_mhw_dur_ext = compute_mhw_durations(bool_series)
-    #         mhw_recalc[:,ieta,ixi] = mhw_dur_ext
-    #         non_mhw_recalc[:,ieta,ixi] = non_mhw_dur_ext
-
-    # Recalculating duration -- ~ 4min per depth
-    print('Recalculating duration')
-    for i in range(mhw_event_combined_reshaped.shape[1]): # Loop over grid points (1D)
-        mhw_durations_recalc_all[:, i], non_mhw_durations_recalc_all[:, i] = compute_mhw_durations(mhw_event_combined_reshaped[:, i])
-
-    # Reshape to (eta, xi)
-    mhw_recalc = mhw_durations_recalc_all.reshape(ntime, neta, nxi)
-    non_mhw_recalc= non_mhw_durations_recalc_all.reshape(ntime, neta, nxi)
-    print(mhw_recalc[38*365: 38*365 + 30, 224, 583])
-
-    # Reformat with years and days in dim
-    mhw_recalc_reshaped = mhw_recalc.reshape((40, 365, neta, nxi))
-    non_mhw_recalc_reshaped = non_mhw_recalc.reshape((40, 365, neta, nxi))
-
     # To dataset
     ds_out = xr.Dataset({
         "mhw_durations": (("years", "days", "eta_rho", "xi_rho"), mhw_recalc_reshaped),
