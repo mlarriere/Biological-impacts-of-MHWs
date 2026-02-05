@@ -214,7 +214,6 @@ def mhw_duration(depth_idx):
     ds_intermediate_rel.to_netcdf(output_file_rel, engine="netcdf4")
     print(f"File written (90th percentile only): {depth_idx}")
 
-
     # ----- MHW DURATION BASED ON BOTH RELATIVE AND ABSOLUTE THRESHOLDS (1°C)-----
     output_file = os.path.join(path_duration, f"mhw_duration_{-all_depths[depth_idx]}m.nc")
     if os.path.exists(output_file):
@@ -340,8 +339,6 @@ def mhw_duration(depth_idx):
     print(f"Processing time for depth {depth_idx}: {elapsed_time:.2f} secs, Memory used: {psutil.virtual_memory().percent}%")
 
 process_map(mhw_duration, range(3,6), max_workers=6, desc="Processing depth")  # detects extremes for each latitude in parallel - computing time ~10min total
-
-
 
 #%% =============== Mean duration over hincast ===============
 det_combined_ds= xr.open_dataset( os.path.join(path_det, f"duration_AND_thresh_5mFULL.nc"))
