@@ -86,8 +86,8 @@ path_cephalopod = os.path.join(path_biomass, 'CEPHALOPOD')
 # --- Load biomass from CEPHALOPOD
 # 5 different algorithms, 10 bootstraps per algo
 biomass_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_tot_krill_WOA_2026-01-12 17:27:04.013515/Euphausiacea/tot_krill_biomass.nc') #shape (coords, model, time) = (d1=64800, d2=5*10,  d3=12)
-print(f'max: {biomass_data.max()} mgC/m3') #7426.0 mgC/m3
-print(f'min: {biomass_data.min()} mgC/m3') #-6.576 mgC/m3
+# print(f'max: {biomass_data.max()} mgC/m3') #7426.0 mgC/m3
+# print(f'min: {biomass_data.min()} mgC/m3') #-6.576 mgC/m3
 
 # --- Reformatting
 nlat, nlon = 180, 360
@@ -486,6 +486,77 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
 else:
     biomass_regridded = xr.open_dataset(output_file_biomass_regrid)
     biomass_regrid_interp = xr.open_dataset(output_file_biomass_regrid_interp)
+
+
+# %% ====================== CEPHALOPOD biomass in the MPAS ======================
+# This is use afterwards to select MHW events happening in area where Biomass exists.
+mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
+# South of 60°S
+south_mask = (mpas_ds['lat_rho'] <= -60)
+mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
+
+mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
+             "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
+             "EA": ("East Antarctic", mpas_south60S.mask_ea),
+             "WS": ("Weddell Sea", mpas_south60S.mask_ws),
+             "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
+
+
+# Mask biomass in the MPAs (for only 1 algo_bootstrap)
+biomass_mpa_regrid_vars = {}
+biomass_mpa_interp_vars = {}
+
+for abbrv, (name, mask_2d) in mpa_masks.items():
+    # test
+    # abbrv, (name, mask_2d) = "RS", ("Ross Sea", mpas_south60S.mask_rs)
+
+    print(f"Masking biomass for {name} ({abbrv})")
+
+    # Ensure boolean mask
+    mask_2d = mask_2d.astype(bool)
+
+    # Select 1 boostrap
+    biomass_regridded_1algo = biomass_regridded.isel(algo_bootstrap=0).euphausia_biomass
+    biomass_regrid_interp_1algo = biomass_regrid_interp.isel(algo_bootstrap=0).euphausia_biomass
+
+    # Reformat
+    biomass_regridded_reformat = biomass_regridded_1algo.isel(xi_rho=slice(0, mask_2d.xi_rho.size))
+    biomass_interp_reformat = biomass_regrid_interp_1algo.isel(xi_rho=slice(0, mask_2d.xi_rho.size))
+
+    # Mask biomass (broadcast over days & bootstrap)
+    biomass_regridded_mpa = biomass_regridded_reformat.where(mask_2d)
+    biomass_interp_mpa = biomass_interp_reformat.where(mask_2d)
+
+    biomass_mpa_regrid_vars[f"biomass_{abbrv}"] = biomass_regridded_mpa
+    biomass_mpa_interp_vars[f"biomass_{abbrv}"] = biomass_interp_mpa
+
+# To Datasets
+biomass_mpa_regrid_ds = xr.Dataset(data_vars=biomass_mpa_regrid_vars,
+                                   coords={"days": biomass_regridded_reformat.days,
+                                           "lon_rho": (("eta_rho", "xi_rho"), mpas_south60S.lon_rho.data),
+                                           "lat_rho": (("eta_rho", "xi_rho"), mpas_south60S.lat_rho.data), },
+                                   attrs={"description": "Euphausia superba biomass masked to MPAs (south of 60°S)",
+                                          "algo_bootstrap": 0,
+                                          "regridding": biomass_regridded.attrs.get("regridding", ""),
+                                          "units": "mg C m-3",
+                                          "note": "Biomass available only inside each MPA; NaN elsewhere.",})
+
+
+biomass_mpa_interp_ds = xr.Dataset(data_vars=biomass_mpa_interp_vars,
+                                   coords={"days": biomass_interp_reformat.days,
+                                           "lon_rho": (("eta_rho", "xi_rho"), mpas_south60S.lon_rho.data),
+                                           "lat_rho": (("eta_rho", "xi_rho"), mpas_south60S.lat_rho.data),},
+                                   attrs={"description": "Interpolated Euphausia superba biomass masked to MPAs (south of 60°S)",
+                                          "algo_bootstrap": 0,
+                                          "regridding": biomass_regrid_interp.attrs.get("regridding", ""),
+                                          "units": "mg C m-3",
+                                          "note": "Biomass available only inside each MPA; NaN elsewhere.",})
+
+# Save to file
+out_regrid = os.path.join(path_cephalopod, "biomass_regridded_1algo_mpa.nc")
+out_interp = os.path.join(path_cephalopod, "biomass_regridded_interp_1algo_mpa.nc")
+biomass_mpa_regrid_ds.to_netcdf(out_regrid)
+biomass_mpa_interp_ds.to_netcdf(out_interp)
 
 
 # %% ====================== Spread of models ======================
