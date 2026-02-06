@@ -74,7 +74,7 @@ path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth'
 path_fixed_baseline = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/'
 path_duration = os.path.join(path_fixed_baseline, 'mhw_durations')
 
-# %% Functions
+# %%  ------------------------------- FUNCTIONS --------------------------------
 def extract_one_season_pair(args):
     ds_y, ds_y1, y = args
     try:
@@ -123,7 +123,6 @@ def define_season_all_years_parallel(ds, max_workers=6):
     return xr.concat(season_list, dim="season_year", combine_attrs="override")
 
 
-# According to Hobday et al. (2016) - MHW needs to persist for at least five days (5days of TRUE)
 def compute_mhw_durations(arr):
     """
     Compute duration of consecutive Trues (MHW) and Falses (non-MHW) in a 1D boolean array (time, ).
@@ -184,8 +183,8 @@ def apply_hobday_rules(bool_event):
     # Detecting gaps of 1 day 
     mhw_prev = np.roll(mhw_event, 1, axis=0)
     mhw_next = np.roll(mhw_event, -1, axis=0)
-    mhw_prev[0] = False
-    mhw_next[-1] = False
+    mhw_prev[0] = False #gap on day 0 cannot be bridged from the previous season
+    mhw_next[-1] = False #gap on Apr 30 cannot be bridged into next season
 
     gap_1 = (non_mhw_dur == 1) & mhw_prev & mhw_next 
     # print('Gap 1day: ', gap_1[d0:dfin, eta_choice, xi_choice]) #test
@@ -231,22 +230,7 @@ def apply_hobday_rules_seasonal_parallel(bool_event_seasonal, max_workers=6):
 
     return mhw_out
 
-# def apply_hobday_rules_seasonal(bool_event_seasonal):
-#     # test
-#     # bool_event_seasonal = det_rel_thres_season.values
-
-#     nyears, ntime, neta, nxi = bool_event_seasonal.shape
-#     mhw_out = np.zeros((nyears, ntime, neta, nxi), dtype=np.int32)
-
-#     for y in range(nyears):
-#         # test
-#         # y=10
-#         print(f"Processing season {y+1}/{nyears}")
-#         mhw_out[y] = apply_hobday_rules(bool_event_seasonal[y])
-
-#     return mhw_out
-
-# %% 
+# %% -------------------------------- MAIN --------------------------------
 ds_det= xr.open_dataset(os.path.join(path_fixed_baseline, f"det_depth/det_5m.nc")) #read each depth
 
 # Relative-only MHWs
@@ -265,7 +249,7 @@ det_rel_thres_season = det_rel_thres_season.rename({'season_year': 'season_year_
 det_rel_thres_season = det_rel_thres_season.rename({'season_year_temp': 'years'})
 
 
-# MHW durations for seasonal dataset
+# MHW durations for seasonal dataset -- According to Hobday et al. (2016) - MHW needs to persist for at least five days (5days of TRUE)
 bool_event_seasonal = det_rel_thres_season.values.astype(bool)
 mhw_duration_season = apply_hobday_rules_seasonal_parallel(bool_event_seasonal, max_workers=6) #shape (39, 181, 231, 1442)
 
