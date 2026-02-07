@@ -123,9 +123,8 @@ propagated_sd = np.sqrt(np.sum(np.array([v[1] for v in C_frac_stage.values()])**
 
 biomass_regridded_dry = biomass_regridded / mean_C_fraction #[mg/m3]
 biomass_regrid_interp_dry = biomass_regrid_interp / mean_C_fraction #[mg/m3]
-print(f'Before: {biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mgC/m3')
-print(f'After: {biomass_regridded_dry.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mg/m3')
-
+# print(f'Before: {biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mgC/m3')
+# print(f'After: {biomass_regridded_dry.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mg/m3')
 
 # %% ======================== Load data ========================
 # --- Load mass data [mg] for each maturity stage -- Southern Ocean  
@@ -199,39 +198,52 @@ def evolution_biomass_yr(year_idx, ds_mass, proportion, B0_interp=False):
 
     # Extract data
     B_all = np.stack(results, axis=0) #shape (50, 181, 231, 1442)
- 
+    
+    # Reshape to (5, 10, 181, 231, 1442)
+    B_all = B_all.reshape(5, 10, *B_all.shape[1:])
+
+    # Take the mean over boostraps per algo
+    B_all_algo = B_all.mean(axis=1) #shape (5, 181, 231, 1442)
+
     # To Datsaset
-    biomass_ds = xr.Dataset(data_vars=dict(biomass=(("algo_bootstrap", "days", "eta_rho", "xi_rho"), B_all)),
-                            coords=dict(algo_bootstrap=np.arange(50), 
+    biomass_ds = xr.Dataset(data_vars=dict(biomass=(("algo", "days", "eta_rho", "xi_rho"), B_all_algo)),
+                            coords=dict(algo=np.arange(5), 
                                         days=ds_mass.days,
                                         lat_rho=ds_mass.lat_rho,
                                         lon_rho=ds_mass.lon_rho,))
-    # -- Take median and std
-    biomass_stats_ds = xr.Dataset({"biomass_median": biomass_ds.biomass.median(dim="algo_bootstrap"),
-                                   "biomass_std":    biomass_ds.biomass.std(dim="algo_bootstrap"),})
+    
+    biomass_ds.attrs.update({"Description": "Evolution of krill biomass weighted according to population proportions.\n"\
+                                            "Biomass time series were computed for all 50 algorithm–bootstrap "\
+                                            "realisations of the Cephalopod model. For each algorithm, the "\
+                                            "bootstrap realisations were then averaged to obtain a single time series per algorithm.",
+                            "Units": "mg/m3",})
+    
+    # -- Take median and std - NO only at the last steps, i.e. attribution
+    # biomass_stats_ds = xr.Dataset({"biomass_median": biomass_ds.biomass.median(dim="algo_bootstrap"),
+    #                                "biomass_std":    biomass_ds.biomass.std(dim="algo_bootstrap"),})
 
     # Add attributes
-    biomass_stats_ds.biomass_median.attrs.update({"description": "Median over the 5 models × 10 bootstraps of Cephalopod.",
-                                                  "units": "mg m-3",})
-    biomass_stats_ds.biomass_std.attrs.update({"description": "Spread over 5 models × 10 bootstraps of Cephalopod.",
-                                               "units": "mg m-3",})
+    # biomass_stats_ds.biomass_median.attrs.update({"description": "Median over the 5 models × 10 bootstraps of Cephalopod.",
+    #                                               "units": "mg m-3",})
+    # biomass_stats_ds.biomass_std.attrs.update({"description": "Spread over 5 models × 10 bootstraps of Cephalopod.",
+                                            #    "units": "mg m-3",})
 
     # Clean memory
-    del B_all, biomass_ds
+    del B_all, B_all_algo
     gc.collect()
 
-    return biomass_stats_ds
+    return biomass_ds
 
 
 def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_folder, max_workers=10, B0_interp=False):
     # test
-    # max_workers=20
+    # max_workers=10
     # proportion=proportion
     # ds_mass=nowarming_krillmass_SO
     # label='No Warming'  
     # label_da='nowarming'  
     # B0_interp=True
-    # output_folder= os.path.join(path_surrogates, f'biomass_timeseries/biomass_interpolated')
+    # output_folder= os.path.join(path_biomass_ts_SO, f'biomass_interpolated')
     
     print(f"  → {label}")
     
@@ -246,10 +258,12 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
 
         if has_years:
             # Run in parallel
-            B_algo_median_da = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | Biomass ") #len = nyears and shape (181, 231, 1442)
+            # B_algo_median_da = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | Biomass ") #len = nyears and shape (181, 231, 1442)
+            B_algo_da = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | Biomass ") #len = nyears and shape (5, 181, 231, 1442)
 
             # Extract data
-            B_algo_median_all_ds = xr.concat(B_algo_median_da, dim="years")  # shape: (39, 181, 231, 1442)
+            # B_algo_median_all_ds = xr.concat(B_algo_median_da, dim="years")  # shape: (39, 181, 231, 1442)
+            B_algo_all_ds = xr.concat(B_algo_da, dim="years")  # shape: (39, 5, 181, 231, 1442)
 
             if B0_interp:
                 initial_biomass_description = "Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution (0.25°) and interpolated."
@@ -259,28 +273,33 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
 
 
             # Put together into dataset
-            B_algo_median_all_ds.attrs.update({"surrogate": label,
-                                               "Description": "Evolution of krill biomass weighted according to population proportions.\n"\
-                                                              "Biomass timeseries computed for each models and boostraps.\n"\
-                                                              "Then, we compute the median and std over the 50 timeseries.",
-                                               "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
-                                               "Initial Biomass": initial_biomass_description,
-                                               "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
-                                               "Units": "mg/m3",})
+            B_algo_all_ds.attrs.update({"Surrogate": label,
+                                        "Description": "Evolution of krill biomass weighted according to population proportions.\n"\
+                                                       "Biomass timeseries computed for each algorithm.\n"\
+                                                        "For each algorithm, the bootstrap realisations were averaged to obtain a single time series per algorithm.",
+                                                        #   "Then, we compute the median and std over the 50 timeseries.",
+                                        "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
+                                        "Initial Biomass": initial_biomass_description,
+                                        "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
+                                        "Units": "mg/m3",
+                                        'Conversion to dry weight': f"Using mean C fraction of {mean_C_fraction:.4f} (SD: {propagated_sd:.4f}) from Farber-Lorda et al. (2009).",})
+
             
             # Save to file
-            B_algo_median_all_ds.to_netcdf(output_file, mode="w", engine="netcdf4")
+            B_algo_all_ds.to_netcdf(output_file, mode="w", engine="netcdf4")
             
             # Clean memory
-            del B_algo_median_da
+            del B_algo_da
             gc.collect()
 
         else:
             # Run function only for clim, no year dimension
-            B_algo_median_da = [func(0)]
+            # B_algo_median_da = [func(0)]
+            B_algo_da = [func(0)] 
 
             # Extract data
-            B_algo_median_all_ds  = B_algo_median_da[0]  # shape: (181, 231, 1442)
+            # B_algo_median_all_ds  = B_algo_median_da[0]  # shape: (181, 231, 1442)
+            B_algo_all_ds  = B_algo_da[0]  # shape: (5, 181, 231, 1442)
 
             if B0_interp:
                 initial_biomass_description = "Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution (0.25°) and interpolated."
@@ -289,10 +308,10 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
                 initial_biomass_description="Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution, i.e. 0.25°."
 
             # Put together into dataset
-            B_algo_median_all_ds.attrs.update({"surrogate": label,
+            B_algo_all_ds.attrs.update({"Surrogate": label,
                                                "Description": "Evolution of krill biomass weighted according to population proportions.\n"\
-                                                              "Biomass timeseries computed for each models and boostraps.\n"\
-                                                              "Then, we compute the median and std over the 50 timeseries.",
+                                                              "Biomass timeseries computed for each models and boostraps.",
+                                                            #   "Then, we compute the median and std over the 50 timeseries.",
                                                "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
                                                "Initial Biomass": initial_biomass_description,
                                                "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
@@ -300,10 +319,10 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
                                                'Conversion to dry weight': f"Using mean C fraction of {mean_C_fraction:.4f} (SD: {propagated_sd:.4f}) from Farber-Lorda et al. (2009).",})
 
             # Save to file
-            B_algo_median_all_ds.to_netcdf(output_file)
+            B_algo_all_ds.to_netcdf(output_file)
 
             # Clean memory
-            del B_algo_median_da
+            del B_algo_da
             gc.collect()
 
     else:
@@ -313,7 +332,8 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
 # %% ==================================== Compute Biomass for surrogates - Regridded ====================================
 print('\nInitial biomass: Regridded')
 
-output_folder_regrid=os.path.join(path_biomass_ts_SO, f'biomass_regridded')
+output_folder_regrid = os.path.join(path_biomass_ts_SO, 'biomass_regridded')
+os.makedirs(output_folder_regrid, exist_ok=True)
 files_regrid = [os.path.join(output_folder_regrid, "biomass_clim.nc"),
                 os.path.join(output_folder_regrid, "biomass_actual.nc"),
                 os.path.join(output_folder_regrid, "biomass_nomhws.nc"),
@@ -354,7 +374,8 @@ else:
 # %% ==================================== Compute Biomass for surrogates - Regridded and Interpolated ====================================
 print('\nInitial biomass: Regridded and Interpolated')
 
-output_folder_interp=os.path.join(path_biomass_ts_SO, f'biomass_interpolated')
+output_folder_interp = os.path.join(path_biomass_ts_SO, 'biomass_interpolated')
+os.makedirs(output_folder_interp, exist_ok=True)
 files_interp = [os.path.join(output_folder_interp, "biomass_clim.nc"),
                 os.path.join(output_folder_interp, "biomass_actual.nc"),
                 os.path.join(output_folder_interp, "biomass_nomhws.nc"),
@@ -393,13 +414,15 @@ else:
     clim_trended_biomass_interp= xr.open_dataset(files_interp[3])
     nowarming_biomass_interp = xr.open_dataset(files_interp[4])
 
+
+
 # %% ================================= Plot climatologcical biomass =================================
 # Plot initial and final climatological biomass (2 columns, 1 row)
 # --- Prepare data
-B0 = clim_biomass.biomass_median.isel(days=0).isel(xi_rho=slice(0, -1))    # 1st Nov
-B0_interp = clim_biomass_interp.biomass_median.isel(days=0).isel(xi_rho=slice(0, -1))    # 1st Nov
-Bfinal = clim_biomass.biomass_median.isel(days=-1).isel(xi_rho=slice(0, -1)) # 30th Apr
-Bfinal_interp = clim_biomass_interp.biomass_median.isel(days=-1).isel(xi_rho=slice(0, -1)) # 30th Apr
+B0 = clim_biomass.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')   # 1st Nov
+B0_interp = clim_biomass_interp.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')    # 1st Nov
+Bfinal = clim_biomass.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
+Bfinal_interp = clim_biomass_interp.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
 
 # Row 0: regridded only
 # Row 1: regridded + interpolated
@@ -470,21 +493,21 @@ plt.show()
 
 # %% ================================= Plot Biomass concentration =================================
 # --- Prepare data
-dataset_interest =  nomhw_biomass_interp #actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
+dataset_interest =  nowarming_biomass_interp #actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
 # title = "Environmental conditions without MHWs\nClimatological signal trended"
-title = "Environmental conditions without MHWs"
-# title = "Environmental conditions without global warming"
+# title = "Environmental conditions without MHWs"
+title = "Environmental conditions without global warming"
 # title = "Actual environmental conditions"
 
 # Years to show
 years_to_plot = [1980, 1989, 2000, 2010, 2016]
 
 # Row 1: Biomass 
-initial_biomass = dataset_interest.biomass_median.isel(years=0, days=0).isel(xi_rho=slice(0, -1))  # 1st Nov
-biomass_actual_30Apr = [dataset_interest.biomass_median.isel(years=i, days=-1).isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]  
+initial_biomass = dataset_interest.biomass.isel(years=0, days=0).isel(xi_rho=slice(0, -1)).median('algo')  # 1st Nov
+biomass_actual_30Apr = [dataset_interest.biomass.isel(years=i, days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]  
 
 # Row 2: Difference (end of season)
-diff_actual = [biomass_actual_30Apr[i] - clim_biomass_interp.biomass_median.isel(days=-1).isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]
+diff_actual = [biomass_actual_30Apr[i] - clim_biomass_interp.biomass.isel(days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]
 
 
 # --- Figure setup
