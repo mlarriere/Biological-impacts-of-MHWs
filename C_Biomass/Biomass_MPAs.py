@@ -232,11 +232,10 @@ def mask_one_surrogate(args):
             mask = mask.expand_dims({"days": ds.days.size}, axis=2)
         
         # Mask biomass to MPAs
-        biomass_masked = ds.biomass_median.where(mask)
-        std_masked = ds.biomass_std.where(mask)
+        biomass_masked = ds.biomass.where(mask)
         
         # To Dataset
-        ds_mpa = xr.Dataset({"biomass_median": biomass_masked, "biomass_std": std_masked},
+        ds_mpa = xr.Dataset({"biomass": biomass_masked},
                             coords={"years": ds.years if "years" in ds.dims else None,
                                     "days": ds.days,
                                     "lon_rho": (("eta_rho", "xi_rho"), ds.lon_rho.data),
@@ -325,7 +324,7 @@ else:
 
 # %% ================================= Plot Biomass concentration =================================    
 # Year to plot
-years_to_plot = 1989
+years_to_plot = 1989 #1989 2000 2016
 year_idx = years_to_plot - 1980
 
 # --- Figure setup
@@ -342,13 +341,13 @@ titles = ["Climatology", "Actual (2016)", "No MHWs", "No Warming",
           "", "Actual − Clim", "No MHWs − Clim", "No Warming − Clim"]
 
 # --- Color Setup
-color_data=biomass_mpas_interp['AP']['actual'].biomass_median.isel(years=year_idx).values
-vmin_bio, vmax_bio = np.nanpercentile(color_data, [5, 95])
+color_data=biomass_mpas_interp['AP']['actual'].biomass.isel(years=year_idx).median('algo').values
+vmin_bio, vmax_bio = 5, 40 # np.nanpercentile(color_data, [5, 95])
 cmap_bio = 'Reds'
 
-diff_data= color_data - biomass_mpas_interp['AP']['clim'].biomass_median
+diff_data= color_data - biomass_mpas_interp['AP']['clim'].biomass.median('algo')
 max_abs_diff = np.nanmax(np.abs(diff_data))
-vmin_diff, vmax_diff = -max_abs_diff, max_abs_diff
+vmin_diff, vmax_diff = -20, 20 #-max_abs_diff, max_abs_diff
 cmap_diff = 'bwr'
 
 # --- Prepare axis
@@ -387,10 +386,10 @@ for abbrv, mpa_data in biomass_mpas_interp.items():
     ds_nowarm = mpa_data["nowarming"]
 
     # Row 1: Biomass at the end of the season
-    bio_clim = ds_clim.biomass_median.isel(days=-1)
-    bio_actual = ds_actual.biomass_median.isel(years=year_idx, days=-1)
-    bio_clim_trend = ds_clim_trend.biomass_median.isel(years=year_idx, days=-1)
-    bio_nowarm = ds_nowarm.biomass_median.isel(years=year_idx, days=-1)
+    bio_clim = ds_clim.biomass.isel(days=-1).median('algo')
+    bio_actual = ds_actual.biomass.isel(years=year_idx, days=-1).median('algo')
+    bio_clim_trend = ds_clim_trend.biomass.isel(years=year_idx, days=-1).median('algo')
+    bio_nowarm = ds_nowarm.biomass.isel(years=year_idx, days=-1).median('algo')
 
     # Row 2: Difference w.r.t clim at the end of the season
     diff_actual  = bio_actual - bio_clim
@@ -413,7 +412,7 @@ for abbrv, mpa_data in biomass_mpas_interp.items():
         # --- Row 2: Difference
         else:
             pcm_diff = axes[i].pcolormesh(ds_clim.lon_rho, ds_clim.lat_rho, data_i, transform=ccrs.PlateCarree(),
-                                cmap=cmap_diff, vmin=-max_abs_diff, vmax=max_abs_diff, zorder=1)
+                                cmap=cmap_diff, vmin=vmin_diff, vmax=vmax_diff, zorder=1)
 
 # --- Colorbars
 cbar_ax1 = fig.add_axes([0.92, 0.58, 0.01, 0.27]) #(left, bottom, width, height)
@@ -509,10 +508,10 @@ if not os.path.exists(out_csv):
 else:
     df_longest_mhw = pd.read_csv(out_csv)
 
-
+# HERE!
 # %% ================================= Select MHW event to plot =================================
-mpa_choice = 'AP'
-threshold_choice = '4deg'
+mpa_choice = 'WS' #'RS' 'AP' 'EA' 'WS' 'SO'
+threshold_choice = '3deg'
 mhw_event_choice = df_longest_mhw.loc[(df_longest_mhw["mpa_abbrv"] == mpa_choice) & (df_longest_mhw["threshold"] == threshold_choice)].iloc[0]
 
 year_idx=mhw_event_choice["year"]-1980
@@ -520,12 +519,12 @@ eta_idx=mhw_event_choice["eta_idx"]
 xi_idx=mhw_event_choice["xi_idx"]
 
 # Extract data at that location
-biomass_mhw_actual = biomass_mpas_interp[mpa_choice]['actual'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
-biomass_mhw_clim = biomass_mpas_interp[mpa_choice]['clim'].biomass_median.isel(eta_rho=eta_idx, xi_rho=xi_idx)
-biomass_mhw_nomhw = biomass_mpas_interp[mpa_choice]['nomhws'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
-biomass_mhw_climtrend = biomass_mpas_interp[mpa_choice]['climtrend'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
-biomass_mhw_nowarming = biomass_mpas_interp[mpa_choice]['nowarming'].biomass_median.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
-mhw_timeseries = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/duration_AND_thresh_{mpa_choice}.nc')).isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
+biomass_mhw_actual = biomass_mpas_interp[mpa_choice]['actual'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
+biomass_mhw_clim = biomass_mpas_interp[mpa_choice]['clim'].biomass.isel(eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
+biomass_mhw_nomhw = biomass_mpas_interp[mpa_choice]['nomhws'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
+biomass_mhw_climtrend = biomass_mpas_interp[mpa_choice]['climtrend'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
+biomass_mhw_nowarming = biomass_mpas_interp[mpa_choice]['nowarming'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
+mhw_timeseries = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/interpolated/duration_AND_thresh_{mpa_choice}.nc')).isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
 
 chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
 chla_surf_SO_allyrs_event = chla_surf_SO_allyrs.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
@@ -600,7 +599,7 @@ ax1.plot(days_xaxis, biomass_mhw_actual.values, color=okabe_ito[1],linewidth=lw,
 ax1.plot(days_xaxis, biomass_mhw_nomhw.values, color=okabe_ito[3],  linestyle='--', linewidth=1.3, label='No MHWs')
 ax1.plot(days_xaxis, biomass_mhw_climtrend.values, color=okabe_ito[5],  linestyle='--', linewidth=1.3, label='No MHWs (Clim with trend)')
 ax1.plot(days_xaxis, biomass_mhw_nowarming.values, color=okabe_ito[-1],  linestyle='--', linewidth=1.3, label='No Warming')
-ax1.set_ylabel("Biomass [mg C/m³]", **label_kwargs)
+ax1.set_ylabel("Biomass [mg/m³]", **label_kwargs)
 ax1.set_title(f"{mhw_event_choice['mpa_name']} in {year_idx+1980}\n" f"Lat {biomass_mhw_actual.lat_rho.values:.2f}, Lon {biomass_mhw_actual.lon_rho.values:.2f}", **title_kwargs)
 ax1.tick_params(axis='y', length=2, width=0.5, **tick_kwargs)
 ax1.tick_params(axis='x', labelbottom=False)
