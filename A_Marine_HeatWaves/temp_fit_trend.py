@@ -109,7 +109,7 @@ def compute_trend_cell_vectorized(ieta):
 
     # --- Linear regression
     # Create design matrix for linear regression: Y = X @ coeffs
-    t = np.arange(ntime) / 365.0   # years
+    t = np.arange(ntime) / 365.0   # from days to years
     X = np.column_stack((t, np.ones_like(t))) #shape (time, 2) 
 
     # Extract Y
@@ -119,7 +119,7 @@ def compute_trend_cell_vectorized(ieta):
     coeffs, residuals, _, _ = np.linalg.lstsq(X, Y, rcond=None)  # shape (2, xi)
 
     # Store coeffs of interest
-    slopes= coeffs[0] #shape: (nxi) - [°C/day]
+    slopes= coeffs[0] #shape: (nxi) - [°C/yr]
     intercepts = coeffs[1] #shape: (nxi)
         
     # --- Evaluate the regression
@@ -393,5 +393,100 @@ plt.yticks(fontsize=14)
 plt.xlim(1980-1, 2019+1)
 plt.tight_layout()
 plt.show()
+
+# %% ======================== Defining MPAs ========================
+# == Load data
+mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
+
+# == Fix extent 
+# South of 60°S
+south_mask = (mpas_ds['lat_rho'] <= -60)
+mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
+
+# == Settings plot
+mpa_dict = {
+    "Ross Sea": (mpas_ds.mask_rs, "#5F0F40"),
+    "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#FFBA08"),
+    "East Antarctic": (mpas_ds.mask_ea, "#E36414"),
+    "Weddell Sea": (mpas_ds.mask_ws, "#4F772D"),
+    "Antarctic Peninsula": (mpas_ds.mask_ap, "#0A9396")
+}
+
+# %% ======================== Areas and volume MPAs ========================
+# --- Load data
+area_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc').isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)) #in km2
+volume_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/volume.nc').isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)) #in km3
+
+# --- Calculate total Southern Ocean area (south of 60°S)
+# Select surface layer
+area_SO_surf = area_roms['area'].isel(z_t=0)
+volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho') 
+
+# Mask latitudes south of 60°S (lat_rho <= -60)
+area_60S_SO = area_SO_surf.where(area_roms['lat_rho'] <= -60, drop=True)
+volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
+
+# --- Calculate area and volume of each MPA
+mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
+             "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
+             "EA": ("East Antarctic", mpas_south60S.mask_ea),
+             "WS": ("Weddell Sea", mpas_south60S.mask_ws),
+             "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
+
+area_mpa = {}
+volume_mpa = {}
+
+for abbrv, (name, mask) in mpa_masks.items():
+    area_mpa[abbrv] = area_60S_SO.where(mask)
+    volume_mpa[abbrv] = volume_60S_SO_100m.where(mask)
+
+# %% ======================== Warming in MPAs ========================
+# Mask MPA
+trends_100mavg_mpa = trends_100mavg_ds
+
+# Reformat 
+trends_100mavg_ds_reformat = trends_100mavg_ds.isel(xi_rho = slice(0, mpas_south60S.xi_rho.size))
+
+for abbrv, (name, mask_2d) in mpa_masks.items():
+    output_file= os.path.join(path_surrogates, f'detrended_signal/mpas/temp_linear_trend_{abbrv}.nc')
+
+    if not os.path.exists(output_file) :
+        # Test
+        # abbrv='RS'
+        # name='Ross Sea'
+        # mask_2d = mpas_south60S.mask_rs
+        print(f"Masking of {name} ({abbrv})")
+    
+        mask_mpa = mask_2d.astype(bool)
+
+        # Mask MPA 
+        slope_warming_mpa = trends_100mavg_ds_reformat.slope.where(mask_mpa)    
+        interc_warming_mpa = trends_100mavg_ds_reformat.intercept.where(mask_mpa)    
+        r2_warming_mpa = trends_100mavg_ds_reformat.r2.where(mask_mpa)    
+        
+        # To Dataset
+        warming_mpa_ds = xr.Dataset({"slope": slope_warming_mpa,
+                                     "intercept": interc_warming_mpa,
+                                     "r2": r2_warming_mpa,})
+        
+        warming_mpa_ds.attrs["MPA name"] =  f"{name} ({abbrv})"
+
+        warming_mpa_ds["slope"].attrs["Description"] = "Linear temperature trend"
+        warming_mpa_ds["slope"].attrs["Units"] = "°C yr⁻¹"
+
+        warming_mpa_ds["intercept"].attrs["Description"] = "Temperature at t=0, i.e. 1st January 1980"
+        warming_mpa_ds["intercept"].attrs["Units"] = "°C"
+
+                
+        
+        # Save to file
+        warming_mpa_ds.to_netcdf(output_file) #shape (231, 1442)
+    else:
+        print(f'MHWs in {name} already saved to file') 
+
+# -- Load data
+warming_mpa_ds = {}
+for region in mpa_masks.keys():
+    warming_mpa_ds[region] = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/interpolated/duration_AND_thresh_{region}.nc'))
 
 # %%
