@@ -177,7 +177,7 @@ def apply_hobday_rules(bool_event):
 ds = xr.open_dataset(path_mhw + file_var + 'eta200.nc') #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
 all_depths= ds['z_rho'].values
 
-def mhw_duration(depth_idx):
+def mhw_duration(depth_idx=0):
     depth_idx=0
 
     print(f'---------DEPTH{depth_idx}---------')
@@ -203,15 +203,15 @@ def mhw_duration(depth_idx):
     mhw_rel_recalc_reshaped = mhw_rel_only_final.reshape((40, 365, neta, nxi))
 
     # To dataset
-    ds_intermediate_rel = xr.Dataset({"duration": (("years", "days", "eta_rho", "xi_rho"), mhw_rel_recalc_reshaped)},
+    ds_duration_rel = xr.Dataset({"duration": (("years", "days", "eta_rho", "xi_rho"), mhw_rel_recalc_reshaped)},
                                      coords={"lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
                                              "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values)})  # (434, 1442)
     # Add attributes
-    ds_intermediate_rel.attrs = {"Description": "MHW durations calculated using Hobday et al. (2016) rules (≥5days and 1-2 day gaps allowed). "\
+    ds_duration_rel.attrs = {"Description": "MHW durations calculated using Hobday et al. (2016) rules (≥5days and 1-2 day gaps allowed). "\
                                                  "Relative threshold (90th percentile) only."}
     
     # Save to file
-    ds_intermediate_rel.to_netcdf(output_file_rel, engine="netcdf4")
+    ds_duration_rel.to_netcdf(output_file_rel, engine="netcdf4")
     print(f"File written (90th percentile only): {depth_idx}")
 
     # ----- MHW DURATION BASED ON BOTH RELATIVE AND ABSOLUTE THRESHOLDS (1°C)-----
@@ -231,109 +231,75 @@ def mhw_duration(depth_idx):
     mhw_rel_abs_final = mhw_rel_abs_final.reshape((40, 365, neta, nxi))
 
     # To dataset
-    ds_intermediate = xr.Dataset({ "duration": (("years", "days", "eta_rho", "xi_rho"), mhw_rel_abs_final)},
+    ds_duration_abs = xr.Dataset({ "duration": (("years", "days", "eta_rho", "xi_rho"), mhw_rel_abs_final)},
                                  coords={"lon_rho":(["eta_rho", "xi_rho"], ds_roms.lon_rho.values),  # (434, 1442)
                                          "lat_rho":(["eta_rho", "xi_rho"], ds_roms.lat_rho.values)}),  # (434, 1442)
     
     # Save to file
-    ds_intermediate.to_netcdf(output_file, engine="netcdf4")
+    ds_duration_abs.to_netcdf(output_file, engine="netcdf4")
 
-    # To dataset
-    ds_out = xr.Dataset({
-        "mhw_durations": (("years", "days", "eta_rho", "xi_rho"), mhw_recalc_reshaped),
-        "non_mhw_durations": (("years", "days", "eta_rho", "xi_rho"), non_mhw_recalc_reshaped),
-        }, 
-        coords=dict(
-            lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
-            lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
-            ), 
-        attrs={
-            'depth': f"{-all_depths[depth_idx]}m, i.e. layer{depth_idx}",
-            'description': 'Durations recalculated using Hobday rules (min 5-day events, 1-2 day gaps allowed). Events T°C are above the relative and absolute (1°C) thresholds'}
-        )
-    print(ds_out.mhw_durations.isel(eta_rho=224, xi_rho=583, years=38, days=slice(0,30)).values)
-
-    # Clean memory
-    del mhw_recalc_reshaped, non_mhw_recalc_reshaped, mhw_recalc, non_mhw_recalc, mhw_event_combined_stacked, mhw_event, gap_2_day, gap_1_day
-    gc.collect()
-    print(f"Memory used: {psutil.virtual_memory().percent}%")
-
-    # ====== ILLUSTRATION ======
-    print('Illustration') 
-    # to show duration recalculation (before/after)
-    # if depth_idx==0:
-    year_to_plot = slice(37, 39) #last idx excluded
-    xi_rho_to_plot = 1000  
-    eta_rho_to_plot = 200  
-    # ---- BEFORE
-    # Reformat with years and days in dim
-    mhw_intermediate_reshape = xr.Dataset({
-        "mhw_durations": (("years", "days", "eta_rho", "xi_rho"), ds_intermediate['mhw_durations'].values.reshape((nyears, ndays, neta, nxi))),
-        "non_mhw_durations": (("years", "days", "eta_rho", "xi_rho"),  ds_intermediate['non_mhw_durations'].values.reshape((nyears, ndays, neta, nxi))),
-        },
-        coords={
-            "years": np.arange(1980, 2020),
-            "days": np.arange(365),
-            "eta_rho": ds_intermediate["eta_rho"],
-            "xi_rho": ds_intermediate["xi_rho"]
-        }
-    )
     
-    # Slicing dataset
-    mhw_duration_before = mhw_intermediate_reshape['mhw_durations'].isel(years=year_to_plot, xi_rho=xi_rho_to_plot, eta_rho=eta_rho_to_plot)
-    mhw_duration_before = mhw_duration_before.stack(time=('years', 'days'))
-    non_mhw_duration_before = mhw_intermediate_reshape['non_mhw_durations'].isel(years=year_to_plot, xi_rho=xi_rho_to_plot, eta_rho=eta_rho_to_plot)
-    non_mhw_duration_before = non_mhw_duration_before.stack(time=('years', 'days')) 
-    # print('BEFORE', mhw_duration_before.isel(time=slice(120,210)).values)
-
-    # ---- AFTER 
-    mhw_event_recalculated = ds_out['mhw_durations'].isel(years=year_to_plot, xi_rho=xi_rho_to_plot, eta_rho=eta_rho_to_plot)
-    mhw_event_recalculated = mhw_event_recalculated.stack(time=('years', 'days')) 
-    # print('AFTER', mhw_event_recalculated.isel(time=slice(120,210)).values)
+    # # ====== ILLUSTRATION ======
+    # print('Illustration') 
+    # # to show duration recalculation (before/after)
+    # # if depth_idx==0:
+    # year_to_plot = slice(37, 39) #last idx excluded
+    # xi_rho_to_plot = 1000  
+    # eta_rho_to_plot = 200  
+    # # ---- BEFORE
+    # # Reformat with years and days in dim
+    # mhw_intermediate_reshape = xr.Dataset({
+    #     "mhw_durations": (("years", "days", "eta_rho", "xi_rho"), ds_intermediate['mhw_durations'].values.reshape((nyears, ndays, neta, nxi))),
+    #     "non_mhw_durations": (("years", "days", "eta_rho", "xi_rho"),  ds_intermediate['non_mhw_durations'].values.reshape((nyears, ndays, neta, nxi))),
+    #     },
+    #     coords={
+    #         "years": np.arange(1980, 2020),
+    #         "days": np.arange(365),
+    #         "eta_rho": ds_intermediate["eta_rho"],
+    #         "xi_rho": ds_intermediate["xi_rho"]
+    #     }
+    # )
     
-    # Plot
-    fig, ax = plt.subplots(figsize=(15, 5))
-    ax.set_clip_on(False)
+    # # Slicing dataset
+    # mhw_duration_before = mhw_intermediate_reshape['mhw_durations'].isel(years=year_to_plot, xi_rho=xi_rho_to_plot, eta_rho=eta_rho_to_plot)
+    # mhw_duration_before = mhw_duration_before.stack(time=('years', 'days'))
+    # non_mhw_duration_before = mhw_intermediate_reshape['non_mhw_durations'].isel(years=year_to_plot, xi_rho=xi_rho_to_plot, eta_rho=eta_rho_to_plot)
+    # non_mhw_duration_before = non_mhw_duration_before.stack(time=('years', 'days')) 
+    # # print('BEFORE', mhw_duration_before.isel(time=slice(120,210)).values)
 
-    ax.plot(non_mhw_duration_before, label="Non-MHW", color='#A2B36B',linestyle=":")
-    ax.plot(mhw_duration_before, label="MHW", color='#DC6D04', linestyle="--")
-    ax.plot(mhw_event_recalculated, label="Extended MHW", color='#780000', linestyle="-")
-
-    ax.set_title(f'Illustration of Hobday et al (2016) rules on MHW duration ({all_depths[depth_idx]}m depth)')
-    ax.set_xlabel('Days')
-    ax.set_ylabel('Duration (days)')
-    # ax.set_ylim(-1,10)
-    # ax.set_xlim(135,165)
-
-    # Add the year labels below the x-axis
-    ax.annotate('', xy=(365, -65), xytext=(0, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
-    ax.annotate('', xy=(365*2, -65), xytext=(365, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
-    # ax.annotate('', xy=(365*3, -65), xytext=(365*2, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
-
-    ax.text(182, -80, f'{1980 + year_to_plot.start}', ha='center', va='center')
-    ax.text(365 + 182, -80, f'{1980 + year_to_plot.start+1}', ha='center', va='center')
-    # ax.text(365*2 + 182, -80, f'{1980 + year_to_plot.start+2}', ha='center', va='center')
-
-    ax.legend()
-    plt.tight_layout()
-    plt.show()
+    # # ---- AFTER 
+    # mhw_event_recalculated = ds_out['mhw_durations'].isel(years=year_to_plot, xi_rho=xi_rho_to_plot, eta_rho=eta_rho_to_plot)
+    # mhw_event_recalculated = mhw_event_recalculated.stack(time=('years', 'days')) 
+    # # print('AFTER', mhw_event_recalculated.isel(time=slice(120,210)).values)
     
-    # Clean memory
-    del mhw_intermediate_reshape, mhw_event_recalculated, non_mhw_duration_before, mhw_duration_before
-    gc.collect()
-    
-    # Save file
-    output_file = os.path.join(path_duration, f"mhw_duration_{-all_depths[depth_idx]}m.nc")
-    if not os.path.exists(output_file):
-        try:
-            ds_out.to_netcdf(output_file, engine="netcdf4")
-            print(f"File written: {depth_idx}")
-        except Exception as e:
-            print(f"Error writing {depth_idx}: {e}")    
+    # # Plot
+    # fig, ax = plt.subplots(figsize=(15, 5))
+    # ax.set_clip_on(False)
 
-    # Clean memory
-    del ds_intermediate, ds_out
-    gc.collect()
+    # ax.plot(non_mhw_duration_before, label="Non-MHW", color='#A2B36B',linestyle=":")
+    # ax.plot(mhw_duration_before, label="MHW", color='#DC6D04', linestyle="--")
+    # ax.plot(mhw_event_recalculated, label="Extended MHW", color='#780000', linestyle="-")
+
+    # ax.set_title(f'Illustration of Hobday et al (2016) rules on MHW duration ({all_depths[depth_idx]}m depth)')
+    # ax.set_xlabel('Days')
+    # ax.set_ylabel('Duration (days)')
+    # # ax.set_ylim(-1,10)
+    # # ax.set_xlim(135,165)
+
+    # # Add the year labels below the x-axis
+    # ax.annotate('', xy=(365, -65), xytext=(0, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
+    # ax.annotate('', xy=(365*2, -65), xytext=(365, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
+    # # ax.annotate('', xy=(365*3, -65), xytext=(365*2, -65), arrowprops=dict(arrowstyle="<->", color='black', lw=1.5), annotation_clip=False)
+
+    # ax.text(182, -80, f'{1980 + year_to_plot.start}', ha='center', va='center')
+    # ax.text(365 + 182, -80, f'{1980 + year_to_plot.start+1}', ha='center', va='center')
+    # # ax.text(365*2 + 182, -80, f'{1980 + year_to_plot.start+2}', ha='center', va='center')
+
+    # ax.legend()
+    # plt.tight_layout()
+    # plt.show()
+    
+
 
     elapsed_time = time.time() - start_time
     print(f"Processing time for depth {depth_idx}: {elapsed_time:.2f} secs, Memory used: {psutil.virtual_memory().percent}%")
@@ -483,7 +449,7 @@ if plot == 'report':
     # plt.savefig(os.path.join(outdir, outfile), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/mhw_duration_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/mhw_duration_{plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
 # %%
 
