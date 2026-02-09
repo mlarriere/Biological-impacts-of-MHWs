@@ -38,14 +38,14 @@ from tqdm.contrib.concurrent import process_map
 
 from joblib import Parallel, delayed
 
-#%% Server 
+#%% -------------------------------- Server --------------------------------
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 gc.collect()
 print(f"Memory used: {psutil.virtual_memory().percent}%")
 
-# %% Figure settings
+# %% -------------------------------- Figure settings --------------------------------
 mpl.rcParams.update({
     "text.usetex": True,
     "font.family": "serif",
@@ -105,7 +105,7 @@ date_dict = dict(date_list)
 
 # %% ======================== Load data ========================
 # MHW durations
-mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442)
+mhw_duration_5m = xr.open_dataset(os.path.join(path_duration, "mhw_duration_5m.nc")).mhw_durations #dataset - shape (40, 365, 434, 1442) -- This has duration (90thperc + 1°C conditions!)
 
 det_combined_ds = xr.open_dataset(os.path.join(path_det, 'det5m_extended.nc')) #boolean shape (40, 365, 434, 1442)
 
@@ -116,12 +116,32 @@ combined_file_FULL = os.path.join(os.path.join(path_det, 'duration_AND_thresh_5m
 if not os.path.exists(combined_file_FULL):
 
     # === Select 60°S south extent
+    print("Selecting 60°S south extent...")
     south_mask = mhw_duration_5m['lat_rho'] <= -60
     mhw_duration_5m_NEW_60S_south = mhw_duration_5m.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
     det_combined_ds_60S_south = det_combined_ds.where(south_mask, drop=True) #shape (40, 365, 231, 1442)
     det_combined_ds_60S_south = det_combined_ds_60S_south.transpose('years','days','eta_rho','xi_rho')
 
-    # === Associate each mhw duration with the event threshold 
+
+    # lat_mean_eta = mhw_duration_5m.lat_rho.mean(dim='xi_rho')
+    # lat_idx = np.where(lat_mean_eta <= -60)[0]
+    # south_mask = mhw_duration_5m['lat_rho'] <= -60
+    
+    # Duration MHW events defined as T°C > 90th percentile and 1°C
+    # mhw_duration_5m_NEW_60S = mhw_duration_5m.isel(eta_rho=lat_idx) #shape (40, 365, 231, 1442)
+    # mhw_duration_5m_NEW_60S = mhw_duration_5m_NEW_60S.transpose('years','days','eta_rho','xi_rho')
+
+    # Duration MHW events defined as T°C > 90th percentile only
+    # mhw_duration_5m_NEW_60S_90thperc = mhw_duration_5m_90th.isel(eta_rho=lat_idx) #shape (40, 365, 231, 1442)
+
+    # # Detections of events above absolute thresholds
+    # det_combined_ds_60S_south = det_combined_ds.isel(eta_rho=lat_idx) #shape (40, 365, 231, 1442)
+    # det_combined_ds_60S_south = det_combined_ds_60S_south.transpose('years','days','eta_rho','xi_rho')
+    # det_combined_ds_60S_south = det_combined_ds_60S_south.drop_vars(['xi_rho', 'eta_rho'])
+
+
+    # === Associate each mhw duration with the event threshold and store in Datasets
+    print('to Dataset...')
     ds_duration_thresh_FULLyear= xr.Dataset(
         data_vars=dict(
             duration = (["years", "days", "eta_rho" ,"xi_rho"], mhw_duration_5m_NEW_60S_south.data), #shape (40, 365, 231, 1442)
@@ -138,12 +158,28 @@ if not os.path.exists(combined_file_FULL):
             ),
         attrs = {
                 "depth": "5m",
-                "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc) - based on the condition that a mhw is when T°C > absolute AND relative thresholds",
+                "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc).\n"\
+                    "Duration calculated for events where T°C > relative threshold and 1°C.",
                 "det_ideg": "Detected events where SST > (EXTENDED absolute threshold (i°C) BUT NOT NECESSARILY 90th percentile) , boolean array"
                 }                
             )
+    # ds_duration_thresh_FULLyear= xr.Dataset(data_vars=dict(duration = mhw_duration_5m_NEW_60S,
+    #                                                        det_1deg = det_combined_ds_60S_south['det_1deg_extended'],
+    #                                                        det_2deg = det_combined_ds_60S_south['det_2deg_extended'],
+    #                                                        det_3deg = det_combined_ds_60S_south['det_3deg_extended'],
+    #                                                        det_4deg = det_combined_ds_60S_south['det_4deg_extended']),
+    #                                         coords=dict(years = mhw_duration_5m_NEW_60S['years'],
+    #                                                     days = mhw_duration_5m_NEW_60S['days'],
+    #                                                     lon_rho = mhw_duration_5m_NEW_60S['lon_rho'],
+    #                                                     lat_rho = mhw_duration_5m_NEW_60S['lat_rho']),
+    #                                         attrs = {"depth": "5m",
+    #                                                 "duration":"Duration redefined as following the rules of Hobday et al. (2016), based on relative threshold (90thperc).\n"\
+    #                                                            "Duration calculated for events where T°C > relative threshold and 1°C.",
+    #                                                 "det_ideg": "Detected events where SST > (EXTENDED absolute threshold (i°C) BUT NOT NECESSARILY 90th percentile) , boolean array"})
 
+    
     # Write to file
+    print('Writing to file...')
     ds_duration_thresh_FULLyear.to_netcdf(combined_file_FULL)
 
 else: 
@@ -202,13 +238,14 @@ ds_duration_thresh_FULLyear = xr.open_dataset(os.path.join(path_det, 'duration_A
 
 # -- Write or load data
 combined_file = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc'))
+combined_file_90thperc = os.path.join(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON_90th.nc'))
 
 if not os.path.exists(combined_file):
     seasonal_vars = {}
     
     for var in ['duration', 'det_1deg', 'det_2deg', 'det_3deg', 'det_4deg']:
+        var='duration'
         print(f"Processing {var}")
-        # var='duration'
         # Step 1: Wrap variable as dataset (this avoids sel errors in your parallel logic)
         var_ds = ds_duration_thresh_FULLyear[[var]]
 
@@ -567,8 +604,8 @@ if plot == 'report':
     # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/temp100m_report.pdf'), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/temp100m_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/temp100m_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
 
 
 # %% ======================== Plot number of days under MHWs ========================
@@ -711,8 +748,8 @@ if plot == 'report':
     # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days_report.pdf'), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_days_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
 
 
 
@@ -1015,8 +1052,8 @@ if plot == 'report':
     # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years_report.pdf'), dpi=200, format='pdf', bbox_inches='tight')
     plt.show()
 else:
-    plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
-    # plt.show()
+    # plt.savefig(os.path.join(os.getcwd(), f'Marine_HeatWaves/figures_outputs/MHWs_metrics/nb_of_years_slides.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+    plt.show()
 
 
 
