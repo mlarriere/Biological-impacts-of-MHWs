@@ -93,7 +93,7 @@ mhw_duration_seasonal = mhw_duration_seasonal.rename({'days_of_yr': 'days'}) # r
 temp_clim = temp_avg_100m_SO_allyrs.isel(years=slice(0,30)) #shape: (30, 365, 231, 1442)
 temp_clim_mean = temp_clim.mean(dim=['years']) #shape: (365, 231, 1442)
 
-# %% ======================== Visualisation daily ========================
+# %% ======================== Visualization daily ========================
 eta_choice = 200
 xi_choice = 1100
 
@@ -131,7 +131,7 @@ plt.show()
 
 
 
-# %%Funtcion
+# %% ======================== Functions ========================
 # Select growth season for each year
 def extract_one_season_pair(args):
     ds_y, ds_y1, y = args
@@ -183,14 +183,14 @@ if not os.path.exists(output_file):
     temp_no_mhws = temp_clim_expanded + temp_trend.slope * (temp_avg_100m_SO_allyrs.years - reference_year) #shape (40, 365, 231, 1442)
 
     # -- Growth seasonal
-    temp_no_mhws_seasons = define_season_all_years_parallel(temp_no_mhws, max_workers=6, desc='Growth season') #(39, 181, 231, 1442)
+    temp_no_mhws_seasons = define_season_all_years_parallel(temp_no_mhws, max_workers=6) #(39, 181, 231, 1442)
 
     # Add metadata
     temp_no_mhws_seasons = temp_no_mhws_seasons.rename({'season_year': 'season_year_temp'})
     temp_no_mhws_seasons = temp_no_mhws_seasons.drop_vars('years')
     temp_no_mhws_seasons = temp_no_mhws_seasons.rename({'season_year_temp': 'years'})
-    temp_no_mhws_seasons.attrs['description'] = ("Climatological temperature signal with warming trend (surrogate no MHWs conditions).\n"
-                                                 "The trend is estimated using OLS (over daily signal of 40years).\n"
+    temp_no_mhws_seasons.attrs['description'] = ("Climatological temperature signal with warming trend.\n"
+                                                 "The trend is estimated using OLS (fitted on annual means).\n"
                                                  "Temporal extent: Growth season (Nov 1 – Apr 30)")
     
     # -- Save to file
@@ -213,7 +213,8 @@ lon = temp_clim_mean.isel(eta_rho=eta_choice, xi_rho=xi_choice).lon_rho.values
 data_clim = temp_clim_season.isel(eta_rho=200, xi_rho=1100).avg_temp #shape (181, )
 data_temp = temp_avg_100m_SO_allyrs_season.isel(eta_rho=eta_choice, xi_rho=xi_choice).avg_temp  #shape (39, 181)
 
-data_temp_yearly = np.array([data_temp.values[years == yr].mean() for yr in np.unique(years)])
+# data_temp_yearly = np.array([data_temp.values[years == yr].mean() for yr in np.unique(years)])
+data_temp_yearly = np.array([data_temp.sel(years=yr).mean().values for yr in data_temp.years.values])
 
 # Full hindcast daily: 365*40days
 n_years, n_days = data_temp.shape
@@ -288,9 +289,9 @@ def identify_events(data, threshold_vars = ['det_1deg', 'det_2deg', 'det_3deg', 
 # %% ======================== Plot before VS after ========================
 from matplotlib.patches import Patch
 # ================= Prepare data =================
-eta_choice = 200 #190
-xi_choice = 1100 #1000
-year_choice = 36 #9
+eta_choice = 190 #190 200
+xi_choice = 1000 #1000 1100
+year_choice = 9 #9 36
 
 lat = temp_clim_mean.isel(eta_rho=eta_choice, xi_rho=xi_choice).lat_rho.values
 lon = temp_clim_mean.isel(eta_rho=eta_choice, xi_rho=xi_choice).lon_rho.values
