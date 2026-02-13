@@ -92,45 +92,69 @@ temp_stacked = temp_stacked.transpose("time", "eta_rho", "xi_rho")
 # %% ======================== Functions ========================
 def compute_trend_cell_vectorized(ieta):
     """
-    Compute linear trend for one eta (all xi).
+    Compute linear trend for one eta (all xi) on ANNUAL MEANS.
     Returns slopes, intercepts, and r2 arrays: shape (time, xi)
     """
     # test
     # ieta=120
 
     temp_data = temp_stacked
-    ntime = temp_data.sizes['time']
+    # ntime = temp_data.sizes['time']
     nxi = temp_data.sizes['xi_rho']
     
+    # Reshape to (n_years, days_per_year, xi_rho) and compute annual mean
+    temp_daily = temp_data.isel(eta_rho=ieta).avg_temp.values  # shape (14600, 1442)
+    temp_annual = temp_daily.reshape(n_years, 365, nxi).mean(axis=1)  # shape (40, 1442)
+    
     # Initialisation
-    slopes = np.full(nxi, np.nan)
-    intercepts = np.full(nxi, np.nan)
-    r2 = np.full(nxi, np.nan)
+    # Time in years: t=0 for 1980, t=1 for 1981...
+    t = np.arange(n_years)
+    X = np.column_stack((t, np.ones_like(t)))
+    
+    # Initialisation
+    # slopes = np.full(nxi, np.nan)
+    # intercepts = np.full(nxi, np.nan)
+    # r2 = np.full(nxi, np.nan)
 
     # --- Linear regression
-    # Create design matrix for linear regression: Y = X @ coeffs
-    t = np.arange(ntime) / 365.0   # from days to years
-    X = np.column_stack((t, np.ones_like(t))) #shape (time, 2) 
+    # Fit: Y = slope*t + intercept
+    coeffs, residuals, _, _ = np.linalg.lstsq(X, temp_annual, rcond=None)
+    slopes = coeffs[0]      # °C/yr - warming rate
+    intercepts = coeffs[1]  # °C - mean temperature in 1980
+    
+    # # Create design matrix for linear regression: Y = X @ coeffs
+    # t = np.arange(ntime) / 365.0   # from days to years
+    # X = np.column_stack((t, np.ones_like(t))) #shape (time, 2) 
 
     # Extract Y
-    Y = temp_data.isel(eta_rho=ieta).avg_temp.values  # (time, xi)
+    # Y = temp_data.isel(eta_rho=ieta).avg_temp.values  # (time, xi)
     
     # Solve linear regression
-    coeffs, residuals, _, _ = np.linalg.lstsq(X, Y, rcond=None)  # shape (2, xi)
+    # coeffs, residuals, _, _ = np.linalg.lstsq(X, Y, rcond=None)  # shape (2, xi)
 
-    # Store coeffs of interest
-    slopes= coeffs[0] #shape: (nxi) - [°C/yr]
-    intercepts = coeffs[1] #shape: (nxi)
-        
-    # --- Evaluate the regression
-    # Compute R2 for each xi
-    y_mean = np.mean(Y, axis=0)
-    ss_tot = np.sum((Y - y_mean)**2, axis=0)
-
-    # Compute residuals
+    # # Store coeffs of interest
+    # slopes= coeffs[0] #shape: (nxi) - [°C/yr]
+    # intercepts = coeffs[1] #shape: (nxi)
+    
+    # --- Evaluate the regression: R² calculation
+    y_mean = np.mean(temp_annual, axis=0)
+    ss_tot = np.sum((temp_annual - y_mean)**2, axis=0)
     Y_pred = X @ coeffs
-    ss_res = np.sum((Y - Y_pred)**2, axis=0)  
-    r2 = np.where(ss_tot != 0, 1 - ss_res / ss_tot, np.nan)
+    ss_res = np.sum((temp_annual - Y_pred)**2, axis=0)
+
+    # Avoid division by zero
+    with np.errstate(divide='ignore', invalid='ignore'):
+        r2 = 1 - ss_res / ss_tot
+        r2 = np.where(ss_tot == 0, np.nan, r2)  # Set to NaN where ss_tot is zero
+
+    # # Compute R2 for each xi
+    # y_mean = np.mean(Y, axis=0)
+    # ss_tot = np.sum((Y - y_mean)**2, axis=0)
+
+    # # Compute residuals
+    # Y_pred = X @ coeffs
+    # ss_res = np.sum((Y - Y_pred)**2, axis=0)  
+    # r2 = np.where(ss_tot != 0, 1 - ss_res / ss_tot, np.nan)
 
     return ieta, slopes, intercepts, r2
 
@@ -208,15 +232,11 @@ if not os.path.exists(output_file_100mavg):
         },
     )
 
-    trends_100mavg_ds["slope"].attrs = {
-        "description": "Linear temperature trend",
-        "units": "°C/yr",
-    }
+    trends_100mavg_ds["slope"].attrs = {"description": "Linear temperature trend fitted on annual means",
+                                        "units": "°C/yr"}
 
-    trends_100mavg_ds["intercept"].attrs = {
-        "description": "Temperature at t=0, i.e. 1st January 1980",
-        "units": "°C",
-    }
+    trends_100mavg_ds["intercept"].attrs = {"description": "Mean temperature in 1980",
+                                            "units": "°C"}
     # Save
     trends_100mavg_ds.to_netcdf(output_file_100mavg)
 
@@ -266,28 +286,39 @@ plt.title('ROMS 100m-avg temperature\n Warming after 40years', fontsize=15)
 # plt.title('ROMS 100m-avg temperature\n Evaluation of Linear trend', fontsize=15)
 plt.show()
 
-# %% ======================== Removing trend ========================
+# %% ======================== Removing trend (no warming signal)========================
 detrended_temp_seasons_file = os.path.join(path_surrogates, f'detrended_signal/temp_detrended_seasonal.nc')
 if not os.path.exists(detrended_temp_seasons_file):
-    # Preparing (linear trend fitted on daily continuous data over 40 years -> need to reconstruct time to have trend)
+    # Preparing (linear trend fitted on ANNUAL MEANS over 40 years -> need to reconstruct time to have trend)
     n_years = temp_avg_100m_SO_allyrs.sizes["year"]
     n_days_per_year = temp_avg_100m_SO_allyrs.sizes["days"]
     total_days = n_years * n_days_per_year
-    t_cont = np.arange(total_days) / 365.0  # fractional years
-    t_da = xr.DataArray(t_cont, dims=["time"], coords={"time": np.arange(total_days)})
+
+    # Create year index for each day (0 for 1980, 1 for 1981, etc.)
+    year_idx = np.repeat(np.arange(n_years), n_days_per_year)  # shape (14600,)
+    year_idx_da = xr.DataArray(year_idx, dims=["time"], coords={"time": np.arange(total_days)})
+
+    # t_cont = np.arange(total_days) / 365.0  # fractional years
+    # t_da = xr.DataArray(t_cont, dims=["time"], coords={"time": np.arange(total_days)})
 
     # -- Reconstruct the linear fit using coeffs from linear regression 
+    # Expand slope and intercept
     intercept = trends_100mavg_ds.intercept
     slope = trends_100mavg_ds.slope
     slope_exp = slope.expand_dims({"time": total_days}).transpose("time", "eta_rho", "xi_rho") 
     intercept_exp = intercept.expand_dims({"time": total_days}).transpose("time", "eta_rho", "xi_rho")
 
     # Linear trend
-    y_fit_daily = slope_exp * t_da + intercept_exp #shape (14600, 231, 1442)
+    y_fit_daily = slope_exp * year_idx_da + intercept_exp #shape (14600, 231, 1442)
     y_fit_da = xr.DataArray(y_fit_daily, dims=temp_stacked.avg_temp.dims, coords=temp_stacked.avg_temp.coords)
 
     # -- Detrend signal = ROMS signal - linear trend
     roms_detrended_yearly = temp_stacked.avg_temp - y_fit_da #shape (14600, 231, 1442)
+
+    # -- CHECK
+    # There should be no warming in 1980, by definition
+    mean_1980 = roms_detrended_yearly.isel(time=slice(0, n_days_per_year), eta_rho=200, xi_rho=800).mean(dim='time')
+    print(f"Mean detrended temp in 1980: {mean_1980.mean().values:.6e} °C")  # Should be ~0
 
     # -- Unstack time (put back to (years, days) - not continuous anymore)
     detrended_unstacked = roms_detrended_yearly.unstack("time").transpose("year", "days", "eta_rho", "xi_rho") #shape(40, 365, 231, 1442)
@@ -301,7 +332,7 @@ if not os.path.exists(detrended_temp_seasons_file):
     temp_detrended_seasons = temp_detrended_seasons.drop_vars('years')
     temp_detrended_seasons = temp_detrended_seasons.rename({'season_year_temp': 'years'})
     temp_detrended_seasons.attrs['description'] = ("Daily ROMS temperature with linear trend removed at each grid cell. "
-                                                    "Trend estimated using OLS (over daily signal of 40years).\n"
+                                                    "Trend estimated using OLS (40years, annual means).\n"
                                                     "Temporal extent: Growth season (Nov 1 – Apr 30)")
     temp_detrended_seasons_ds = temp_detrended_seasons.to_dataset(name="avg_temp")
     
@@ -412,39 +443,16 @@ mpa_dict = {
     "Antarctic Peninsula": (mpas_ds.mask_ap, "#0A9396")
 }
 
-# %% ======================== Areas and volume MPAs ========================
-# --- Load data
-area_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc').isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)) #in km2
-volume_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/volume.nc').isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)) #in km3
 
-# --- Calculate total Southern Ocean area (south of 60°S)
-# Select surface layer
-area_SO_surf = area_roms['area'].isel(z_t=0)
-volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho') 
-
-# Mask latitudes south of 60°S (lat_rho <= -60)
-area_60S_SO = area_SO_surf.where(area_roms['lat_rho'] <= -60, drop=True)
-volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
-
-# --- Calculate area and volume of each MPA
 mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
              "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
              "EA": ("East Antarctic", mpas_south60S.mask_ea),
              "WS": ("Weddell Sea", mpas_south60S.mask_ws),
              "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
 
-area_mpa = {}
-volume_mpa = {}
 
-for abbrv, (name, mask) in mpa_masks.items():
-    area_mpa[abbrv] = area_60S_SO.where(mask)
-    volume_mpa[abbrv] = volume_60S_SO_100m.where(mask)
-
-# %% ======================== Warming in MPAs ========================
-# Mask MPA
-trends_100mavg_mpa = trends_100mavg_ds
-
-# Reformat 
+# %% ======================== Warming and trend in MPAs ========================
+# -- Mask trend in the MPA
 trends_100mavg_ds_reformat = trends_100mavg_ds.isel(xi_rho = slice(0, mpas_south60S.xi_rho.size))
 
 for abbrv, (name, mask_2d) in mpa_masks.items():
@@ -484,9 +492,93 @@ for abbrv, (name, mask_2d) in mpa_masks.items():
     else:
         print(f'MHWs in {name} already saved to file') 
 
-# -- Load data
 warming_mpa_ds = {}
 for region in mpa_masks.keys():
-    warming_mpa_ds[region] = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/interpolated/duration_AND_thresh_{region}.nc'))
+    warming_mpa_ds[region] = xr.open_dataset(os.path.join(path_surrogates, f'detrended_signal/mpas/temp_linear_trend_{region}.nc'))
+
+
+# -- Mask temperature in the MPA
+temp_100mavg_ds_reformat = temp_avg_100m_SO_allyrs.isel(xi_rho = slice(0, mpas_south60S.xi_rho.size))  # shape (years, days, eta_rho, xi_rho)
+
+for abbrv, (name, mask_2d) in mpa_masks.items():
+    # test
+    # abbrv = 'RS'
+    # name  = mpa_masks[abbrv][0]
+    # mask_2d = mpa_masks[abbrv][1]
+
+    output_file = os.path.join(path_surrogates, f"detrended_signal/mpas/temp_{abbrv}.nc")
+
+    if not os.path.exists(output_file):
+        print(f'Processing {name}')
+        # Mask
+        mask_mpa = mask_2d.astype(bool)
+        
+        # Store masked temperature per year in a list
+        masked_years = []
+        
+        for yr in range(temp_100mavg_ds_reformat.sizes["year"]):
+            # print(f' {yr + 1980}')
+            temp_yr = temp_100mavg_ds_reformat.isel(year=yr)
+            temp_masked = temp_yr.where(mask_mpa)
+            masked_years.append(temp_masked)
+        
+        # Combine togther
+        temp_mpa_da = xr.concat(masked_years, dim="years")
+
+        # To Dataset
+        temp_mpa_da.attrs["MPA name"] = f"{name}"
+        temp_mpa_da.attrs["Description"] = "Masked 100m-avg temperature in MPA"
+        temp_mpa_da.attrs["Units"] = "°C"
+
+        # Save
+        temp_mpa_da.to_netcdf(output_file)
+        print(f"Saved to {output_file}")
+
+    else:
+        print(f'Temperature in {name} already saved to file') 
+
+
+temp_mpa_ds = {}
+for region in mpa_masks.keys():
+    temp_mpa_ds[region] = xr.open_dataset(os.path.join(path_surrogates, f'detrended_signal/mpas/temp_{region}.nc'))
+
+
+
+# %% ======================== Visualisation ========================
+# ------------------ Daily MPA-mean time series ------------------
+mpa_choice = "RS"
+
+temp_plot = temp_mpa_ds[mpa_choice]
+
+temp_mpa_stacked = temp_plot.avg_temp.stack(time=("years", "days"))
+ntime = temp_mpa_stacked.time.size
+
+y_obs_daily = temp_mpa_stacked.mean(
+    dim=("eta_rho", "xi_rho"),
+    skipna=True
+).values  # (14600,)
+
+time = np.arange(ntime)
+t_years = time / 365.0
+
+# ------------------ Fit trend on DAILY data ------------------
+slope_mpa, intercept_mpa = np.polyfit(t_years, y_obs_daily, 1)
+
+print("MPA mean slope (°C/dec):", slope_mpa * 10)
+
+# Reconstruct fitted trend
+y_fit = slope_mpa * t_years + intercept_mpa
+
+# ------------------ Plot ------------------
+plt.figure(figsize=(12,5))
+plt.plot(time, y_obs_daily, "-", label="ROMS (MPA mean)", alpha=0.7, color="#0A9396")
+plt.plot(time, y_fit, "r--", label="Linear trend (daily fit)", linewidth=2)
+plt.xlabel("Days", fontsize=16)
+plt.ylabel("Temperature [°C]", fontsize=16)
+plt.title(f"ROMS Temperature – MPA mean ({mpa_choice})", fontsize=18)
+plt.legend(fontsize=14)
+plt.tight_layout()
+plt.show()
+
 
 # %%
