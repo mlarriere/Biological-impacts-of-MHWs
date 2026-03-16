@@ -278,113 +278,67 @@ print(f"  Negative values: {(biomass_cephalopod_60S_euphausia.euphausia_biomass 
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import distance_transform_edt
 
-def fill_lat_trend(biomass_da, roms_mask):
-    filled = biomass_da.copy()
+from scipy.ndimage import gaussian_filter
+
+def fill_and_smooth(biomass_da, roms_ocean_mask, sigma=1.5):
+    """
+    Fill NaNs using nearest neighbor, then apply Gaussian smoothing
+    ONLY to the filled regions — original regridded values are preserved.
+    """
+    values = biomass_da.values.copy()  # shape (eta_rho, xi_rho)
     
-    # Extract latitude array 
-    lats = biomass_da.lat_rho[:, 0].values  # shape (231,)
+    # Track where data was originally valid
+    originally_valid = np.isfinite(values) & roms_ocean_mask
     
-    for i in range(biomass_da.shape[1]):  # loop over xi_rho 
-        valid = np.isfinite(biomass_da[:, i]) & roms_mask[:, i]
-        if valid.sum() < 2:
-            continue  # skip if not enough points to fit
-        
-        # Linear fit along latitude
-        coeff = np.polyfit(lats[valid], biomass_da[:, i][valid], deg=1)
-        trend = np.polyval(coeff, lats)
-        
-        # Fill NaNs along latitude
-        filled[:, i] = np.where(valid, biomass_da[:, i], trend)
-        
-    return filled
-
-
-def fill_lon_trend(biomass_da, roms_mask):
-    # Test
-    # biomass_da=biomass_small.euphausia_biomass
-    # roms_mask=roms_ocean_mask.values
-
-    filled = biomass_da.copy()
+    # Step 1: nearest neighbor fill using distance transform
+    from scipy.ndimage import distance_transform_edt
+    invalid = ~np.isfinite(values)
+    if not invalid.any():
+        return biomass_da
     
-    # Extract Longitude array 
-    lons = biomass_da.lon_rho[0, :].values  # shape (1442,)
+    # For each NaN, find index of nearest valid cell
+    _, nearest_idx = distance_transform_edt(invalid, return_indices=True)
+    values_filled = values.copy()
+    values_filled[invalid] = values[nearest_idx[0][invalid], nearest_idx[1][invalid]]
     
-    for i in range(biomass_da.shape[0]): #loop over eta
-        valid = np.isfinite(biomass_da[i, :]) & roms_mask[i, :]
-        if np.sum(valid) < 2:
-            continue 
-
-        # Linear fit along longitude
-        coeff = np.polyfit(lons[valid], biomass_da[i, :][valid], deg=1)
-        trend = np.polyval(coeff, lons)
-
-        filled[i, :] = np.where(valid, biomass_da[i, :], trend)
-        
-        
-    return filled
+    # Step 2: Gaussian smooth the entire field
+    values_smooth = gaussian_filter(values_filled, sigma=sigma)
+    
+    # Step 3: Restore original values where data was valid
+    # Only filled regions get the smoothed version
+    values_final = np.where(originally_valid, values_filled, values_smooth)
+    
+    # Step 4: Re-apply ocean mask
+    values_final = np.where(roms_ocean_mask, values_final, np.nan)
+    
+    return xr.DataArray(values_final, dims=biomass_da.dims, 
+                        coords=biomass_da.coords, attrs=biomass_da.attrs)
 
 
 def process_bootstraps(a):
-    # Test
-    # a=0
-    print(f"Processing algo_bootstrap {a}")
-    biomass_algo = biomass_regridded.euphausia_biomass.isel(algo_bootstrap=a)
+    print(f"Processing bootstrap {a}")
+    biomass_algo = biomass_regridded.euphausia_biomass.isel(bootstraps=a)
     biomass_algo_monthly = biomass_algo.groupby("months").median("days")
     
     filled_monthly = []
-    
     for m in biomass_algo_monthly.months.values:
-        # Test
-        # m=1
-
         biomass_mth = biomass_algo_monthly.sel(months=m)
-
-        # Step1. Filling NA along latitudes
-        biomass_lat = fill_lat_trend(biomass_mth, roms_ocean_mask.values) #shape (231, 1442)
-
-        # Step2. Filling NA along longitudes
-        biomass_lon = fill_lon_trend(biomass_mth, roms_ocean_mask.values) #shape (231, 1442)
-
-        # Weighted combination using inverse distance --> Interpolation error variance increases with distance from data support
-        both_valid = np.isfinite(biomass_lat) & np.isfinite(biomass_lon)
-        mask_lat = np.isfinite(biomass_lat.values)
-        mask_lon = np.isfinite(biomass_lon.values)
-
-        d_lat = distance_transform_edt(~mask_lat)
-        d_lon = distance_transform_edt(~mask_lon)
-
-        w_lat = 1 / (d_lat + 1) #shape (231, 1442)
-        w_lon = 1 / (d_lon + 1) #shape (231, 1442)
-
-        biomass_latlon = xr.where(both_valid, (w_lat * biomass_lat + w_lon * biomass_lon) / (w_lat + w_lon),
-                                    xr.where(np.isfinite(biomass_lat), biomass_lat, biomass_lon))
-
-        # biomass_latlon = xr.where(both_valid, 0.3 * biomass_lat + 0.7 * biomass_lon, 
-        #                     xr.where(np.isfinite(biomass_lat), biomass_lat, biomass_lon))
-
-        # biomass_latlon = 0.5 * biomass_lat + 0.5 * biomass_lon
-    
-        # Step3. Gaussian smoothing
-        biomass_smooth = gaussian_filter(biomass_latlon, sigma=1)
-        
-        da = xr.DataArray(biomass_smooth, dims=biomass_mth.dims, coords=biomass_mth.coords, attrs=biomass_mth.attrs)
+        da = fill_and_smooth(biomass_mth, roms_ocean_mask.values, sigma=1.5)
         filled_monthly.append(da)
     
     filled_monthly = xr.concat(filled_monthly, dim="months")
     filled_monthly = filled_monthly.assign_coords(months=biomass_algo_monthly.months)
-    filled_monthly = filled_monthly.where(roms_ocean_mask)
     
-    return filled_monthly.expand_dims(algo_bootstrap=[a])
+    return filled_monthly.expand_dims(bootstraps=[a])
 
 
 # %% ====================== Regridding Biomass and Abundance to ROMS grid ======================
 import xesmf as xe
 from tqdm.contrib.concurrent import process_map
 
-output_file_biomass_regrid= os.path.join(path_cephalopod, "euphausia_biomass_SO_regridded.nc")
 output_file_biomass_regrid_interp= os.path.join(path_cephalopod, "euphausia_biomass_SO_regrid_interp.nc")
 
-if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_file_biomass_regrid_interp)):
+if not os.path.exists(output_file_biomass_regrid_interp):
 
     # ===================== Prepare data =====================
     # Load dataset with correct grid
@@ -392,6 +346,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     area_SO = area_roms.where(area_roms['lat_rho'] <= -60, drop=True) #shape (231, 1442)
 
     biomass_cephalopod_60S_euphausia = xr.open_dataset(os.path.join(path_cephalopod,'no_eke_euphausia_biomass.nc'))
+    
     # From monthly to daily dataset
     # Repeat monthly value for each day of the month
     days_in_month = np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
@@ -428,17 +383,26 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
         {"lon": (("eta_rho", "xi_rho"), roms_fixed.lon_rho.values),
         "lat": (("eta_rho", "xi_rho"), roms_fixed.lat_rho.values),})
 
-    # Build xESMF regridder 
-    regridder = xe.Regridder(
-        in_ds,
-        out_ds,
-        method="bilinear", #weighted avg of the 4 nearest neighbors
-        periodic=True, # if global grid put periodic=True, otherwise the edges of the grid won’t line up with each other
-        extrap_method="nearest_s2d"  # fill edges with nearest valid neighbor (otherwise, invalid data -> since do not have 4 neighbors)
-    ) 
+    # == Perform regridding
+    # Pass 1: regrid WITHOUT extrapolation — keeps NaNs where coverage is missing
+    regridder_no_extrap = xe.Regridder(
+        in_ds, out_ds,
+        method="bilinear",
+        periodic=True,
+        extrap_method=None  # no extrapolation
+    )
+    biomass_regridded_clean = regridder_no_extrap(biomass_fixed)
 
-    # Perform regridding
-    biomass_regridded = regridder(biomass_fixed) #shape (181, 10, 231, 1442)
+    # Pass 2: regrid WITH nearest-neighbor to get filled version
+    regridder_extrap = xe.Regridder(
+        in_ds, out_ds,
+        method="nearest_s2d",
+        periodic=True,
+    )
+    biomass_regridded_filled = regridder_extrap(biomass_fixed)
+
+    # Combine
+    biomass_regridded = biomass_regridded_clean.fillna(biomass_regridded_filled) #shape (181, 10, 231, 1442)
 
     # Add coordinates (lat, lon) from ROMS
     biomass_regridded = biomass_regridded.assign_coords(
@@ -449,78 +413,19 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     if 'regrid_method' in biomass_regridded.attrs:
         del biomass_regridded.attrs['regrid_method']
     biomass_regridded.attrs.update({"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
-                                    "Cephalopod run": "Simple run (T°C, salinity and PP)",
-                                    "regridding": "Nearest neighbors, using bilinear method.",
+                                    "Cephalopod run": "Chla and EKE removed (PP is replacing Chla)",
+                                    "regridding": "Bilinear and Nearest neighbors (2 passes).",
                                     "units": "mg C m-3",})
-
-    # Save to file 
-    biomass_regridded.to_netcdf(output_file_biomass_regrid, engine="netcdf4")
 
     # ===================== Interpolate NAs values =====================
     # Mask the land from ROMS
     roms_ocean_mask = roms_fixed > 0   #True False - shape (231, 1442)
    
-    # -- Test interpolation
-    # biomass_regridded = xr.open_dataset(os.path.join(path_cephalopod, "euphausia_biomass_SO_regridded.nc"))
-    biomass_regridded_small_extent = biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=slice(150, 220), xi_rho=slice(1000,1200)).euphausia_biomass
-    roms_mask = roms_ocean_mask.isel(eta_rho=slice(150, 220), xi_rho=slice(1000,1200))
-        
-    filled_lat_na = fill_lat_trend(biomass_regridded_small_extent, roms_mask)
-    filled_lon_na = fill_lon_trend(biomass_regridded_small_extent, roms_mask)
-
-    # Check if both valid
-    both_valid = np.isfinite(filled_lat_na) & np.isfinite(filled_lon_na)
-    mask_lat = np.isfinite(filled_lat_na.values)
-    mask_lon = np.isfinite(filled_lon_na.values)
-    d_lat = distance_transform_edt(~mask_lat)
-    d_lon = distance_transform_edt(~mask_lon)
-    w_lat = 1 / (d_lat + 1)
-    w_lon = 1 / (d_lon + 1)
-    filled_latlon_na = xr.where(both_valid, (w_lat * filled_lat_na + w_lon * filled_lon_na) / (w_lat + w_lon),
-                                xr.where(np.isfinite(filled_lat_na), filled_lat_na, filled_lon_na))
-    biomass_smooth = xr.DataArray(gaussian_filter(filled_latlon_na.values, sigma=1), coords=filled_latlon_na.coords,
-                                  dims=filled_latlon_na.dims, name="biomass_smooth", attrs=filled_latlon_na.attrs)
-    # Plot
-    fig, axes = plt.subplots(1, 5, figsize=(15, 3), sharey=True)
-
-    # 1. Original (regridded subset)
-    pcm0 = axes[0].pcolormesh(biomass_regridded_small_extent.lon_rho, biomass_regridded_small_extent.lat_rho, 
-                            biomass_regridded_small_extent, shading="nearest", cmap="viridis")
-    axes[0].set_title("Regridded")
-    axes[0].set_ylabel("Lat")
-
-    # 2. Latitude NaNs filled
-    pcm1 = axes[1].pcolormesh(filled_lat_na.lon_rho, filled_lat_na.lat_rho, filled_lat_na,
-                            shading="nearest", cmap="viridis")
-    axes[1].set_title("Latitude filled")
-
-    # 3. Longitude NaNs filled
-    pcm2 = axes[2].pcolormesh(filled_lon_na.lon_rho, filled_lon_na.lat_rho, filled_lon_na,
-                            shading="nearest", cmap="viridis")
-    axes[2].set_title("Longitude filled")
-
-    # 4. Weighted interpolation
-    pcm3 = axes[3].pcolormesh(filled_latlon_na.lon_rho, filled_latlon_na.lat_rho, filled_latlon_na,
-                            shading="nearest", cmap="viridis")
-    axes[3].set_title("Lat and Long weighted filling")
-
-    # 5. Gaussian smoothing
-    pcm4 = axes[4].pcolormesh(biomass_smooth.lon_rho, biomass_smooth.lat_rho, biomass_smooth,
-                            shading="nearest", cmap="viridis")
-    axes[4].set_title("Smoothed")
-
-    # Shared formatting
-    for ax in axes:
-        ax.set_xlabel("Lon")
-
-    plt.tight_layout()
-    plt.show()
-
     # Run in parallel 
-    biomass_interp_list = process_map(process_bootstraps, np.arange(50), max_workers=10, desc='Interpolation Bootstraps')
+    biomass_interp_list = process_map(process_bootstraps, np.arange(10), max_workers=10, desc='Interpolation Bootstraps')
 
     # Concatenate results together
-    biomass_interp = xr.concat(biomass_interp_list, dim="algo_bootstrap")
+    biomass_interp = xr.concat(biomass_interp_list, dim="bootstraps")
     biomass_interp = biomass_interp.assign_coords(lon_rho=(("eta_rho", "xi_rho"), area_SO.lon_rho.values),
                                                   lat_rho=(("eta_rho", "xi_rho"), area_SO.lat_rho.values))
     
@@ -531,17 +436,15 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     assert day_to_month.size == 181
     day_to_month_xr = xr.DataArray(day_to_month, dims="days", name="months")
     biomass_interp_daily = biomass_interp.sel(months=day_to_month_xr)
-    biomass_interp_daily = biomass_interp_daily.transpose('days', 'algo_bootstrap', 'eta_rho', 'xi_rho')  #shape (181, 50, 231, 1442)
+    biomass_interp_daily = biomass_interp_daily.transpose('days', 'bootstraps', 'eta_rho', 'xi_rho')  #shape (181, 50, 231, 1442)
 
     # To Dataset
     biomass_interp_daily_ds = biomass_interp_daily.to_dataset(name="euphausia_biomass")
-    biomass_interp_daily_ds = biomass_interp_daily_ds.reset_index(["algo_bootstrap"])
+    biomass_interp_daily_ds = biomass_interp_daily_ds.reset_index(["bootstraps"])
     biomass_interp_daily_ds.attrs.update({"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
                                           "regridding": "Nearest neighbors, using bilinear method.",
-                                          "Cephalopod run": "Original", #Simple run (T°C, salinity and PP)
-                                          "interpolation": "Nan values filled using linear trend fits along latitude and longitude.\n"
-                                                           "Latitude- and longitude-based estimated values are combined with inverse distance weighting.\n"
-                                                           "Finally, Gaussian smoothing (with sigma = 1).",
+                                           "Cephalopod run": "Chla and EKE removed (PP is replacing Chla).",
+                                          "interpolation": "Nan values filled using nearest neighbor and Gaussian smoothing (sigma=1.5).",
                                           "units": "mg C m-3",})
 
     # Save to file
@@ -550,13 +453,13 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     visualisation = True
     if visualisation:
         # ---- Prepare data
-        data_before = biomass_fixed.isel(algo_bootstrap=0, days=0).euphausia_biomass
-        data_after = biomass_regridded.isel(algo_bootstrap=0, days=0).euphausia_biomass
-        data_filled = biomass_interp_daily_ds.isel(algo_bootstrap=0, days=0).euphausia_biomass
+        data_before = biomass_fixed.isel(bootstraps=0, days=0).euphausia_biomass
+        data_after = biomass_regridded.isel(bootstraps=0, days=0).euphausia_biomass
+        data_filled = biomass_interp_daily_ds.isel(bootstraps=0, days=0).euphausia_biomass
 
         # ---- Figure setup
         fig, axes = plt.subplots(1, 3, figsize=(15, 6), subplot_kw=dict(projection=ccrs.SouthPolarStereo()))
-        fig.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.9, wspace=0.05)
+        # fig.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.9, wspace=0.05)
 
         # Circular boundary
         theta = np.linspace(0, 2*np.pi, 200)
@@ -567,13 +470,12 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
         vmax = np.nanpercentile(data_before, 95)
         norm = mcolors.Normalize(vmin=0, vmax=5)
 
-        titles = ["Before regridding", "After regridding", "After Nan filling"]
+        titles = ["Before regridding", "After regridding", "After Interpolation"]
         datasets = [data_before, data_after, data_filled]
 
         for i, (ax, data, title) in enumerate(zip(axes, datasets, titles)):
-            ax.set_extent([0, 360, -90, -60], crs=ccrs.PlateCarree())
+            ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
             ax.set_boundary(circle, transform=ax.transAxes)
-            ax.set_anchor('C')
 
             ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
             ax.add_feature(cfeature.COASTLINE, linewidth=0.6, zorder=3)
@@ -603,11 +505,8 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
         fig.suptitle("Euphausia superba biomass - day 0, bootstrap 0", fontsize=16, y=0.93)
         plt.show()
 
-
 else:
-    biomass_regridded = xr.open_dataset(output_file_biomass_regrid)
     biomass_regrid_interp = xr.open_dataset(output_file_biomass_regrid_interp)
-
 
 # %% ====================== CEPHALOPOD biomass in the MPAS ======================
 # This is use afterwards to select MHW events happening in area where Biomass exists.
