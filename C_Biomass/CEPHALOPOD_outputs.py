@@ -83,11 +83,121 @@ path_masslength = os.path.join(path_surrogates, f'mass_length')
 path_cephalopod = os.path.join(path_biomass, 'CEPHALOPOD')
 
 # %% ====================== Prepare biomass data ======================
+# Dictionary to store all three runs
+runs = {
+    'simple': '/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_total_krill_2026-02-11 15:51:16.858336/tot_krill_biomass.nc',
+    'no_chla': '/net/meso/work/aschickele//CEPHALOPOD/output/Marguerite_total_krill_2026-02-13 12:00:15.588019/Euphausiacea/tot_krill_biomass.nc',
+    'no_eke': '/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_total_krill_2026-02-16 09:45:59.190018/Euphausiacea/tot_krill_biomass.nc',
+    # 'original_WOA': '/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_tot_krill_WOA_2026-01-12 17:27:04.013515/Euphausiacea/tot_krill_biomass.nc'
+}
+
+
+main_predictors = {
+    'simple': "1. Temperature\n 2. OO\n 3. Salinity", 
+    'no_chla' : "1. Silicates,\n2. Oxygen (correlated with temperature),\n3. Salinity,\n4. PP",
+    'no_eke' : "Same run as no Chla with EKE removed",
+    # 'original_WOA': "1. Silicates (correlated with nutrients),\n2. Oxygen (correlated with temperature),\n3. Salinity,\n4. Chla (correlated with PP)"
+}
+
+run_type = {
+    'simple': 'Simple run with basic predictors',
+    'no_chla': 'Run without Chlorophyll-a, using PP instead',
+    'no_eke': 'Run without Chlorophyll-a and without EKE',
+    # 'original_WOA': 'Original run with WOA data including Chlorophyll-a'
+}
+
+# Process each run
+for run_name, path in runs.items():
+    # test
+    # run_name ='original_WOA'
+    # path = runs[run_name]
+    print(f"\n{'='*60}")
+    print(f"Processing: {run_name}")
+    print(f"{'='*60}")
+    
+    # Load data
+    biomass_data = xr.open_dataset(path)
+    
+    # --- Reformatting
+    nlat, nlon = 180, 360
+    lat = np.linspace(-89.5, 89.5, nlat)
+    lon = np.linspace(-179.5, 179.5, nlon)
+
+    # Raw data
+    arr = biomass_data.tot_krill_biomass.values  # shape: (12, 10, 64800)
+
+    # Reshape northing into (lat, lon)
+    arr = arr.reshape(12, 10, 180, 360)  # (months, bootstrap, lat, lon)
+
+    # Flip latitude (before it was going from -90 to 90, i.e. from south pole to north pole)
+    arr_global = arr[:, :, ::-1, :]  # flip along lat axis
+    lat_flipped = lat[::-1]
+
+    # Create new Dataset
+    biomass_cephalopod = xr.Dataset(data_vars=dict(total_krill_biomass=(["months", "bootstraps", "lat", "lon"], arr_global)), 
+        coords=dict(months=np.arange(1, 13),
+                    algo_bootstrap=np.arange(1, 51),
+                    lat=lat_flipped, lon=lon),
+        attrs=biomass_data.attrs)
+
+    # Add info in attributed
+    biomass_cephalopod.attrs.update({
+        "description": "Bootstraps of the ensemble member (from 6 different models).",
+        "run_type": run_type[run_name],
+        "model_name": "Cephalopod",
+        "model_resolution": "1 degree",
+        "model_extent": "global",
+        "model_inputs": "WOA",
+        "units":"mg C m-3",
+        "main_predictors": main_predictors[run_name], 
+        # "ensemble_members": "5 models out of 6: GLM, MLP, GAM, SWM, RF. Not passing: BRT.",
+        "note": "Under assumption that krill spend most of their time in the 0-100m, all observations are integrated (median concentration on depth)."
+    })
+
+    # -- Select only the Southern Ocean (south of 60°S)
+    lat = np.linspace(89.5, -89.5, 180)  # north → south
+    lat_mask = lat <= -60
+    arr_60S = arr[:, :, lat_mask, :]
+    lat_60S = lat[lat_mask]  # lat_60S: -60.5 → -89.5 (north → south)
+
+    arr_60S_flipped = arr_60S[:, :, ::-1, :]
+    lat_60S_flipped = lat_60S[::-1]  # now first row = south pole
+
+    biomass_cephalopod_60S = xr.Dataset(data_vars=dict(total_krill_biomass=(["months", "bootstraps", "lat", "lon"], arr_60S_flipped)),
+                                        coords=dict( months=np.arange(1, 13), bootstraps=np.arange(1, 11), lat=lat_60S_flipped, lon=np.linspace(-179.5, 179.5, 360)))
+
+    biomass_cephalopod_60S.attrs = biomass_cephalopod.attrs.copy()
+    biomass_cephalopod_60S.attrs.update({"model_extent": "Southern Ocean",})
+
+    # -- Euphausia superba biomass
+    # Euphausia = 80% of total krill
+    biomass_cephalopod_60S_euphausia = xr.Dataset(data_vars=dict(euphausia_biomass=(["months", "bootstraps", "lat", "lon"], arr_60S_flipped * 0.8)),
+                                                coords=dict(months=np.arange(1, 13), bootstraps=np.arange(1, 11), lat=lat_60S_flipped, lon=np.linspace(-179.5, 179.5, 360)))
+
+    biomass_cephalopod_60S_euphausia.attrs = {
+        "description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
+        "run_type": run_type[run_name],
+        "units": "mg C m-3",
+    }
+
+    # Save 
+    output_file_tot_krill = os.path.join(path_cephalopod, f"{run_name}_tot_krill_biomass.nc")
+    output_file_euphausia = os.path.join(path_cephalopod, f"{run_name}_euphausia_biomass.nc")
+    
+    biomass_cephalopod_60S.to_netcdf(output_file_tot_krill, engine="netcdf4")
+    biomass_cephalopod_60S_euphausia.to_netcdf(output_file_euphausia, engine="netcdf4")
+    
+    print(f"Stats for {run_name}:")
+    print(f"  Max: {biomass_cephalopod_60S_euphausia.euphausia_biomass.max().values:.2f} mgC/m³")
+    print(f"  Min: {biomass_cephalopod_60S_euphausia.euphausia_biomass.min().values:.2f} mgC/m³")
+    print(f"  Mean: {biomass_cephalopod_60S_euphausia.euphausia_biomass.mean().values:.2f} mgC/m³")
+    print(f"  Negative values: {(biomass_cephalopod_60S_euphausia.euphausia_biomass < 0).sum().values}")
+
+# %% ====================== Original RUN ======================
 # --- Load biomass from CEPHALOPOD
 # 5 different algorithms, 10 bootstraps per algo
 biomass_data = xr.open_dataset('/net/meso/work/aschickele/CEPHALOPOD/output/Marguerite_tot_krill_WOA_2026-01-12 17:27:04.013515/Euphausiacea/tot_krill_biomass.nc') #shape (coords, model, time) = (d1=64800, d2=5*10,  d3=12)
-# print(f'max: {biomass_data.max()} mgC/m3') #7426.0 mgC/m3
-# print(f'min: {biomass_data.min()} mgC/m3') #-6.576 mgC/m3
+
 
 # --- Reformatting
 nlat, nlon = 180, 360
@@ -143,8 +253,11 @@ biomass_cephalopod_60S.attrs.update({"model_extent": "Southern Ocean",})
 biomass_cephalopod_60S_euphausia = xr.Dataset(data_vars=dict(euphausia_biomass=(["months", "algo_bootstrap", "lat", "lon"], arr_60S_flipped * 0.8)),
                                               coords=dict(months=np.arange(1, 13), algo_bootstrap=np.arange(1, 51), lat=lat_60S_flipped, lon=np.linspace(-179.5, 179.5, 360)))
 
-biomass_cephalopod_60S_euphausia.attrs = {"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
-                                          "units": "mg C m-3",}
+biomass_cephalopod_60S_euphausia.attrs = {
+    "description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
+    "run_type": 'original',
+    "units": "mg C m-3",
+}
 
 # -- Save 
 output_file_biomass_tot_krill = os.path.join(path_cephalopod, "total_krill_biomass_SO.nc")
@@ -155,6 +268,11 @@ output_file_biomass_euphausia = os.path.join(path_cephalopod, "euphausia_biomass
 if not os.path.exists(output_file_biomass_euphausia):
     biomass_cephalopod_60S_euphausia.to_netcdf(output_file_biomass_euphausia, engine="netcdf4")
 
+print(f"Stats for original run:")
+print(f"  Max: {biomass_cephalopod_60S_euphausia.euphausia_biomass.max().values:.2f} mgC/m³")
+print(f"  Min: {biomass_cephalopod_60S_euphausia.euphausia_biomass.min().values:.2f} mgC/m³")
+print(f"  Mean: {biomass_cephalopod_60S_euphausia.euphausia_biomass.mean().values:.2f} mgC/m³")
+print(f"  Negative values: {(biomass_cephalopod_60S_euphausia.euphausia_biomass < 0).sum().values}")
 
 # %% ====================== Interpolation functions ======================
 from scipy.ndimage import gaussian_filter
@@ -206,10 +324,10 @@ def fill_lon_trend(biomass_da, roms_mask):
     return filled
 
 
-def process_algorithm(a):
+def process_bootstraps(a):
     # Test
     # a=0
-    # print(f"Processing algorithm {a}")
+    print(f"Processing algo_bootstrap {a}")
     biomass_algo = biomass_regridded.euphausia_biomass.isel(algo_bootstrap=a)
     biomass_algo_monthly = biomass_algo.groupby("months").median("days")
     
@@ -273,13 +391,14 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     area_roms =  xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/area.nc')['area'].isel(z_t=0)
     area_SO = area_roms.where(area_roms['lat_rho'] <= -60, drop=True) #shape (231, 1442)
 
+    biomass_cephalopod_60S_euphausia = xr.open_dataset(os.path.join(path_cephalopod,'no_eke_euphausia_biomass.nc'))
     # From monthly to daily dataset
     # Repeat monthly value for each day of the month
     days_in_month = np.array([31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31])
     day_index = np.concatenate([np.repeat(month, days_in_month[month-1]) for month in range(1, 13)])
     assert day_index.shape[0] == 365
     day_index_xr = xr.DataArray(day_index, dims="days", name="month")
-    biomass_daily = biomass_cephalopod_60S_euphausia.sel(months=day_index_xr) #shape: (365, 50, 30, 360)
+    biomass_daily = biomass_cephalopod_60S_euphausia.sel(months=day_index_xr) #shape: (365, 10, 30, 360)
 
     # Check if the same 
     diff = biomass_daily.isel(days=304) - biomass_daily.isel(days=304+14)
@@ -290,7 +409,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     jan_april_biomass.coords['days'] = jan_april_biomass.coords['days'] 
     nov_dec_biomass = biomass_daily.sel(days=slice(304, 366))
     nov_dec_biomass.coords['days'] = np.arange(304, 365)
-    biomass_daily_austral = xr.concat([nov_dec_biomass, jan_april_biomass], dim="days") #shape: (181, 50, 30, 360)
+    biomass_daily_austral = xr.concat([nov_dec_biomass, jan_april_biomass], dim="days") #shape: (181, 10, 30, 360)
 
     # Fix longitudes
     # ROMS (24.125, 383.875) - put to (0, 360)
@@ -319,7 +438,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     ) 
 
     # Perform regridding
-    biomass_regridded = regridder(biomass_fixed) #shape (181, 50, 231, 1442)
+    biomass_regridded = regridder(biomass_fixed) #shape (181, 10, 231, 1442)
 
     # Add coordinates (lat, lon) from ROMS
     biomass_regridded = biomass_regridded.assign_coords(
@@ -330,6 +449,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     if 'regrid_method' in biomass_regridded.attrs:
         del biomass_regridded.attrs['regrid_method']
     biomass_regridded.attrs.update({"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
+                                    "Cephalopod run": "Simple run (T°C, salinity and PP)",
                                     "regridding": "Nearest neighbors, using bilinear method.",
                                     "units": "mg C m-3",})
 
@@ -341,7 +461,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     roms_ocean_mask = roms_fixed > 0   #True False - shape (231, 1442)
    
     # -- Test interpolation
-    biomass_regridded = xr.open_dataset(os.path.join(path_cephalopod, "euphausia_biomass_SO_regridded.nc"))
+    # biomass_regridded = xr.open_dataset(os.path.join(path_cephalopod, "euphausia_biomass_SO_regridded.nc"))
     biomass_regridded_small_extent = biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=slice(150, 220), xi_rho=slice(1000,1200)).euphausia_biomass
     roms_mask = roms_ocean_mask.isel(eta_rho=slice(150, 220), xi_rho=slice(1000,1200))
         
@@ -397,7 +517,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     plt.show()
 
     # Run in parallel 
-    biomass_interp_list = process_map(process_algorithm, np.arange(50), max_workers=10, desc='Interpolation Algo')
+    biomass_interp_list = process_map(process_bootstraps, np.arange(50), max_workers=10, desc='Interpolation Bootstraps')
 
     # Concatenate results together
     biomass_interp = xr.concat(biomass_interp_list, dim="algo_bootstrap")
@@ -418,6 +538,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
     biomass_interp_daily_ds = biomass_interp_daily_ds.reset_index(["algo_bootstrap"])
     biomass_interp_daily_ds.attrs.update({"description": "Biomass of Euphausia superba assuming 80% of total krill biomass",
                                           "regridding": "Nearest neighbors, using bilinear method.",
+                                          "Cephalopod run": "Original", #Simple run (T°C, salinity and PP)
                                           "interpolation": "Nan values filled using linear trend fits along latitude and longitude.\n"
                                                            "Latitude- and longitude-based estimated values are combined with inverse distance weighting.\n"
                                                            "Finally, Gaussian smoothing (with sigma = 1).",
@@ -428,7 +549,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
 
     visualisation = True
     if visualisation:
-        # ---- Median over longitude (just for plotting, small example)
+        # ---- Prepare data
         data_before = biomass_fixed.isel(algo_bootstrap=0, days=0).euphausia_biomass
         data_after = biomass_regridded.isel(algo_bootstrap=0, days=0).euphausia_biomass
         data_filled = biomass_interp_daily_ds.isel(algo_bootstrap=0, days=0).euphausia_biomass
@@ -444,7 +565,7 @@ if not (os.path.exists(output_file_biomass_regrid) and os.path.exists(output_fil
 
         # Colorscale
         vmax = np.nanpercentile(data_before, 95)
-        norm = mcolors.Normalize(vmin=0, vmax=vmax)
+        norm = mcolors.Normalize(vmin=0, vmax=5)
 
         titles = ["Before regridding", "After regridding", "After Nan filling"]
         datasets = [data_before, data_after, data_filled]
