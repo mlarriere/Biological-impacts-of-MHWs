@@ -38,7 +38,7 @@ os.environ["MKL_NUM_THREADS"] = "1"
 gc.collect()
 print(f"Memory used: {psutil.virtual_memory().percent}%")
 
-# %% --------------------------------Figure settings --------------------------------
+# %% -------------------------------- Figure settings --------------------------------
 import matplotlib as mpl
 mpl.rcParams.update({
     "text.usetex": True,
@@ -109,9 +109,7 @@ volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=
 # %% ======================== Biomass from CEPHALOPOD ========================
 # -- Load data
 # Biomass are climatological products [mgC/m3]
-biomass_regridded = xr.open_dataset(os.path.join(path_cephalopod, 'euphausia_biomass_SO_regridded.nc')) #shape (181, 50, 231, 1442)
-biomass_regrid_interp = xr.open_dataset(os.path.join(path_cephalopod, 'euphausia_biomass_SO_regrid_interp.nc')) #shape (181, 50, 231, 1442)
-original_product = xr.open_dataset(os.path.join(path_cephalopod, 'total_krill_biomass_SO.nc'))
+biomass_regrid_interp = xr.open_dataset(os.path.join(path_cephalopod, 'regrid_interp/euphausia_biomass_no_eke.nc')) #shape (181, 10, 231, 1442)
 
 # -- Convert biomass from [mgC/m3] to [mg/m3]
 # Carbon fraction in Euphausia Superba -- Data from Farber-Lorda et al. (2009)
@@ -121,7 +119,6 @@ propagated_sd = np.sqrt(np.sum(np.array([v[1] for v in C_frac_stage.values()])**
 # print(f"Mean C fraction: {mean_C_fraction:.4f}")
 # print(f"Propagated SD: {propagated_sd:.4f}")
 
-biomass_regridded_dry = biomass_regridded / mean_C_fraction #[mg/m3]
 biomass_regrid_interp_dry = biomass_regrid_interp / mean_C_fraction #[mg/m3]
 # print(f'Before: {biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mgC/m3')
 # print(f'After: {biomass_regridded_dry.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mg/m3')
@@ -130,18 +127,17 @@ biomass_regrid_interp_dry = biomass_regrid_interp / mean_C_fraction #[mg/m3]
 # --- Load mass data [mg] for each maturity stage -- Southern Ocean  
 # 1. Climatology
 clim_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "clim_mass_stages_SO.nc")) #shape (181, 231, 1442)
+clim_krillmass_SO = clim_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
 
 # 2. Actual
 actual_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "actual_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
 actual_krillmass_SO = actual_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
 
 # 3. No MHWs (MHWs replaced by clim)
-noMHWs_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "noMHWs_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
-noMHWs_krillmass_SO = noMHWs_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
 clim_trended_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "clim_trended_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
 clim_trended_krillmass_SO = clim_trended_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
 
-# 3. No warming (temperature signal detrended)
+# 4. No warming (temperature signal detrended)
 nowarming_krillmass_SO = xr.open_dataset(os.path.join(path_masslength, "nowarming_mass_stages_SO.nc")) #shape (39, 181, 231, 1442)
 nowarming_krillmass_SO = nowarming_krillmass_SO.rename({"lat": "lat_rho", "lon": "lon_rho"})
 
@@ -151,14 +147,11 @@ from functools import partial
 from tqdm.contrib.concurrent import process_map
 import gc
 
-def biomass_k(k, growth_fact_pop, B0_interp=False):
-
+def biomass_k(k, growth_fact_pop):
+    # k=0
     n_days = 181
     
-    if B0_interp:
-        B0 = biomass_regrid_interp_dry.euphausia_biomass.isel(days=0, algo_bootstrap=k).values
-    else:
-        B0 = biomass_regridded_dry.euphausia_biomass.isel(days=0, algo_bootstrap=k).values
+    B0 = biomass_regrid_interp_dry.euphausia_biomass.isel(days=0, bootstraps=k).values
 
     B_k = np.empty((n_days, *B0.shape), dtype=np.float32)
     B_k[0] = B0
@@ -169,11 +162,10 @@ def biomass_k(k, growth_fact_pop, B0_interp=False):
     return B_k
 
 
-def evolution_biomass_yr(year_idx, ds_mass, proportion, B0_interp=False):
+def evolution_biomass_yr(year_idx, ds_mass, proportion):
     # test
     # year_idx = 36
     # ds_mass = clim_krillmass_SO
-    # B0_interp=False
 
     # -- Climatology case, i.e. no years dim
     has_years = 'years' in ds_mass.dims
@@ -193,21 +185,15 @@ def evolution_biomass_yr(year_idx, ds_mass, proportion, B0_interp=False):
 
     # -- Biomass timeseries for every models and algorithms
     # Loop over the algo and boostraps -- in parallel
-    func = partial(biomass_k, growth_fact_pop=growth_fact_pop, B0_interp=B0_interp)
-    results = process_map(func, range(50), max_workers=10, chunksize=1, desc='Algo')
+    func = partial(biomass_k, growth_fact_pop=growth_fact_pop)
+    results = process_map(func, range(10), max_workers=10, chunksize=1, desc='Bootstraps')
 
     # Extract data
-    B_all = np.stack(results, axis=0) #shape (50, 181, 231, 1442)
+    B_all = np.stack(results, axis=0) #shape (10, 181, 231, 1442)
     
-    # Reshape to (5, 10, 181, 231, 1442)
-    B_all = B_all.reshape(5, 10, *B_all.shape[1:])
-
-    # Take the mean over boostraps per algo
-    B_all_algo = B_all.mean(axis=1) #shape (5, 181, 231, 1442)
-
     # To Datsaset
-    biomass_ds = xr.Dataset(data_vars=dict(biomass=(("algo", "days", "eta_rho", "xi_rho"), B_all_algo)),
-                            coords=dict(algo=np.arange(5), 
+    biomass_ds = xr.Dataset(data_vars=dict(biomass=(("bootstraps", "days", "eta_rho", "xi_rho"), B_all)),
+                            coords=dict(bootstraps=np.arange(10), 
                                         days=ds_mass.days,
                                         lat_rho=ds_mass.lat_rho,
                                         lon_rho=ds_mass.lon_rho,))
@@ -229,21 +215,20 @@ def evolution_biomass_yr(year_idx, ds_mass, proportion, B0_interp=False):
                                             #    "units": "mg m-3",})
 
     # Clean memory
-    del B_all, B_all_algo
+    del B_all
     gc.collect()
 
     return biomass_ds
 
 
-def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_folder, max_workers=10, B0_interp=False):
+def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_folder, max_workers=10):
     # test
     # max_workers=10
     # proportion=proportion
-    # ds_mass=nowarming_krillmass_SO
-    # label='No Warming'  
-    # label_da='nowarming'  
-    # B0_interp=True
-    # output_folder= os.path.join(path_biomass_ts_SO, f'biomass_interpolated')
+    # ds_mass=clim_krillmass_SO_expanded
+    # label='Climatology'  
+    # label_da='clim'  
+    # output_folder= os.path.join(path_biomass_ts_SO)
     
     print(f"  → {label}")
     
@@ -251,338 +236,243 @@ def compute_biomass_surrogates(ds_mass, label, label_da, proportion, output_fold
 
     if not os.path.exists(output_file):
         # Prepare function
-        func = partial(evolution_biomass_yr, ds_mass=ds_mass, proportion=proportion, B0_interp=B0_interp)
+        func = partial(evolution_biomass_yr, ds_mass=ds_mass, proportion=proportion)
 
         # -- Climatology case, i.e. no years dim
-        has_years = 'years' in ds_mass.dims
+        if 'years' not in ds_mass.dims:
+            raise ValueError(f"ds_mass for '{label}' has no 'years' dimension.")
 
-        if has_years:
-            # Run in parallel
-            # B_algo_median_da = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | Biomass ") #len = nyears and shape (181, 231, 1442)
-            B_algo_da = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | Biomass ") #len = nyears and shape (5, 181, 231, 1442)
+        # Run in parallel
+        B_algo_da = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | Biomass ") #len = nyears and shape (10, 181, 231, 1442)
 
-            # Extract data
-            # B_algo_median_all_ds = xr.concat(B_algo_median_da, dim="years")  # shape: (39, 181, 231, 1442)
-            B_algo_all_ds = xr.concat(B_algo_da, dim="years")  # shape: (39, 5, 181, 231, 1442)
+        # Extract data
+        B_algo_all_ds = xr.concat(B_algo_da, dim="years")  # shape: (39, 10, 181, 231, 1442)
 
-            if B0_interp:
-                initial_biomass_description = "Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution (0.25°) and interpolated."
-
-            else:
-                initial_biomass_description="Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution, i.e. 0.25°."
-
-
-            # Put together into dataset
-            B_algo_all_ds.attrs.update({"Surrogate": label,
-                                        "Description": "Evolution of krill biomass weighted according to population proportions.\n"\
-                                                       "Biomass timeseries computed for each algorithm.\n"\
-                                                        "For each algorithm, the bootstrap realisations were averaged to obtain a single time series per algorithm.",
-                                                        #   "Then, we compute the median and std over the 50 timeseries.",
-                                        "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
-                                        "Initial Biomass": initial_biomass_description,
-                                        "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
-                                        "Units": "mg/m3",
-                                        'Conversion to dry weight': f"Using mean C fraction of {mean_C_fraction:.4f} (SD: {propagated_sd:.4f}) from Farber-Lorda et al. (2009).",})
-
+        # Put together into dataset
+        B_algo_all_ds.attrs.update({"Surrogate": label,
+                                    "Description": "Evolution of krill biomass weighted according to population proportions.\n"\
+                                                    "Biomass timeseries computed for each bootstrap of the CEPHALOPOD model output.",
+                                    "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
+                                    "Initial Biomass": "Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution (0.25°) and interpolated.",
+                                    "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
+                                    "Units": "mg/m3",
+                                    'Conversion to dry weight': f"Using mean C fraction of {mean_C_fraction:.4f} (SD: {propagated_sd:.4f}) from Farber-Lorda et al. (2009).",})
             
-            # Save to file
-            B_algo_all_ds.to_netcdf(output_file, mode="w", engine="netcdf4")
-            
-            # Clean memory
-            del B_algo_da
-            gc.collect()
+        # Save to file
+        B_algo_all_ds.to_netcdf(output_file, mode="w", engine="netcdf4")
+        
+        # Clean memory
+        del B_algo_da
+        gc.collect()
 
-        else:
-            # Run function only for clim, no year dimension
-            # B_algo_median_da = [func(0)]
-            B_algo_da = [func(0)] 
-
-            # Extract data
-            # B_algo_median_all_ds  = B_algo_median_da[0]  # shape: (181, 231, 1442)
-            B_algo_all_ds  = B_algo_da[0]  # shape: (5, 181, 231, 1442)
-
-            if B0_interp:
-                initial_biomass_description = "Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution (0.25°) and interpolated."
-
-            else:
-                initial_biomass_description="Cephalopod output for krill total (euphausia biomass ~80% of it).\nRegridded to ROMS resolution, i.e. 0.25°."
-
-            # Put together into dataset
-            B_algo_all_ds.attrs.update({"Surrogate": label,
-                                               "Description": "Evolution of krill biomass weighted according to population proportions.\n"\
-                                                              "Biomass timeseries computed for each models and boostraps.",
-                                                            #   "Then, we compute the median and std over the 50 timeseries.",
-                                               "Population Proportions": ", ".join(f"{k} : {v*100:.0f}%" for k, v in proportion.items()),
-                                               "Initial Biomass": initial_biomass_description,
-                                               "Assumptions": "Fixed stage proportions, no mortality, no recruitment, no stage transitions within a growth season.",
-                                               "Units": "mg/m3",
-                                               'Conversion to dry weight': f"Using mean C fraction of {mean_C_fraction:.4f} (SD: {propagated_sd:.4f}) from Farber-Lorda et al. (2009).",})
-
-            # Save to file
-            B_algo_all_ds.to_netcdf(output_file)
-
-            # Clean memory
-            del B_algo_da
-            gc.collect()
 
     else:
         print(f"  → {label} already exists, skipping.")
         return
-
-# %% ==================================== Compute Biomass for surrogates - Regridded ====================================
-print('\nInitial biomass: Regridded')
-
-output_folder_regrid = os.path.join(path_biomass_ts_SO, 'biomass_regridded')
-os.makedirs(output_folder_regrid, exist_ok=True)
-files_regrid = [os.path.join(output_folder_regrid, "biomass_clim.nc"),
-                os.path.join(output_folder_regrid, "biomass_actual.nc"),
-                os.path.join(output_folder_regrid, "biomass_nomhws.nc"),
-                os.path.join(output_folder_regrid, "biomass_clim_trend.nc"),
-                os.path.join(output_folder_regrid, "biomass_nowarming.nc")]
-
-if not all(os.path.exists(f) for f in files_regrid):
-    print("Missing output files → running full processing pipeline...\n")
-
-    # ---------- Surrogate 1: Climatology
-    clim_biomass = compute_biomass_surrogates(clim_krillmass_SO, label="Climatology", label_da='clim', proportion=proportion, 
-                                              output_folder=output_folder_regrid, max_workers=20, B0_interp=False)
-    
-    # ---------- Surrogate 2: Actual
-    actual_biomass = compute_biomass_surrogates(actual_krillmass_SO, label="Actual", label_da='actual', proportion=proportion, 
-                                                output_folder=output_folder_regrid, max_workers=20, B0_interp=False)
-    
-    # ---------- Surrogate 3: No MHWs
-    nomhw_biomass = compute_biomass_surrogates(noMHWs_krillmass_SO, label="No MHWs", label_da='nomhws', proportion=proportion, 
-                                               output_folder=output_folder_regrid, max_workers=20, B0_interp=False)
-    
-    clim_trended_biomass = compute_biomass_surrogates(clim_trended_krillmass_SO, label="Clim Trended", label_da='clim_trend', proportion=proportion, 
-                                                             output_folder=output_folder_regrid, max_workers=20, B0_interp=False)
-    # ---------- Surrogate 4: No Warming
-    nowarming_biomass = compute_biomass_surrogates(nowarming_krillmass_SO, label="No Warming", label_da='nowarming', proportion=proportion, 
-                                                   output_folder=output_folder_regrid, max_workers=20, B0_interp=False)
-
-else:
-    print("All files already written → Load data")
-    # Load data
-    clim_biomass = xr.open_dataset(files_regrid[0])
-    actual_biomass = xr.open_dataset(files_regrid[1])
-    nomhw_biomass = xr.open_dataset(files_regrid[2])
-    clim_trended_biomass = xr.open_dataset(files_regrid[3])
-    nowarming_biomass = xr.open_dataset(files_regrid[4])
-
-
 # %% ==================================== Compute Biomass for surrogates - Regridded and Interpolated ====================================
-print('\nInitial biomass: Regridded and Interpolated')
-
-output_folder_interp = os.path.join(path_biomass_ts_SO, 'biomass_interpolated')
-os.makedirs(output_folder_interp, exist_ok=True)
-files_interp = [os.path.join(output_folder_interp, "biomass_clim.nc"),
-                os.path.join(output_folder_interp, "biomass_actual.nc"),
-                os.path.join(output_folder_interp, "biomass_nomhws.nc"),
-                os.path.join(output_folder_interp, "biomass_clim_trend.nc"),
-                os.path.join(output_folder_interp, "biomass_nowarming.nc")]
+files_interp = [os.path.join(path_biomass_ts_SO, "biomass_clim.nc"),
+                os.path.join(path_biomass_ts_SO, "biomass_actual.nc"),
+                os.path.join(path_biomass_ts_SO, "biomass_clim_trend.nc"),
+                os.path.join(path_biomass_ts_SO, "biomass_nowarming.nc")]
 
 if not all(os.path.exists(f) for f in files_interp):
     print("Missing output files → running full processing pipeline...\n")
 
     # ---------- Surrogate 1: Climatology
     clim_biomass_interp = compute_biomass_surrogates(clim_krillmass_SO, label="Climatology", label_da='clim', proportion=proportion, 
-                                                     output_folder=output_folder_interp, max_workers=20, B0_interp=True)
+                                                     output_folder=path_biomass_ts_SO, max_workers=20)
     
     # ---------- Surrogate 2: Actual
     actual_biomass_interp = compute_biomass_surrogates(actual_krillmass_SO, label="Actual", label_da='actual', proportion=proportion, 
-                                                        output_folder=output_folder_interp, max_workers=20, B0_interp=True)
+                                                        output_folder=path_biomass_ts_SO, max_workers=20)
 
     # ---------- Surrogate 3: No MHWs
-    nomhw_biomass_interp = compute_biomass_surrogates(noMHWs_krillmass_SO, label="No MHWs", label_da='nomhws', proportion=proportion, 
-                                                      output_folder=output_folder_interp, max_workers=20, B0_interp=True)
-
     clim_trended_biomass_interp = compute_biomass_surrogates(clim_trended_krillmass_SO, label="Clim Trended", label_da='clim_trend', proportion=proportion, 
-                                                             output_folder=output_folder_interp, max_workers=20, B0_interp=True)
+                                                             output_folder=path_biomass_ts_SO, max_workers=20)
     
     # ---------- Surrogate 4: No Warming
     nowarming_biomass_interp = compute_biomass_surrogates(nowarming_krillmass_SO, label="No Warming", label_da='nowarming', proportion=proportion, 
-                                                   output_folder=output_folder_interp, max_workers=20, B0_interp=True)
+                                                   output_folder=path_biomass_ts_SO, max_workers=20)
     
-    
+
 else:
     print("All files already written → Load data")
     # Load data
     clim_biomass_interp = xr.open_dataset(files_interp[0])
     actual_biomass_interp = xr.open_dataset(files_interp[1])
-    nomhw_biomass_interp = xr.open_dataset(files_interp[2])
-    clim_trended_biomass_interp= xr.open_dataset(files_interp[3])
-    nowarming_biomass_interp = xr.open_dataset(files_interp[4])
+    clim_trended_biomass_interp= xr.open_dataset(files_interp[2])
+    nowarming_biomass_interp = xr.open_dataset(files_interp[3])
 
 
 
 # %% ================================= Plot climatologcical biomass =================================
-# Plot initial and final climatological biomass (2 columns, 1 row)
-# --- Prepare data
-B0 = clim_biomass.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')   # 1st Nov
-B0_interp = clim_biomass_interp.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')    # 1st Nov
-Bfinal = clim_biomass.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
-Bfinal_interp = clim_biomass_interp.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
+# # Plot initial and final climatological biomass (2 columns, 1 row)
+# # --- Prepare data
+# B0 = clim_biomass.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')   # 1st Nov
+# B0_interp = clim_biomass_interp.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')    # 1st Nov
+# Bfinal = clim_biomass.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
+# Bfinal_interp = clim_biomass_interp.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
 
-# Row 0: regridded only
-# Row 1: regridded + interpolated
-data_grid = [
-    [B0,        Bfinal],        # regridded
-    [B0_interp, Bfinal_interp]  # regridded + interpolated
-]
+# # Row 0: regridded only
+# # Row 1: regridded + interpolated
+# data_grid = [
+#     [B0,        Bfinal],        # regridded
+#     [B0_interp, Bfinal_interp]  # regridded + interpolated
+# ]
 
-row_labels = ["Regridded", "Regridded + interpolated"]
-col_labels = ["Initial (1 Nov)", "Final (30 Apr)"]
+# row_labels = ["Regridded", "Regridded + interpolated"]
+# col_labels = ["Initial (1 Nov)", "Final (30 Apr)"]
 
-# --- Figure setup
-fig = plt.figure(figsize=(10, 8))
-gs = gridspec.GridSpec(nrows=2, ncols=2, wspace=0.02, hspace=0.15)
+# # --- Figure setup
+# fig = plt.figure(figsize=(10, 8))
+# gs = gridspec.GridSpec(nrows=2, ncols=2, wspace=0.02, hspace=0.15)
 
-# Circular boundary
-theta = np.linspace(0, 2 * np.pi, 200)
-verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-circle = mpath.Path(verts * 0.5 + 0.5)
+# # Circular boundary
+# theta = np.linspace(0, 2 * np.pi, 200)
+# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+# circle = mpath.Path(verts * 0.5 + 0.5)
 
-# --- Color Setup
-vmin, vmax = np.nanpercentile(np.stack([d.values for row in data_grid for d in row]), [5, 95])
-cmap = "Reds"
+# # --- Color Setup
+# vmin, vmax = np.nanpercentile(np.stack([d.values for row in data_grid for d in row]), [5, 95])
+# cmap = "Reds"
 
-# --- Plot panels
-for r in range(2):
-    for c in range(2):
-        data = data_grid[r][c]
+# # --- Plot panels
+# for r in range(2):
+#     for c in range(2):
+#         data = data_grid[r][c]
 
-        ax = fig.add_subplot(gs[r, c], projection=ccrs.SouthPolarStereo())
-        ax.set_boundary(circle, transform=ax.transAxes)
+#         ax = fig.add_subplot(gs[r, c], projection=ccrs.SouthPolarStereo())
+#         ax.set_boundary(circle, transform=ax.transAxes)
 
-        ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-        ax.coastlines(linewidth=0.7, zorder=3)
+#         ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+#         ax.coastlines(linewidth=0.7, zorder=3)
 
-        im = ax.pcolormesh(data.lon_rho, data.lat_rho, data, cmap=cmap, vmin=vmin, vmax=vmax, transform=ccrs.PlateCarree(), zorder=1)
+#         im = ax.pcolormesh(data.lon_rho, data.lat_rho, data, cmap=cmap, vmin=vmin, vmax=vmax, transform=ccrs.PlateCarree(), zorder=1)
 
-        gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-        gl.xlabels_top = False
-        gl.ylabels_right = False
-        gl.xlabel_style = {'size': 7, 'rotation': 0}
-        gl.ylabel_style = {'size': 7, 'rotation': 0}
+#         gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+#         gl.xlabels_top = False
+#         gl.ylabels_right = False
+#         gl.xlabel_style = {'size': 7, 'rotation': 0}
+#         gl.ylabel_style = {'size': 7, 'rotation': 0}
     
-        # Column titles
-        if r == 0:
-            ax.set_title(col_labels[c], fontsize=12)
+#         # Column titles
+#         if r == 0:
+#             ax.set_title(col_labels[c], fontsize=12)
 
-        # Row labels
-        if c == 0:
-            ax.text(
-                -0.09, 0.5, row_labels[r],
-                va="center", ha="right",
-                rotation=90,
-                transform=ax.transAxes,
-                fontsize=12
-            )
+#         # Row labels
+#         if c == 0:
+#             ax.text(
+#                 -0.09, 0.5, row_labels[r],
+#                 va="center", ha="right",
+#                 rotation=90,
+#                 transform=ax.transAxes,
+#                 fontsize=12
+#             )
 
-# --- Colorbar
-cax = fig.add_axes([0.92, 0.15, 0.02, 0.74]) #(left, bottom, width, height)
-plt.colorbar(im, cax=cax, extend='both').set_label("Biomass [mg m$^{-3}$]", fontsize=12)
+# # --- Colorbar
+# cax = fig.add_axes([0.92, 0.15, 0.02, 0.74]) #(left, bottom, width, height)
+# plt.colorbar(im, cax=cax, extend='both').set_label("Biomass [mg m$^{-3}$]", fontsize=12)
 
-# --- Title
-plt.suptitle("Climatological Krill Biomass Concentration", fontsize=14, y=0.98, x=0.52)
-plt.show()
-
-
+# # --- Title
+# plt.suptitle("Climatological Krill Biomass Concentration", fontsize=14, y=0.98, x=0.52)
+# plt.show()
 
 
-# %% ================================= Plot Biomass concentration =================================
-# --- Prepare data
-dataset_interest =  nowarming_biomass_interp #actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
-# title = "Environmental conditions without MHWs\nClimatological signal trended"
-# title = "Environmental conditions without MHWs"
-title = "Environmental conditions without global warming"
-# title = "Actual environmental conditions"
-
-# Years to show
-years_to_plot = [1980, 1989, 2000, 2010, 2016]
-
-# Row 1: Biomass 
-initial_biomass = dataset_interest.biomass.isel(years=0, days=0).isel(xi_rho=slice(0, -1)).median('algo')  # 1st Nov
-biomass_actual_30Apr = [dataset_interest.biomass.isel(years=i, days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]  
-
-# Row 2: Difference (end of season)
-diff_actual = [biomass_actual_30Apr[i] - clim_biomass_interp.biomass.isel(days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]
 
 
-# --- Figure setup
-ncols = len(biomass_actual_30Apr)
-fig = plt.figure(figsize=(20, 8))
-gs = gridspec.GridSpec(nrows=2, ncols=ncols, wspace=0.08, hspace=0.3)
+# # %% ================================= Plot Biomass concentration =================================
+# # --- Prepare data
+# dataset_interest =  nowarming_biomass_interp #actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
+# # title = "Environmental conditions without MHWs\nClimatological signal trended"
+# # title = "Environmental conditions without MHWs"
+# title = "Environmental conditions without global warming"
+# # title = "Actual environmental conditions"
 
-# --- Circular boundary
-theta = np.linspace(0, 2 * np.pi, 200)
-verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-circle = mpath.Path(verts * 0.5 + 0.5)
+# # Years to show
+# years_to_plot = [1980, 1989, 2000, 2010, 2016]
 
-# --- Color Setup
-# Row 1: biomass
-vmin_row1, vmax_row1 = np.nanpercentile(np.stack([d.values for d in biomass_actual_30Apr]), [5, 95])
-cmap_row1 = 'Reds'
+# # Row 1: Biomass 
+# initial_biomass = dataset_interest.biomass.isel(years=0, days=0).isel(xi_rho=slice(0, -1)).median('algo')  # 1st Nov
+# biomass_actual_30Apr = [dataset_interest.biomass.isel(years=i, days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]  
 
-# Row 2: actual - clim
-diff_stack2 = np.stack([d.values for d in diff_actual])
-max_abs_diff2 = np.nanmax(np.abs(diff_stack2))
-vmin_row2, vmax_row2 = -max_abs_diff2, max_abs_diff2
-cmap_row2 = 'bwr'
+# # Row 2: Difference (end of season)
+# diff_actual = [biomass_actual_30Apr[i] - clim_biomass_interp.biomass.isel(days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]
 
-# --- Row 1: Biomass
-for i, data in enumerate(biomass_actual_30Apr):
-    ax = fig.add_subplot(gs[0, i], projection=ccrs.SouthPolarStereo())
-    ax.set_boundary(circle, transform=ax.transAxes)
-    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.coastlines(color='black', linewidth=0.7, zorder=3)
 
-    im1 = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
-                        cmap=cmap_row1, vmin=vmin_row1, vmax=vmax_row1,
-                        transform=ccrs.PlateCarree(), zorder=1)
+# # --- Figure setup
+# ncols = len(biomass_actual_30Apr)
+# fig = plt.figure(figsize=(20, 8))
+# gs = gridspec.GridSpec(nrows=2, ncols=ncols, wspace=0.08, hspace=0.3)
 
-    # if i == 0:
-    gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
-    gl.xlabel_style = {'size': 7, 'rotation': 0}
-    gl.ylabel_style = {'size': 7, 'rotation': 0}
+# # --- Circular boundary
+# theta = np.linspace(0, 2 * np.pi, 200)
+# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+# circle = mpath.Path(verts * 0.5 + 0.5)
+
+# # --- Color Setup
+# # Row 1: biomass
+# vmin_row1, vmax_row1 = np.nanpercentile(np.stack([d.values for d in biomass_actual_30Apr]), [5, 95])
+# cmap_row1 = 'Reds'
+
+# # Row 2: actual - clim
+# diff_stack2 = np.stack([d.values for d in diff_actual])
+# max_abs_diff2 = np.nanmax(np.abs(diff_stack2))
+# vmin_row2, vmax_row2 = -max_abs_diff2, max_abs_diff2
+# cmap_row2 = 'bwr'
+
+# # --- Row 1: Biomass
+# for i, data in enumerate(biomass_actual_30Apr):
+#     ax = fig.add_subplot(gs[0, i], projection=ccrs.SouthPolarStereo())
+#     ax.set_boundary(circle, transform=ax.transAxes)
+#     ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+#     ax.coastlines(color='black', linewidth=0.7, zorder=3)
+
+#     im1 = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+#                         cmap=cmap_row1, vmin=vmin_row1, vmax=vmax_row1,
+#                         transform=ccrs.PlateCarree(), zorder=1)
+
+#     # if i == 0:
+#     gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+#     gl.xlabels_top = False
+#     gl.ylabels_right = False
+#     gl.xlabel_style = {'size': 7, 'rotation': 0}
+#     gl.ylabel_style = {'size': 7, 'rotation': 0}
     
-    ax.set_title(f'{years_to_plot[i]}', fontsize=14)
+#     ax.set_title(f'{years_to_plot[i]}', fontsize=14)
 
-# --- Row 2: Difference
-for i, diff in enumerate(diff_actual):
-    ax = fig.add_subplot(gs[1, i], projection=ccrs.SouthPolarStereo())
-    ax.set_boundary(circle, transform=ax.transAxes)
-    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-    ax.coastlines(color='black', linewidth=0.7, zorder=3)
+# # --- Row 2: Difference
+# for i, diff in enumerate(diff_actual):
+#     ax = fig.add_subplot(gs[1, i], projection=ccrs.SouthPolarStereo())
+#     ax.set_boundary(circle, transform=ax.transAxes)
+#     ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
+#     ax.coastlines(color='black', linewidth=0.7, zorder=3)
 
-    im2 = ax.pcolormesh(diff.lon_rho, diff.lat_rho, diff,
-                        cmap=cmap_row2, vmin=vmin_row2, vmax=vmax_row2,
-                        transform=ccrs.PlateCarree(), zorder=1)
+#     im2 = ax.pcolormesh(diff.lon_rho, diff.lat_rho, diff,
+#                         cmap=cmap_row2, vmin=vmin_row2, vmax=vmax_row2,
+#                         transform=ccrs.PlateCarree(), zorder=1)
 
-    gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-    gl.xlabels_top = False
-    gl.ylabels_right = False
-    gl.xlabel_style = {'size': 7, 'rotation': 0}
-    gl.ylabel_style = {'size': 7, 'rotation': 0}
+#     gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
+#     gl.xlabels_top = False
+#     gl.ylabels_right = False
+#     gl.xlabel_style = {'size': 7, 'rotation': 0}
+#     gl.ylabel_style = {'size': 7, 'rotation': 0}
 
-# --- Colorbars
-cbar_ax1 = fig.add_axes([0.92, 0.55, 0.01, 0.35])
-plt.colorbar(im1, cax=cbar_ax1, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
+# # --- Colorbars
+# cbar_ax1 = fig.add_axes([0.92, 0.55, 0.01, 0.35])
+# plt.colorbar(im1, cax=cbar_ax1, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
 
-cbar_ax2 = fig.add_axes([0.92, 0.1, 0.01, 0.35])
-plt.colorbar(im2, cax=cbar_ax2, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
+# cbar_ax2 = fig.add_axes([0.92, 0.1, 0.01, 0.35])
+# plt.colorbar(im2, cax=cbar_ax2, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
 
-# --- Row titles
-fig.text(0.52, 0.95, title, ha='center', fontsize=16)
-fig.text(0.52, 0.48, "Comparison with Climatology ", ha='center', fontsize=16)
+# # --- Row titles
+# fig.text(0.52, 0.95, title, ha='center', fontsize=16)
+# fig.text(0.52, 0.48, "Comparison with Climatology ", ha='center', fontsize=16)
 
-# --- Overall figure title
-plt.suptitle("Krill Biomass on 30th April", fontsize=18, y=1.04, x=0.52)
-plt.show()
+# # --- Overall figure title
+# plt.suptitle("Krill Biomass on 30th April", fontsize=18, y=1.04, x=0.52)
+# plt.show()
 
 
 
-# %%
+# # %%
+
