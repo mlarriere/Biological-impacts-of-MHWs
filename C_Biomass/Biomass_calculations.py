@@ -116,12 +116,8 @@ biomass_regrid_interp = xr.open_dataset(os.path.join(path_cephalopod, 'regrid_in
 C_frac_stage = {'juvenile': (0.4989, 0.0250), 'males': (0.4756, 0.0266), 'mature females': (0.4756, 0.0297), 'spent females': (0.5299, 0.0267),} # [fraction C / mg biomass]
 mean_C_fraction = np.mean(np.array([v[0] for v in C_frac_stage.values()]))
 propagated_sd = np.sqrt(np.sum(np.array([v[1] for v in C_frac_stage.values()])**2) / len(np.array([v[1] for v in C_frac_stage.values()])))
-# print(f"Mean C fraction: {mean_C_fraction:.4f}")
-# print(f"Propagated SD: {propagated_sd:.4f}")
 
 biomass_regrid_interp_dry = biomass_regrid_interp / mean_C_fraction #[mg/m3]
-# print(f'Before: {biomass_regridded.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mgC/m3')
-# print(f'After: {biomass_regridded_dry.isel(days=0, algo_bootstrap=0, eta_rho=200, xi_rho=1000).euphausia_biomass.values:.3f} mg/m3')
 
 # %% ======================== Load data ========================
 # --- Load mass data [mg] for each maturity stage -- Southern Ocean  
@@ -204,16 +200,7 @@ def evolution_biomass_yr(year_idx, ds_mass, proportion):
                                             "bootstrap realisations were then averaged to obtain a single time series per algorithm.",
                             "Units": "mg/m3",})
     
-    # -- Take median and std - NO only at the last steps, i.e. attribution
-    # biomass_stats_ds = xr.Dataset({"biomass_median": biomass_ds.biomass.median(dim="algo_bootstrap"),
-    #                                "biomass_std":    biomass_ds.biomass.std(dim="algo_bootstrap"),})
-
-    # Add attributes
-    # biomass_stats_ds.biomass_median.attrs.update({"description": "Median over the 5 models × 10 bootstraps of Cephalopod.",
-    #                                               "units": "mg m-3",})
-    # biomass_stats_ds.biomass_std.attrs.update({"description": "Spread over 5 models × 10 bootstraps of Cephalopod.",
-                                            #    "units": "mg m-3",})
-
+    
     # Clean memory
     del B_all
     gc.collect()
@@ -302,177 +289,4 @@ else:
     actual_biomass_interp = xr.open_dataset(files_interp[1])
     clim_trended_biomass_interp= xr.open_dataset(files_interp[2])
     nowarming_biomass_interp = xr.open_dataset(files_interp[3])
-
-
-
-# %% ================================= Plot climatologcical biomass =================================
-# # Plot initial and final climatological biomass (2 columns, 1 row)
-# # --- Prepare data
-# B0 = clim_biomass.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')   # 1st Nov
-# B0_interp = clim_biomass_interp.biomass.isel(days=0).isel(xi_rho=slice(0, -1)).median('algo')    # 1st Nov
-# Bfinal = clim_biomass.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
-# Bfinal_interp = clim_biomass_interp.biomass.isel(days=-1).isel(xi_rho=slice(0, -1)).median('algo') # 30th Apr
-
-# # Row 0: regridded only
-# # Row 1: regridded + interpolated
-# data_grid = [
-#     [B0,        Bfinal],        # regridded
-#     [B0_interp, Bfinal_interp]  # regridded + interpolated
-# ]
-
-# row_labels = ["Regridded", "Regridded + interpolated"]
-# col_labels = ["Initial (1 Nov)", "Final (30 Apr)"]
-
-# # --- Figure setup
-# fig = plt.figure(figsize=(10, 8))
-# gs = gridspec.GridSpec(nrows=2, ncols=2, wspace=0.02, hspace=0.15)
-
-# # Circular boundary
-# theta = np.linspace(0, 2 * np.pi, 200)
-# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-# circle = mpath.Path(verts * 0.5 + 0.5)
-
-# # --- Color Setup
-# vmin, vmax = np.nanpercentile(np.stack([d.values for row in data_grid for d in row]), [5, 95])
-# cmap = "Reds"
-
-# # --- Plot panels
-# for r in range(2):
-#     for c in range(2):
-#         data = data_grid[r][c]
-
-#         ax = fig.add_subplot(gs[r, c], projection=ccrs.SouthPolarStereo())
-#         ax.set_boundary(circle, transform=ax.transAxes)
-
-#         ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-#         ax.coastlines(linewidth=0.7, zorder=3)
-
-#         im = ax.pcolormesh(data.lon_rho, data.lat_rho, data, cmap=cmap, vmin=vmin, vmax=vmax, transform=ccrs.PlateCarree(), zorder=1)
-
-#         gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-#         gl.xlabels_top = False
-#         gl.ylabels_right = False
-#         gl.xlabel_style = {'size': 7, 'rotation': 0}
-#         gl.ylabel_style = {'size': 7, 'rotation': 0}
-    
-#         # Column titles
-#         if r == 0:
-#             ax.set_title(col_labels[c], fontsize=12)
-
-#         # Row labels
-#         if c == 0:
-#             ax.text(
-#                 -0.09, 0.5, row_labels[r],
-#                 va="center", ha="right",
-#                 rotation=90,
-#                 transform=ax.transAxes,
-#                 fontsize=12
-#             )
-
-# # --- Colorbar
-# cax = fig.add_axes([0.92, 0.15, 0.02, 0.74]) #(left, bottom, width, height)
-# plt.colorbar(im, cax=cax, extend='both').set_label("Biomass [mg m$^{-3}$]", fontsize=12)
-
-# # --- Title
-# plt.suptitle("Climatological Krill Biomass Concentration", fontsize=14, y=0.98, x=0.52)
-# plt.show()
-
-
-
-
-# # %% ================================= Plot Biomass concentration =================================
-# # --- Prepare data
-# dataset_interest =  nowarming_biomass_interp #actual_biomass_interp #nowarming_biomass_interp #clim_trended_biomass_interp 
-# # title = "Environmental conditions without MHWs\nClimatological signal trended"
-# # title = "Environmental conditions without MHWs"
-# title = "Environmental conditions without global warming"
-# # title = "Actual environmental conditions"
-
-# # Years to show
-# years_to_plot = [1980, 1989, 2000, 2010, 2016]
-
-# # Row 1: Biomass 
-# initial_biomass = dataset_interest.biomass.isel(years=0, days=0).isel(xi_rho=slice(0, -1)).median('algo')  # 1st Nov
-# biomass_actual_30Apr = [dataset_interest.biomass.isel(years=i, days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]  
-
-# # Row 2: Difference (end of season)
-# diff_actual = [biomass_actual_30Apr[i] - clim_biomass_interp.biomass.isel(days=-1).median('algo').isel(xi_rho=slice(0, -1)) for i in range(len(years_to_plot))]
-
-
-# # --- Figure setup
-# ncols = len(biomass_actual_30Apr)
-# fig = plt.figure(figsize=(20, 8))
-# gs = gridspec.GridSpec(nrows=2, ncols=ncols, wspace=0.08, hspace=0.3)
-
-# # --- Circular boundary
-# theta = np.linspace(0, 2 * np.pi, 200)
-# verts = np.vstack([np.sin(theta), np.cos(theta)]).T
-# circle = mpath.Path(verts * 0.5 + 0.5)
-
-# # --- Color Setup
-# # Row 1: biomass
-# vmin_row1, vmax_row1 = np.nanpercentile(np.stack([d.values for d in biomass_actual_30Apr]), [5, 95])
-# cmap_row1 = 'Reds'
-
-# # Row 2: actual - clim
-# diff_stack2 = np.stack([d.values for d in diff_actual])
-# max_abs_diff2 = np.nanmax(np.abs(diff_stack2))
-# vmin_row2, vmax_row2 = -max_abs_diff2, max_abs_diff2
-# cmap_row2 = 'bwr'
-
-# # --- Row 1: Biomass
-# for i, data in enumerate(biomass_actual_30Apr):
-#     ax = fig.add_subplot(gs[0, i], projection=ccrs.SouthPolarStereo())
-#     ax.set_boundary(circle, transform=ax.transAxes)
-#     ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-#     ax.coastlines(color='black', linewidth=0.7, zorder=3)
-
-#     im1 = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
-#                         cmap=cmap_row1, vmin=vmin_row1, vmax=vmax_row1,
-#                         transform=ccrs.PlateCarree(), zorder=1)
-
-#     # if i == 0:
-#     gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-#     gl.xlabels_top = False
-#     gl.ylabels_right = False
-#     gl.xlabel_style = {'size': 7, 'rotation': 0}
-#     gl.ylabel_style = {'size': 7, 'rotation': 0}
-    
-#     ax.set_title(f'{years_to_plot[i]}', fontsize=14)
-
-# # --- Row 2: Difference
-# for i, diff in enumerate(diff_actual):
-#     ax = fig.add_subplot(gs[1, i], projection=ccrs.SouthPolarStereo())
-#     ax.set_boundary(circle, transform=ax.transAxes)
-#     ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-#     ax.coastlines(color='black', linewidth=0.7, zorder=3)
-
-#     im2 = ax.pcolormesh(diff.lon_rho, diff.lat_rho, diff,
-#                         cmap=cmap_row2, vmin=vmin_row2, vmax=vmax_row2,
-#                         transform=ccrs.PlateCarree(), zorder=1)
-
-#     gl = ax.gridlines(draw_labels=True, color="gray", alpha=0.7, linestyle="--", linewidth=0.4)
-#     gl.xlabels_top = False
-#     gl.ylabels_right = False
-#     gl.xlabel_style = {'size': 7, 'rotation': 0}
-#     gl.ylabel_style = {'size': 7, 'rotation': 0}
-
-# # --- Colorbars
-# cbar_ax1 = fig.add_axes([0.92, 0.55, 0.01, 0.35])
-# plt.colorbar(im1, cax=cbar_ax1, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
-
-# cbar_ax2 = fig.add_axes([0.92, 0.1, 0.01, 0.35])
-# plt.colorbar(im2, cax=cbar_ax2, orientation='vertical', extend='both').set_label("Biomass [mg.m$^{-3}$]", fontsize=12)
-
-# # --- Row titles
-# fig.text(0.52, 0.95, title, ha='center', fontsize=16)
-# fig.text(0.52, 0.48, "Comparison with Climatology ", ha='center', fontsize=16)
-
-# # --- Overall figure title
-# plt.suptitle("Krill Biomass on 30th April", fontsize=18, y=1.04, x=0.52)
-# plt.show()
-
-
-
-# # %%
 
