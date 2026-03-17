@@ -116,46 +116,6 @@ def length_to_mass(length_array, p = 10**(-4.19), r=3.89):
     mass_array = p*length_array**r #in mg
     return mass_array
 
-
-# # %% CHECK 
-# # Fix one driver at clim, vary the other — single pixel for speed
-# eta, xi = 220, 1000
-# yr = 35  # a recent year, should show strongest warming
-
-# # 1. Both actual (your 'actual' surrogate)
-# # 2. Actual temp + clim chla → isolates temperature effect
-# # 3. Clim temp + actual chla → isolates chla effect
-
-# from functools import partial
-
-# def growth_factor_pixel(temp_ds, chla_ds, yr, stage='juvenile'):
-#     temp = temp_ds.avg_temp.isel(years=yr, eta_rho=eta, xi_rho=xi)
-#     chla = chla_ds.chla.isel(years=yr, eta_rho=eta, xi_rho=xi)
-#     length = length_Atkinson2006(chla=chla, temp=temp, initial_length=stage_lengths[stage], maturity_stage=stage)
-#     mass = length_to_mass(length)
-#     g = (mass.values[1:] / mass.values[:-1]).mean()
-#     return g
-
-# results = {'year': [], 'g_actual': [], 'g_temp_only': [], 'g_chla_only': [], 'g_clim': []}
-
-# for yr in range(39):
-#     results['year'].append(1980 + yr)
-#     results['g_actual'].append(growth_factor_pixel(temp_avg_100m_SO_allyrs, chla_surf_SO_allyrs, yr))
-#     results['g_temp_only'].append(growth_factor_pixel(temp_avg_100m_SO_allyrs, chla_clim_expanded, yr))  # actual temp, clim chla
-#     results['g_chla_only'].append(growth_factor_pixel(temp_clim_expanded, chla_surf_SO_allyrs, yr))      # clim temp, actual chla
-#     results['g_clim'].append(growth_factor_pixel(temp_clim_expanded, chla_clim_expanded, yr))            # both clim
-
-# import pandas as pd
-# df = pd.DataFrame(results).set_index('year')
-# df.plot(title=f'Growth factor decomposition — pixel ({eta},{xi})')
-
-# years = np.arange(1980, 2019)
-# df_trend = df - df['g_clim'].values[:, None]  # anomaly relative to clim
-
-# # Linear trends
-# for col in ['g_actual', 'g_temp_only', 'g_chla_only']:
-#     slope = np.polyfit(years, df_trend[col], 1)[0]
-#     print(f"{col} trend: {slope*10:.6f} per decade")
 # %%  ================================== Functions to run length and mass under different scenarios for krill population ==================================
 from functools import partial
 from tqdm.contrib.concurrent import process_map
@@ -207,30 +167,17 @@ def compute_world(stage, chla_ds, temp_ds, label, max_workers=4):
 
 
 def compute_stage(stage):
-    stage='juvenile'
+    # stage='juvenile'
 
     # ---------- World 1: Climatology
     print("  → Climatology")
-    # clim_length = length_Atkinson2006(chla=chla_clim_mean.chla, temp=temp_clim_mean.avg_temp, initial_length=stage_lengths[stage], maturity_stage=stage)
-    # clim_mass = length_to_mass(clim_length)
     clim_length, clim_mass = compute_world(stage, chla_clim_expanded, temp_clim_expanded, label="Climatology", max_workers=10)
 
     # ---------- World 2: Actual
     actual_length, actual_mass = compute_world(stage, chla_surf_SO_allyrs, temp_avg_100m_SO_allyrs, label="Actual", max_workers=10)
 
-    # Check growth factors
-    g_clim   = (clim_mass[1:] / clim_mass[:-1]).isel(years=slice(0,30)).mean('years')  # shape (180, 231, 1442)
-    g_actual = (actual_mass[1:] / actual_mass[:-1]).isel(years=slice(0,30)).mean('years')
-
-    # Should be ~0 everywhere
-    diff = (g_clim - g_actual)
-    print(f"Mean diff: {float(diff.mean()):.6f}")
-    print(f"Max  diff: {float(abs(diff).max()):.6f}")
-
-
     # ---------- World 3: No MHWs
-    # nomhw_length, nomhw_mass = compute_world(stage, chla_surf_SO_allyrs, temp_avg_100m_SO_noMHWs, label="No MHWs", max_workers=4)
-    clim_trended_length, clim_trended_mass = compute_world(stage, chla_clim_expanded, temp_clim_trended, label="Clim Trended", max_workers=4)
+    clim_trended_length, clim_trended_mass = compute_world(stage, chla_surf_SO_allyrs, temp_clim_trended, label="Clim Trended", max_workers=4)
 
     # ---------- World 4: No Warming
     warming_length, warming_mass = compute_world(stage, chla_surf_SO_allyrs, detrended_temp, label="No Warming", max_workers=4)
@@ -238,7 +185,6 @@ def compute_stage(stage):
     return {"stage": stage,
             "clim_length": clim_length, "clim_mass": clim_mass,
             "actual_length": actual_length, "actual_mass": actual_mass,
-            # "nomhw_length": nomhw_length, "nomhw_mass": nomhw_mass,
             "clim_trended_length": clim_trended_length, "clim_trended_mass": clim_trended_mass,
             "warming_length": warming_length, "warming_mass": warming_mass,
             }
@@ -277,8 +223,6 @@ files = [os.path.join(path_surrogates_krill, "clim_length_stages_SO.nc"),
          os.path.join(path_surrogates_krill, "clim_mass_stages_SO.nc"),
          os.path.join(path_surrogates_krill, "actual_length_stages_SO.nc"),
          os.path.join(path_surrogates_krill, "actual_mass_stages_SO.nc"),
-        #  os.path.join(path_surrogates_krill, "noMHWs_length_stages_SO.nc"),
-        #  os.path.join(path_surrogates_krill, "noMHWs_mass_stages_SO.nc"),
          os.path.join(path_surrogates_krill, "clim_trended_length_stages_SO.nc"),
          os.path.join(path_surrogates_krill, "clim_trended_mass_stages_SO.nc"),
          os.path.join(path_surrogates_krill, "nowarming_length_stages_SO.nc"),
@@ -296,14 +240,12 @@ if all(os.path.exists(f) for f in files):
     actual_mass_ds = xr.open_dataset(files[3])
 
     # -- 3. No MHWs
-    # noMHWs_length_ds = xr.open_dataset(files[4])
-    # noMHWs_mass_ds = xr.open_dataset(files[5])
-    clim_trended_length_ds = xr.open_dataset(files[6])
-    clim_trended_mass_ds = xr.open_dataset(files[7])
+    clim_trended_length_ds = xr.open_dataset(files[4])
+    clim_trended_mass_ds = xr.open_dataset(files[5])
 
     # 4. No Global Warming
-    nowarming_length_ds = xr.open_dataset(files[8])
-    nowarming_mass_ds = xr.open_dataset(files[9])
+    nowarming_length_ds = xr.open_dataset(files[6])
+    nowarming_mass_ds = xr.open_dataset(files[7])
 
 else:
     print("Missing output files → running full processing pipeline...\n")
@@ -313,8 +255,6 @@ else:
     clim_mass_ds = xr.Dataset()
     actual_length_ds = xr.Dataset()
     actual_mass_ds = xr.Dataset()
-    # noMHWs_length_ds = xr.Dataset()
-    # noMHWs_mass_ds = xr.Dataset()
     clim_trended_length_ds = xr.Dataset()
     clim_trended_mass_ds = xr.Dataset()
     nowarming_length_ds = xr.Dataset()
@@ -336,9 +276,6 @@ else:
 
         actual_length_ds[stage] = res["actual_length"]
         actual_mass_ds[stage]   = res["actual_mass"]
-
-        # noMHWs_length_ds[stage] = res["nomhw_length"]
-        # noMHWs_mass_ds[stage]   = res["nomhw_mass"]
 
         clim_trended_length_ds[stage] = res['clim_trended_length']
         clim_trended_mass_ds[stage] = res['clim_trended_mass']
@@ -370,9 +307,6 @@ else:
                                                  units='mg')
 
     # 3. No MHWs
-    # save_if_not_exists(noMHWs_length_ds, files[4], description="Krill Length without influence of MHWs.\nThe temperature input doesn't contain MHWs (replaced by clim)", units='mm') 
-    # save_if_not_exists(noMHWs_mass_ds, files[5], description= "Krill Dry weight without influence of MHWs.\nTemperature input don't contain MHWs (replaced by clim)", units='mg')
-    
     save_if_not_exists(clim_trended_length_ds, files[4], description="Krill Length without influence of MHWs.", 
                                                          temperature = 'Climatological temperature trended with warming trend (growth seasons daily).',
                                                          chla = 'Climatological Chla (growth seasons daily).',
