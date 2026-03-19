@@ -105,11 +105,11 @@ date_dict = dict(date_list)
 mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
 south_mask = (mpas_ds['lat_rho'] <= -60)
 mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
-mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#9a031e"),
-            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#F7B538"),
-            "East Antarctic": (mpas_ds.mask_ea, "#5f0f40"),
-            "Weddell Sea": (mpas_ds.mask_ws, "#bb4d00"),
-            "Antarctic Peninsula": (mpas_ds.mask_ap, "#7c6a0a")}
+mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#c77c27"),
+            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#e05c8a"),
+            "East Antarctic": (mpas_ds.mask_ea, "#C00225"),
+            "Weddell Sea": (mpas_ds.mask_ws, "#5f0f40"),
+            "Antarctic Peninsula": (mpas_ds.mask_ap, "#867308")}
 
 mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
              "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
@@ -267,16 +267,23 @@ label_kwargs     = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
 tick_kwargs      = {'labelsize': 13} if plot == 'slides' else {'labelsize': 9}
 
 # Color settings
-cmap_growth = 'coolwarm'
+from matplotlib.colors import LinearSegmentedColormap
+cmap_growth = LinearSegmentedColormap.from_list(
+    "blue_white_green",
+    ["#08519c", "#4292c6", "#9ecae1", "#f7f7f7", "#a1d99b", "#41ab5d", "#006d2c"]
+)
+# cmap_growth = 'coolwarm'
 vmin, vmax = -0.2, 0.2
 norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=0, vmax=vmax)
 
 # Data and titles
-data_to_plot = [growth_anomaly_mhw_anom.growth_90perc, 
+data_to_plot = [
+                # growth_anomaly_mhw_anom.growth_90perc, 
                 growth_anomaly_mhw_anom.growth_1deg, 
                 growth_anomaly_mhw_anom.growth_3deg]
 
-titles = [r'MHWs $\ge$ 90th percentile', 
+titles = [
+        #   r'MHWs $\ge$ 90th percentile', 
           r'MHWs $\ge$ 1$^\circ$C and 90th percentile', 
           r'MHWs $\ge$ 3$^\circ$C and 90th percentile']
 
@@ -286,7 +293,7 @@ verts = np.vstack([np.sin(theta), np.cos(theta)]).T
 circle = mpath.Path(verts * 0.5 + 0.5)
 
 # --- Figure ---
-fig, axes = plt.subplots(1, 3, figsize=(10, 4),
+fig, axes = plt.subplots(1, 2, figsize=(10, 4),
                          subplot_kw={'projection': ccrs.SouthPolarStereo()})
 
 lw = 1   if plot == 'slides' else 0.5
@@ -371,10 +378,11 @@ no_mhw_patch = Patch(facecolor='lightgrey', edgecolor='gray', linewidth=0.5, lab
 fig.legend(handles=[no_mhw_patch], loc='lower center',
            bbox_to_anchor=(0.2, 0.09), frameon=True, **label_kwargs)
 
-plt.suptitle("Mean krill growth anomaly during MHWs relative to climatology", **maintitle_kwargs, y=0.91)
+# plt.suptitle("Mean krill growth anomaly during MHWs relative to climatology", **maintitle_kwargs, y=0.91)
 
 if plot == 'report':
     plt.show()
+    # plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/growth_anom_mhws.pdf'), dpi=200, format='pdf', bbox_inches='tight')
 else:
     plt.show()
 # %%
