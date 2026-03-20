@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Created on Tues 10 March 08:47:34 2025
+Created on Tues 10 March 08:47:34 2026
 
 Growth model according to Atkinson et al. (2006) 
 
@@ -289,13 +289,12 @@ ax.plot(chla_yr[valid_mask], temp_yr[valid_mask],
         color='black', linewidth=lw, alpha=0.9, zorder=4, label=str(year_to_plot))
 # --- MPA colors ---
 mpa_colors = {
-    'RS': '#9a031e',  
-    'SO': '#F7B538',   
-    'EA': '#5f0f40',  
-    'WS': '#bb4d00', 
-    'AP': '#7c6a0a',
+    'RS': '#c77c27',  
+    'SO': '#e05c8a',   
+    'EA': '#C00225',  
+    'WS': '#5f0f40', 
+    'AP': '#867308',
 }
-
 
 # --- Southern Ocean mean (black) ---
 ax.plot(chla_yr[valid_mask], temp_yr[valid_mask],
@@ -441,154 +440,322 @@ for mpa_key, file_det, file_nomhw, file_clim, file_chla_clim, status in results:
     chla_clim_mpa[mpa_key] = xr.open_dataset(file_chla_clim)['chla']
 
 # %% ============ Plot Southern Ocean - different surrogates ============
-import matplotlib.cm as cm
+import matplotlib.patheffects as pe
+import matplotlib.colors as mcolors_lib
 from matplotlib.lines import Line2D
 
-# --- Year selection ---
-year_to_plot = 1980
-mpa_choice= 'SO'
-plot = 'report'  # slides report
+plot = 'report'
+year_to_plot = 2016
 
-# Define figure size based on output type
-if plot == 'report':
-    fig_width = 6.3228348611
-    fig_height = fig_width * 0.5
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-else:
-    fig, ax = plt.subplots(figsize=(10, 6))
+mpa_colors = {
+    'RS': '#c77c27',
+    'SO': '#e05c8a',
+    'EA': '#C00225',
+    'WS': '#5f0f40',
+    'AP': '#867308',
+}
+
+mpa_labels = {
+    'RS': 'Ross Sea', 'SO': 'South Orkney Islands',
+    'EA': 'East Antarctic', 'WS': 'Weddell Sea', 'AP': 'Antarctic Peninsula',
+}
+
+def lighten(hex_color, factor=0.5):
+    """Lighten a hex color by blending with white."""
+    rgb = mcolors_lib.to_rgb(hex_color)
+    return tuple(1 - (1 - c) * factor for c in rgb)
+
+def darken(hex_color, factor=0.5):
+    """Darken a hex color by blending with black."""
+    rgb = mcolors_lib.to_rgb(hex_color)
+    return tuple(c * factor for c in rgb)
 
 # Font size settings
-title_kwargs = {'fontsize': 15} if plot == 'slides' else {}
-label_kwargs = {'fontsize': 14} if plot == 'slides' else {}
-tick_kwargs = {'labelsize': 13} if plot == 'slides' else {}
-legend_kwargs = {'fontsize': 12} if plot == 'slides' else {}
-suptitle_kwargs = {'fontsize': 18, 'fontweight': 'bold'} if plot == 'slides' else {'fontsize': 12, 'fontweight': 'bold'}
+label_kwargs  = {'fontsize': 14} if plot == 'slides' else {}
+tick_kwargs   = {'labelsize': 13} if plot == 'slides' else {}
+legend_kwargs = {'fontsize': 12} if plot == 'slides' else {'fontsize': 7}
 lw = 1.5 if plot == 'slides' else 1.0
 
-# --- Colormap normalization ---
-norm = mcolors.TwoSlopeNorm(vmin=np.nanmin(growth_hyp), vcenter=0, vmax=np.nanmax(growth_hyp))
-
-# --- Pseudocolor background ---
-pcm = ax.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto',
-                    cmap='coolwarm_r', norm=norm, rasterized=True)
-
-# --- Plot 0 contour ---
-zero_level = [0]
-manual_zero_pos = [(0.5, -0.5)]
-zero_contour = ax.contour(CHLA, TEMP, growth_hyp, levels=zero_level, colors='black',
-                          linewidths=0.8, linestyles='--', zorder=3)
-label_fontsize = 12 if plot == 'slides' else None
-ax.clabel(zero_contour, manual=manual_zero_pos, fmt="%.2f", inline=True,
-          fontsize=label_fontsize, colors='black')
-
-# --- Plot selected labeled contours ---
-levels_to_plot = [-0.2, -0.1, 0.1, 0.2, 0.3]
 if plot == 'report':
-    manual_positions = {
-        -0.2: (0.33, -1.4),
-        -0.1: (0.4, -0.7),
-         0.1: (0.7, -0.7),
-         0.2: (1.5, -0.4),
-         0.3: (1.5, -0.4),
-    }
+    fig_width  = 6.3228348611 * 1.2
+    fig_height = fig_width * 1.4
 else:
-    manual_positions = {
-        -0.2: (0.4, -1.65),
-        -0.1: (0.45, -0.9),
-         0.1: (0.7, -0.7),
-         0.2: (1.5, -0.4),
-         0.3: (1.5, -0.4),
-    }
+    fig_width, fig_height = 10, 14
 
-for lvl in levels_to_plot:
-    contour = ax.contour(CHLA, TEMP, growth_hyp, levels=[lvl], colors='white',
-                         linewidths=0.8, linestyles='--', zorder=3)
-    try:
-        ax.clabel(contour, manual=[manual_positions[lvl]], fmt="%.2f", inline=True,
-                  fontsize=label_fontsize, colors='white')
-    except Exception as e:
-        print(f"Failed to label level {lvl}: {e}")
-
-
-# --- Observed temp ---
-chla_yr = chla_mpa[mpa_choice].sel(years=year_to_plot).values
-temp_yr = temp_mpa[mpa_choice].sel(years=year_to_plot).values
-valid_mask = ~np.isnan(chla_yr) & ~np.isnan(temp_yr)
-
-ax.plot(chla_yr[valid_mask], temp_yr[valid_mask],
-        color='#648028', linewidth=lw, alpha=0.9, zorder=5,
-        linestyle='-', label=f'Actual signal')
-
-# --- Southern Ocean mean (detrended temp) ---
-temp_yr_det = temp_detrended_mpa[mpa_choice].sel(years=year_to_plot).values  # adjust var name if needed
-valid_mask_det = ~np.isnan(chla_yr) & ~np.isnan(temp_yr_det)
-
-ax.plot(chla_yr[valid_mask_det], temp_yr_det[valid_mask_det],
-        color='#584CBD', linewidth=lw, alpha=0.9, zorder=5,
-        linestyle='--', label=f'Signal without warming')
-
-# --- Southern Ocean mean (no MHW temp) ---
-temp_yr_nomhw = temp_no_mhw_mpa[mpa_choice].sel(years=year_to_plot).values  # adjust var name if needed
-valid_mask_nomhw = ~np.isnan(chla_yr) & ~np.isnan(temp_yr_nomhw)
-
-ax.plot(chla_yr[valid_mask_nomhw], temp_yr_nomhw[valid_mask_nomhw],
-        color='#F18701', linewidth=lw, alpha=0.9, zorder=5,
-        linestyle='--', label=f'Signal without MHWs')
-
-# --- Southern Ocean mean (climatological signal) ---
-temp_clim_val = temp_clim_mpa[mpa_choice].values  # adjust var name if needed
-chla_clim_val = chla_clim_mpa[mpa_choice].values  # adjust var name if needed
-valid_mask_clim = ~np.isnan(chla_clim_val) & ~np.isnan(temp_clim_val)
-
-ax.plot(chla_clim_val[valid_mask_det], temp_clim_val[valid_mask_det],
-        color='black', linewidth=lw, alpha=0.9, zorder=5,
-        linestyle='-', label=f'Climatological signal')
-
-# --- Legend ---
-custom_lines = [
-    Line2D([0], [0], color='#648028', lw=2, linestyle='-',  label=f'Actual signal'),
-    Line2D([0], [0], color='#584CBD', lw=2, linestyle='--', label=f'Signal without warming'),
-    Line2D([0], [0], color='#F18701', lw=2, linestyle='--', label=f'Signal without MHWs'),
-    Line2D([0], [0], color='black', lw=2, linestyle='-', label=f'Climatological signal'),
-]
-
-legend = ax.legend(
-    handles=custom_lines,
-    loc='upper right',
-    frameon=True,
-    facecolor='white',
-    framealpha=0.9,
-    handlelength=1.5,
-    handletextpad=0.8,
-    borderaxespad=0.5,
-    borderpad=0.4,
-    labelspacing=0.6,
-    **legend_kwargs
+cmap_custom = LinearSegmentedColormap.from_list(
+    'red_grey_teal',
+    ['#C00225',   # negative end — red
+     '#F0F0F0',   # midpoint    — light grey
+     '#00667A'],  # positive end — teal-blue
+    N=256
 )
-legend.get_frame().set_linewidth(0.5)
 
-# --- Axis labels and title ---
-suptitle_y = 0.99 if plot == 'report' else 1.0
-fig.suptitle('Krill Growth Dynamic', y=suptitle_y, **suptitle_kwargs)
-fig.text(0.5, suptitle_y - 0.08, f'{mpa_choice} mean – Year {year_to_plot}',
-         ha='center', style='italic', **label_kwargs)
-ax.set_xlabel('Chlorophyll-a [mg/m³]', **label_kwargs)
-ax.set_ylabel('Temperature [°C]', **label_kwargs)
-ax.set_ylim(-2, 3)
-# ax.set_xlim(0, 1)
-ax.set_yticks(np.arange(-2, 4, 1))
-ax.tick_params(**tick_kwargs)
-ax.autoscale(enable=False)
+norm = mcolors.TwoSlopeNorm(vmin=-0.3, vcenter=0, vmax=0.3)
 
-# --- Growth colorbar ---
-cbar = fig.colorbar(pcm, ax=ax, orientation='vertical', fraction=0.04, pad=0.04,
-                    label='Growth [mm/d]', extend='both')
-cbar.ax.yaxis.label.set_size(label_kwargs.get('fontsize', None))
-cbar.ax.tick_params(**tick_kwargs)
+fig, axes = plt.subplots(5, 1, figsize=(fig_width, fig_height),
+                         sharex=True)
 
-# --- Final layout ---
+for i, (mpa_choice, ax) in enumerate(zip(mpa_colors.keys(), axes)):
+    base_color  = mpa_colors[mpa_choice]
+    light_color = lighten(base_color, factor=0.45)  # for climatology
+    dark_color  = darken(base_color,  factor=0.6)   # for detrended
+
+    # --- Background growth pattern ---
+    pcm = ax.pcolormesh(CHLA, TEMP, growth_hyp, shading='auto',
+                        cmap=cmap_custom, norm=norm, alpha=0.7, rasterized=True)
+
+    # --- Contours ---
+    zero_contour = ax.contour(CHLA, TEMP, growth_hyp, levels=[0],
+                              colors='black', linewidths=0.6, linestyles='--', zorder=3)
+    ax.clabel(zero_contour, manual=[(0.5, -0.5)], fmt="%.2f",
+              inline=True, fontsize=7, colors='black')
+
+    for lvl, pos in [(-0.2, (0.33, -1.4)), (-0.1, (0.4, -0.7)),
+                      (0.1, (0.7, -0.7)),   (0.2, (1.5, -0.4))]:
+        c = ax.contour(CHLA, TEMP, growth_hyp, levels=[lvl],
+                       colors='white', linewidths=0.6, linestyles='--', zorder=3)
+        try:
+            ax.clabel(c, manual=[pos], fmt="%.2f", inline=True,
+                      fontsize=7, colors='white')
+        except Exception:
+            pass
+
+    # --- Data ---
+    chla_yr  = chla_mpa[mpa_choice].sel(years=year_to_plot).values
+    temp_yr  = temp_mpa[mpa_choice].sel(years=year_to_plot).values
+    valid    = ~np.isnan(chla_yr) & ~np.isnan(temp_yr)
+
+    temp_det   = temp_detrended_mpa[mpa_choice].sel(years=year_to_plot).values
+    valid_det  = ~np.isnan(chla_yr) & ~np.isnan(temp_det)
+
+    temp_nomhw   = temp_no_mhw_mpa[mpa_choice].sel(years=year_to_plot).values
+    valid_nomhw  = ~np.isnan(chla_yr) & ~np.isnan(temp_nomhw)
+
+    temp_clim  = temp_clim_mpa[mpa_choice].values
+    chla_clim  = chla_clim_mpa[mpa_choice].values
+    valid_clim = ~np.isnan(chla_clim) & ~np.isnan(temp_clim)
+
+    # --- Climatological signal (lightest, background) ---
+    ax.plot(chla_clim[valid_clim], temp_clim[valid_clim],
+            color='black', linewidth=lw*1.0, alpha=1.0, zorder=5,
+            linestyle='--',
+            path_effects=[pe.withStroke(linewidth=1.2, foreground='white')])
+
+    # --- No warming ---
+    ax.plot(chla_yr[valid_det], temp_det[valid_det],
+            color=dark_color, linewidth=lw*1.2, alpha=1.0, zorder=6,
+            linestyle='--')
+
+    # --- No MHWs (thin, on top) ---
+    ax.plot(chla_yr[valid_nomhw], temp_nomhw[valid_nomhw],
+            color=light_color, linewidth=lw*0.8, alpha=1.0, zorder=8,
+            linestyle='-')
+
+    # --- Actual signal (base color, thickest) ---
+    ax.plot(chla_yr[valid], temp_yr[valid],
+            color=base_color, linewidth=lw*1.5, alpha=1.0, zorder=7,
+            linestyle='-')
+
+    # --- Region label ---
+    ax.text(0.005, 0.97, mpa_labels[mpa_choice],
+            transform=ax.transAxes, va='top', ha='left', zorder=9,
+            fontsize=legend_kwargs.get('fontsize', 8),
+            bbox=dict(facecolor='white', edgecolor='black', linewidth=0.4,
+                      boxstyle='round,pad=0.3', alpha=0.9))
+
+    # --- Per-subplot legend ---
+    custom_lines = [
+        Line2D([0], [0], color=base_color,  lw=2, linestyle='-',  label='Actual'),
+        Line2D([0], [0], color=dark_color,  lw=2, linestyle='--', label='Without trend'),
+        Line2D([0], [0], color=light_color, lw=2, linestyle='-',  label='Without MHWs'),
+        Line2D([0], [0], color='black', lw=2, linestyle='--', label='Climatology',
+               path_effects=[pe.withStroke(linewidth=1.0, foreground='grey')]),
+    ]
+    ax.legend(handles=custom_lines, loc='lower right',
+              frameon=True, facecolor='white', framealpha=0.9,
+              handlelength=1.2, ncols=2,
+              **legend_kwargs)
+
+    ax.set_ylabel('Temp [°C]', **label_kwargs)
+    ax.set_ylim(-2, 1.5)
+    ax.set_xlim(0, 2)
+    ax.set_yticks(np.arange(-2, 2, 0.5))
+    ax.tick_params(**tick_kwargs)
+    ax.autoscale(enable=False)
+
+    # Colorbar only on first subplot
+    if i == 0:
+        cbar = fig.colorbar(pcm, ax=axes, orientation='vertical',
+                            fraction=0.02, pad=0.04, label='Growth [mm/d]', extend='both')
+        cbar.ax.tick_params(**tick_kwargs)
+
+axes[-1].set_xlabel('Chlorophyll-a [mg/m³]', **label_kwargs)
+
 plt.tight_layout()
 plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/growth_dynamic_allMPAs_{year_to_plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+# %% ============ Plot for that year the mean krill growth ============
+from skimage import measure
+growth_krill = xr.open_dataset(os.path.join(path_growth, 'growth_Atkison2006_seasonal.nc'))
+growth_krill_yr = growth_krill.sel(years=year_to_plot)
+growth_krill_yr_mean = growth_krill_yr.mean(dim='days')
+
+mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#c77c27"),
+            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#e05c8a"),
+            "East Antarctic": (mpas_ds.mask_ea, "#C00225"),
+            "Weddell Sea": (mpas_ds.mask_ws, "#5f0f40"),
+            "Antarctic Peninsula": (mpas_ds.mask_ap, "#867308")}
+
+plot = 'report'
+
+# Colormap
+cmap_growth = 'coolwarm_r'
+norm_growth = mcolors.TwoSlopeNorm(vmin=-0.2, vcenter=0, vmax=0.2)
+
+# Settings
+lw = 1.0 if plot == 'slides' else 0.6
+lw_grid = 0.7 if plot == 'slides' else 0.3
+gridlabel_kwargs = {'size': 10, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+label_kwargs     = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+
+if plot == 'report':
+    fig_width  = 6.3228348611
+    fig_height = fig_width * 0.55
+else:
+    fig_width, fig_height = 8, 5
+
+# Circular boundary
+theta  = np.linspace(0, 2 * np.pi, 200)
+verts  = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+
+# --- Figure — single polar map ---
+fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height),
+                       subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+ax.set_boundary(circle, transform=ax.transAxes)
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+ax.coastlines(color='black', linewidth=lw, zorder=5)
+ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+ax.set_facecolor('lightgrey')
+
+# Plot mean growth for that year
+pcm = ax.pcolormesh(
+    growth_krill_yr_mean.lon_rho, growth_krill_yr_mean.lat_rho,
+    growth_krill_yr_mean.growth,                        # adjust variable name if needed
+    transform=ccrs.PlateCarree(),
+    cmap=cmap_growth, norm=norm_growth,
+    rasterized=True, zorder=1
+)
+
+# Gridlines
+gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5,
+                  linestyle='--', linewidth=lw_grid, zorder=20)
+gl.xlabels_top   = False
+gl.ylabels_right = False
+gl.xlabel_style  = gridlabel_kwargs
+gl.ylabel_style  = gridlabel_kwargs
+gl.xformatter    = LongitudeFormatter()
+gl.yformatter    = LatitudeFormatter()
+
+# MPA boundaries
+lon_rho = mpas_ds.lon_rho
+lat_rho = mpas_ds.lat_rho
+for name, (mask, color) in mpa_dict.items():
+    mask_2d = mask.values if hasattr(mask, "values") else mask
+    lon_np  = lon_rho.values
+    lat_np  = lat_rho.values
+    contours = measure.find_contours(mask_2d.astype(float), 0.5)
+    for contour in contours:
+        eta_idx = contour[:, 0].astype(int)
+        xi_idx  = contour[:, 1].astype(int)
+        c_lon = lon_np[eta_idx, xi_idx]
+        c_lat = lat_np[eta_idx, xi_idx]
+        ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+                color=color, linewidth=lw,
+                transform=ccrs.PlateCarree(), zorder=6)
+        
+        # Filled polygon with alpha
+        ax.fill(c_lon, c_lat,
+                color=color, alpha=0.25,
+                transform=ccrs.PlateCarree(), zorder=3)
+        # Boundary line
+        ax.plot(c_lon, c_lat,
+                color=color, linewidth=lw,
+                transform=ccrs.PlateCarree(), zorder=6)
+ax.set_title(f'Mean krill growth — {year_to_plot}', fontsize=9)
+
+# Colorbar
+cbar = fig.colorbar(pcm, ax=ax, orientation='vertical', extend='both',
+                    fraction=0.04, pad=0.04, shrink=0.8)
+cbar.set_label('Growth [mm/d]', **label_kwargs)
+cbar.set_ticks([-0.2, -0.1, 0, 0.1, 0.2])
+cbar.ax.tick_params(labelsize=7)
+
+plt.tight_layout()
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/mean_krill_growth_{year_to_plot}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+# %% ============ Plot MPAs ============
+plot = 'report'
+
+# Settings
+lw = 1.0 if plot == 'slides' else 0.6
+lw_grid = 0.7 if plot == 'slides' else 0.3
+gridlabel_kwargs = {'size': 10, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+label_kwargs     = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+
+if plot == 'report':
+    fig_width  = 6.3228348611
+    fig_height = fig_width * 0.55
+else:
+    fig_width, fig_height = 8, 5
+
+# --- Figure — single polar map ---
+fig, ax = plt.subplots(1, 1, figsize=(fig_width, fig_height),
+                       subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+
+ax.coastlines(color='black', linewidth=lw, zorder=16)
+ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+ax.set_facecolor('lightgrey')
+
+
+# MPA boundaries
+lon_rho = mpas_ds.lon_rho
+lat_rho = mpas_ds.lat_rho
+for name, (mask, color) in mpa_dict.items():
+    mask_2d = mask.values if hasattr(mask, "values") else mask
+    lon_np  = lon_rho.values
+    lat_np  = lat_rho.values
+    contours = measure.find_contours(mask_2d.astype(float), 0.5)
+    for contour in contours:
+        eta_idx = contour[:, 0].astype(int)
+        xi_idx  = contour[:, 1].astype(int)
+        c_lon = lon_np[eta_idx, xi_idx]
+        c_lat = lat_np[eta_idx, xi_idx]
+        ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+                color=color, linewidth=lw,
+                transform=ccrs.PlateCarree(), zorder=3)
+        
+        # Filled polygon with alpha
+        ax.fill(c_lon, c_lat,
+                color=color,
+                transform=ccrs.PlateCarree(), zorder=2)
+        # Boundary line
+        ax.plot(c_lon, c_lat,
+                color=color, linewidth=lw,
+                transform=ccrs.PlateCarree(), zorder=1)
+
+
+plt.tight_layout()
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/methods/MPAs_extent.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+
 # %% ============ Find max MHW duration in AP ============
 mhw_duration_mpas = {region: xr.open_dataset(os.path.join(path_combined_thesh, f"mpas/interpolated/duration_AND_thresh_{region}.nc")).duration for region in ['RS', 'SO', 'EA', 'WS', 'AP']}
 da_ap = mhw_duration_mpas['AP']
