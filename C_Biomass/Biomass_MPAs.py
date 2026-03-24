@@ -92,12 +92,11 @@ south_mask = (mpas_ds['lat_rho'] <= -60)
 mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
 
 # == Settings plot
-mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#5F0F40"),
-            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#FFBA08"),
-            "East Antarctic": (mpas_ds.mask_ea, "#E36414"),
-            "Weddell Sea": (mpas_ds.mask_ws, "#4F772D"),
-            "Antarctic Peninsula": (mpas_ds.mask_ap, "#0A9396")}
-
+mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#c77c27"),
+            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#e05c8a"),
+            "East Antarctic": (mpas_ds.mask_ea, "#C00225"),
+            "Weddell Sea": (mpas_ds.mask_ws, "#5f0f40"),
+            "Antarctic Peninsula": (mpas_ds.mask_ap, "#867308")}
 
 # ---- Plot MPAs
 fig = plt.figure(figsize=(5, 8))
@@ -172,31 +171,16 @@ for abbrv, (name, mask) in mpa_masks.items():
     volume_mpa[name] = volume_60S_SO_100m.where(mask)
 
 # %% ======================== Biomass data ========================
-path_biomass_ts_SO_regridd = os.path.join(path_biomass_ts_SO, 'biomass_regridded')
-path_biomass_ts_SO_interp = os.path.join(path_biomass_ts_SO, 'biomass_interpolated')
-
-# ==== Load data ====
 # -- Southern Ocean (from Biomass_calculations.py)
-biomass_clim = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_clim.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-biomass_clim_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_clim.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-
-biomass_actual = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_actual.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-biomass_actual_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_actual.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-
-biomass_noMHWs = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_nomhws.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-biomass_noMHWs_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_nomhws.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-
-biomass_clim_trended = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_clim_trend.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-biomass_clim_trended_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_clim_trend.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-
-biomass_nowarming = xr.open_dataset(os.path.join(path_biomass_ts_SO_regridd, "biomass_nowarming.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
-biomass_nowarming_interp = xr.open_dataset(os.path.join(path_biomass_ts_SO_interp, "biomass_nowarming.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_clim = xr.open_dataset(os.path.join(path_biomass_ts_SO, "biomass_clim.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_actual = xr.open_dataset(os.path.join(path_biomass_ts_SO, "biomass_actual.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_clim_trended = xr.open_dataset(os.path.join(path_biomass_ts_SO, "biomass_clim_trend.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+biomass_nowarming = xr.open_dataset(os.path.join(path_biomass_ts_SO, "biomass_nowarming.nc")).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
 
 # Put together in dictionnary
-biomass_ds = {"clim": biomass_clim, "actual": biomass_actual, "nomhws": biomass_noMHWs, "climtrend": biomass_clim_trended, "nowarming": biomass_nowarming,}
-biomass_ds_interp = {"clim": biomass_clim_interp, "actual": biomass_actual_interp, "nomhws": biomass_noMHWs_interp, "climtrend": biomass_clim_trended_interp, "nowarming": biomass_nowarming_interp,}
+biomass_ds = {"clim": biomass_clim, "actual": biomass_actual,  "climtrend": biomass_clim_trended, "nowarming": biomass_nowarming,}
 
-surrogate_names = {"clim": "Climatology", "actual": "Actual Conditions", "nomhws": "No Marine Heatwaves", "climtrend":"Climatology wih trend", "nowarming": "No Warming"}
+surrogate_names = {"clim": "Climatology", "actual": "Actual Conditions", "climtrend":"Climatology wih trend", "nowarming": "No Warming"}
 mpa_names = list(mpa_dict.keys())
 mpa_abbrs = list(mpa_masks.keys())
 
@@ -205,24 +189,18 @@ from tqdm.contrib.concurrent import process_map
 
 # --- Function to mask one surrogate for one MPA
 def mask_one_surrogate(args):
-    # Extract arguments
-    surrog, ds, mpa_name, mpa_abbrv, mpa_mask, interp = args
+    # -- Extract arguments
+    surrog, ds, mpa_name, mpa_abbrv, mpa_mask = args
 
     # test
-    # surrog ='clim'
-    # ds = biomass_ds['clim']
-    # mpa_name = 'Ross Sea'
-    # mpa_abbrv = 'RS'
-    # mpa_mask = mpa_masks['RS'][1]
-    # interp = False
+    # surrog ='climtrend'
+    # ds = biomass_ds[surrog]
+    # mpa_abbrv = 'AP'
+    # mpa_name = mpa_masks[mpa_abbrv][0]
+    # mpa_mask = mpa_masks[mpa_abbrv][1]
 
-    # 2cases, regridded only or with interpolation
-    if interp:
-        file_path = os.path.join(path_biomass_ts_MPAs_interp, f"{surrog}_biomass_{mpa_abbrv}.nc")
-    else:
-        file_path = os.path.join(path_biomass_ts_MPAs_regridd, f"{surrog}_biomass_{mpa_abbrv}.nc")
-
-    # RUn only if file doesn't already exist
+    # -- Run only if file doesn't already exist
+    file_path = os.path.join(path_biomass_ts_MPAs, f"{surrog}_biomass_{mpa_abbrv}.nc")
     if not os.path.exists(file_path):
         # Expand mask dimensions
         mask = mpa_mask
@@ -236,7 +214,7 @@ def mask_one_surrogate(args):
         
         # To Dataset
         ds_mpa = xr.Dataset({"biomass": biomass_masked},
-                            coords={"years": ds.years if "years" in ds.dims else None,
+                            coords={"years": 1980 + np.arange(39),
                                     "days": ds.days,
                                     "lon_rho": (("eta_rho", "xi_rho"), ds.lon_rho.data),
                                     "lat_rho": (("eta_rho", "xi_rho"), ds.lat_rho.data),},)
@@ -250,27 +228,23 @@ def mask_one_surrogate(args):
     
     else:
         return 'MPAs already saved to file.'
+    
+# %% ==================================== Mask MPAs ====================================
+files_interp = [os.path.join(path_biomass_ts_MPAs, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
 
-# %% ==================================== Mask MPAs - Regridded ====================================
-print('\nInitial biomass: Regridded')
-
-path_biomass_ts_MPAs_regridd = os.path.join(path_biomass_ts_MPAs, 'biomass_regridded')
-files_regrid = [os.path.join(path_biomass_ts_MPAs_regridd, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
-
-if not all(os.path.exists(f) for f in files_regrid):
+if not all(os.path.exists(f) for f in files_interp):
     print('Masking biomass to MPAs and writing to file...')
-    interp=False
     # --- Loop over MPAs
     for abbrv, (mpa_name, mpa_mask) in mpa_masks.items():
         # Test
-        # abbrv='RS'
-        # mpa_name='Ross Sea'
-        # mpa_mask=mpa_masks['RS'][1]
+        # abbrv='AP'
+        # mpa_name=mpa_masks['AP'][0]
+        # mpa_mask=mpa_masks['AP'][1]
 
-        print(f"\nProcessing MPA: {mpa_name} ({abbrv})")
+        print(f"\nProcesssing MPA: {mpa_name} ({abbrv})")
 
         # Prepare arguments for function
-        args_list = [(surrog, ds, mpa_name, abbrv, mpa_mask, interp) for surrog, ds in biomass_ds.items()]
+        args_list = [(surrog, ds, mpa_name, abbrv, mpa_mask) for surrog, ds in biomass_ds.items()]
         
         # Run in parallel
         results = process_map(mask_one_surrogate, args_list, max_workers=4,  desc=f"{abbrv} | Mask ")
@@ -283,49 +257,17 @@ else:
         biomass_mpas[abbrv] = {}
 
         for surrog in surrogate_names.keys():
-            fname = os.path.join(path_biomass_ts_MPAs_regridd, f"{surrog}_biomass_{abbrv}.nc")
+            fname = os.path.join(path_biomass_ts_MPAs, f"{surrog}_biomass_{abbrv}.nc")
             biomass_mpas[abbrv][surrog] = xr.open_dataset(fname)
-
-    
-# %% ==================================== Mask MPAs - Regridded and interpolated ====================================
-print('\nInitial biomass: Regridded and Interpolated')
-
-path_biomass_ts_MPAs_interp = os.path.join(path_biomass_ts_MPAs, 'biomass_interpolated')
-files_interp = [os.path.join(path_biomass_ts_MPAs_interp, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
-
-if not all(os.path.exists(f) for f in files_interp):
-    print('Masking biomass to MPAs and writing to file...')
-    interp=True
-    # --- Loop over MPAs
-    for abbrv, (mpa_name, mpa_mask) in mpa_masks.items():
-        # Test
-        # abbrv='RS'
-        # mpa_name='Ross Sea'
-        # mpa_mask=mpa_masks['RS'][1]
-
-        print(f"\nProcesssing MPA: {mpa_name} ({abbrv})")
-
-        # Prepare arguments for function
-        args_list = [(surrog, ds, mpa_name, abbrv, mpa_mask, interp) for surrog, ds in biomass_ds_interp.items()]
-        
-        # Run in parallel
-        results = process_map(mask_one_surrogate, args_list, max_workers=4,  desc=f"{abbrv} | Mask ")
-
-else:
-    print('Loading files...')
-    biomass_mpas_interp = {}
-
-    for abbrv, (mpa_name, _) in mpa_masks.items():
-        biomass_mpas_interp[abbrv] = {}
-
-        for surrog in surrogate_names.keys():
-            fname = os.path.join(path_biomass_ts_MPAs_interp, f"{surrog}_biomass_{abbrv}.nc")
-            biomass_mpas_interp[abbrv][surrog] = xr.open_dataset(fname)
 
 # %% ================================= Plot Biomass concentration =================================    
 # Year to plot
 years_to_plot = 1989 #1989 2000 2016
 year_idx = years_to_plot - 1980
+
+# -- Prepare data
+actual_med_yr = biomass_mpas['AP']['actual'].biomass.isel(years=year_idx).median('bootstraps')
+clim_med_yr = biomass_mpas['AP']['clim'].biomass.isel(years=year_idx).median('bootstraps')
 
 # --- Figure setup
 fig = plt.figure(figsize=(15, 8))
@@ -341,11 +283,11 @@ titles = ["Climatology", "Actual (2016)", "No MHWs", "No Warming",
           "", "Actual − Clim", "No MHWs − Clim", "No Warming − Clim"]
 
 # --- Color Setup
-color_data=biomass_mpas_interp['AP']['actual'].biomass.isel(years=year_idx).median('algo').values
+color_data=actual_med_yr.values
 vmin_bio, vmax_bio = 5, 40 # np.nanpercentile(color_data, [5, 95])
 cmap_bio = 'Reds'
 
-diff_data= color_data - biomass_mpas_interp['AP']['clim'].biomass.median('algo')
+diff_data= actual_med_yr - clim_med_yr
 max_abs_diff = np.nanmax(np.abs(diff_data))
 vmin_diff, vmax_diff = -20, 20 #-max_abs_diff, max_abs_diff
 cmap_diff = 'bwr'
@@ -378,7 +320,7 @@ for i in range(8):
 pcm_bio  = None
 pcm_diff = None
 
-for abbrv, mpa_data in biomass_mpas_interp.items():
+for abbrv, mpa_data in biomass_mpas.items():
     # Prepare data
     ds_clim = mpa_data["clim"]
     ds_actual = mpa_data["actual"]
@@ -386,10 +328,10 @@ for abbrv, mpa_data in biomass_mpas_interp.items():
     ds_nowarm = mpa_data["nowarming"]
 
     # Row 1: Biomass at the end of the season
-    bio_clim = ds_clim.biomass.isel(days=-1).median('algo')
-    bio_actual = ds_actual.biomass.isel(years=year_idx, days=-1).median('algo')
-    bio_clim_trend = ds_clim_trend.biomass.isel(years=year_idx, days=-1).median('algo')
-    bio_nowarm = ds_nowarm.biomass.isel(years=year_idx, days=-1).median('algo')
+    bio_clim = ds_clim.biomass.isel(years=year_idx, days=-1).median('bootstraps')
+    bio_actual = ds_actual.biomass.isel(years=year_idx, days=-1).median('bootstraps')
+    bio_clim_trend = ds_clim_trend.biomass.isel(years=year_idx, days=-1).median('bootstraps')
+    bio_nowarm = ds_nowarm.biomass.isel(years=year_idx, days=-1).median('bootstraps')
 
     # Row 2: Difference w.r.t clim at the end of the season
     diff_actual  = bio_actual - bio_clim
@@ -406,12 +348,12 @@ for abbrv, mpa_data in biomass_mpas_interp.items():
         
         # --- Row 1: Biomass
         if i < 4:
-            pcm_bio = axes[i].pcolormesh(ds_clim.lon_rho, ds_clim.lat_rho, data_i, transform=ccrs.PlateCarree(),
+            pcm_bio = axes[i].pcolormesh(data_i.lon_rho, data_i.lat_rho, data_i, transform=ccrs.PlateCarree(),
                                 cmap=cmap_bio, vmin=vmin_bio, vmax=vmax_bio, zorder=1)
             
         # --- Row 2: Difference
         else:
-            pcm_diff = axes[i].pcolormesh(ds_clim.lon_rho, ds_clim.lat_rho, data_i, transform=ccrs.PlateCarree(),
+            pcm_diff = axes[i].pcolormesh(data_i.lon_rho, data_i.lat_rho, data_i, transform=ccrs.PlateCarree(),
                                 cmap=cmap_diff, vmin=vmin_diff, vmax=vmax_diff, zorder=1)
 
 # --- Colorbars
@@ -440,7 +382,7 @@ if not os.path.exists(out_csv):
 
         print(f"\nProcessing {mpa_name} ({abbrv})")
 
-        biomass_data = biomass_mpas_interp[abbrv]["actual"].biomass_median
+        biomass_data = biomass_mpas[abbrv]["actual"].biomass_median
         mhw_ds = xr.open_dataset(os.path.join(path_combined_thesh, f"mpas/duration_AND_thresh_{abbrv}.nc"))
 
         longest_mhw[abbrv] = {"mpa_name": mpa_name}
@@ -508,9 +450,8 @@ if not os.path.exists(out_csv):
 else:
     df_longest_mhw = pd.read_csv(out_csv)
 
-# HERE!
 # %% ================================= Select MHW event to plot =================================
-mpa_choice = 'WS' #'RS' 'AP' 'EA' 'WS' 'SO'
+mpa_choice = 'AP' #'RS' 'AP' 'EA' 'WS' 'SO'
 threshold_choice = '3deg'
 mhw_event_choice = df_longest_mhw.loc[(df_longest_mhw["mpa_abbrv"] == mpa_choice) & (df_longest_mhw["threshold"] == threshold_choice)].iloc[0]
 
@@ -519,11 +460,10 @@ eta_idx=mhw_event_choice["eta_idx"]
 xi_idx=mhw_event_choice["xi_idx"]
 
 # Extract data at that location
-biomass_mhw_actual = biomass_mpas_interp[mpa_choice]['actual'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
-biomass_mhw_clim = biomass_mpas_interp[mpa_choice]['clim'].biomass.isel(eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
-biomass_mhw_nomhw = biomass_mpas_interp[mpa_choice]['nomhws'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
-biomass_mhw_climtrend = biomass_mpas_interp[mpa_choice]['climtrend'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
-biomass_mhw_nowarming = biomass_mpas_interp[mpa_choice]['nowarming'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('algo')
+biomass_mhw_actual = biomass_mpas[mpa_choice]['actual'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('bootstraps')
+biomass_mhw_clim = biomass_mpas[mpa_choice]['clim'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('bootstraps')
+biomass_mhw_climtrend = biomass_mpas[mpa_choice]['climtrend'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('bootstraps')
+biomass_mhw_nowarming = biomass_mpas[mpa_choice]['nowarming'].biomass.isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx).median('bootstraps')
 mhw_timeseries = xr.open_dataset(os.path.join(path_combined_thesh, f'mpas/interpolated/duration_AND_thresh_{mpa_choice}.nc')).isel(years=year_idx, eta_rho=eta_idx, xi_rho=xi_idx)
 
 chla_surf_SO_allyrs= xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
@@ -565,9 +505,8 @@ for k, v in threshold_events.items():
 
 
 # %% ================================= Plot biomass timeserie ================================= 
-# Look at the shap of biomass evlution -- see if biomass influence the progretion of biomass increase over the season
+# Look if MHWs influence the progretion of biomass increase over the season
 okabe_ito = ["#000000", "#009E73", "#0072B2", "#56B4E9", "#F0E442", "#E69F00", "#D55E00", "#CC79A7"]
-
 
 title_kwargs = {'fontsize': 15} 
 label_kwargs = {'fontsize': 12} 
@@ -596,7 +535,6 @@ fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, figsize=(12, 6), sharex=Tr
 # --- 1. Biomass timeseries 
 ax1.plot(days_xaxis, biomass_mhw_clim.values, color=okabe_ito[0],  linewidth=lw, label='Climatology')
 ax1.plot(days_xaxis, biomass_mhw_actual.values, color=okabe_ito[1],linewidth=lw, label='Actual')
-ax1.plot(days_xaxis, biomass_mhw_nomhw.values, color=okabe_ito[3],  linestyle='--', linewidth=1.3, label='No MHWs')
 ax1.plot(days_xaxis, biomass_mhw_climtrend.values, color=okabe_ito[5],  linestyle='--', linewidth=1.3, label='No MHWs (Clim with trend)')
 ax1.plot(days_xaxis, biomass_mhw_nowarming.values, color=okabe_ito[-1],  linestyle='--', linewidth=1.3, label='No Warming')
 ax1.set_ylabel("Biomass [mg/m³]", **label_kwargs)
