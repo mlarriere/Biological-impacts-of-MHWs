@@ -7,7 +7,7 @@ Answering the question:
 @author: Marguerite Larriere (mlarriere)
 """
 
-# %% ======================== PACKAGES========================
+# %% ======================== PACKAGES ========================
 import os
 import xarray as xr
 import numpy as np
@@ -108,13 +108,14 @@ p_actual_change_median_cell = p_change_interp_cell['actual'].median(dim=['bootst
 # %% ======================== Temperature data ========================
 ds_mhw = xr.open_dataset(os.path.join(path_combined_thesh, f"duration_AND_thresh_5mSEASON.nc"))
 main_path='/nfs/sea/work/mlarriere/mhw_krill_SO'
+# climSST = xr.open_dataset(os.path.join(path_clim,'climSST_surf.nc'))
 
 temp_surf_file = os.path.join(main_path, 'temp_surf_seasonal.nc')
-temp_surf_clim_file = os.path.join(path_clim, "threshold_90perc_surf_seasonal.nc")
+temp_surf_clim_file = os.path.join(main_path, "temp_clim_surf_seasonal.nc")
 
 if not os.path.exists(temp_surf_file) and not os.path.exists(temp_surf_clim_file):
     temp_surf= xr.open_dataset(os.path.join(main_path, f"temp_surf.nc"))
-    temp_surf_clim =xr.open_dataset(os.path.join(path_clim, "threshold_90perc_surf.nc"))
+    temp_surf_clim =xr.open_dataset(os.path.join(path_clim, "climSST_surf.nc"))
 
     # -- Extent south of 60°S
     south_mask = temp_surf_clim['lat_rho'] <= -60
@@ -179,29 +180,30 @@ if not os.path.exists(temp_surf_file) and not os.path.exists(temp_surf_clim_file
 
     # Seasonal climatology (no year dim, just extract Nov-Apr days in order)
     seasonal_doy = ds_mhw['days_of_yr'].values
-    temp_surf_clim_seasonal = temp_surf_clim['relative_threshold'].sel(days=seasonal_doy)
+    temp_surf_clim_seasonal = temp_surf_clim['clim_sst'].sel(days=seasonal_doy)
 
     # Save to file
     temp_surf_seasonal.to_netcdf(temp_surf_file)
     temp_surf_clim_seasonal.to_netcdf(temp_surf_clim_file)
 else:
-    temp_surf_seasonal=xr.open_dataset(temp_surf_file)
+    temp_surf_seasonal = xr.open_dataset(temp_surf_file)
     temp_surf_clim_seasonal = xr.open_dataset(temp_surf_clim_file)
 
 # %% ======================== MHW metrics ========================
 # -- Temperature anomaly
 temp_anom_file = os.path.join(main_path, 'temp_anomalies_seasonal.nc')
 if not os.path.exists(temp_anom_file):
-    temp_anomalies = temp_surf_seasonal.temp_surf - temp_surf_clim_seasonal.relative_threshold
+    temp_anomalies = temp_surf_seasonal.temp_surf - temp_surf_clim_seasonal.clim_sst
     temp_anomalies_reset = temp_anomalies.assign_coords(days=np.arange(181))
     temp_anomalies_reset.to_netcdf(temp_anom_file)
 else:
-    temp_anomalies_reset=xr.open_dataset(temp_anom_file)
-# print(f"Min anomaly: {float(temp_anomalies.min().values):.2f} °C") # -6.04 °C
-# print(f"Max anomaly: {float(temp_anomalies.max().values):.2f} °C") #5.67 °C
+    temp_anomalies_reset = xr.open_dataset(temp_anom_file)
+# print(f"Min anomaly: {float(temp_anomalies.min().values):.2f} °C") # -5.02 °C
+# print(f"Max anomaly: {float(temp_anomalies.max().values):.2f} °C") # 6.10 °C
 
 # -- Cumulative intensity
 cum_intensity_file = os.path.join(main_path, 'fixed_baseline30yrs/mhw_cumulative_intensity.nc')
+
 if not os.path.exists(cum_intensity_file):
         
     # Defined the 5 different cases of MHWs: 90th perc, 90th perc +i°C
@@ -216,6 +218,16 @@ if not os.path.exists(cum_intensity_file):
                  '2deg': det_2deg.assign_coords(days=np.arange(181)),
                  '3deg': det_3deg.assign_coords(days=np.arange(181)),
                  '4deg': det_4deg.assign_coords(days=np.arange(181)),}
+    
+    # We consider the MHW cumulative intensity, i.e. for a 3°C event, the full event is considered (even if not full event >3°C)
+    # det_cases = {
+    #     '90th': det_90th,
+    #     '1deg': det_90th * (ds_mhw['det_1deg'] == 1).assign_coords(years=years_coord).astype(float),
+    #     '2deg': det_90th * (ds_mhw['det_2deg'] == 1).assign_coords(years=years_coord).astype(float),
+    #     '3deg': det_90th * (ds_mhw['det_3deg'] == 1).assign_coords(years=years_coord).astype(float),
+    #     '4deg': det_90th * (ds_mhw['det_4deg'] == 1).assign_coords(years=years_coord).astype(float),
+    # }
+    # det_cases = {k: v.assign_coords(days=np.arange(181)) for k, v in det_cases.items()}
 
     # Compute cumulative intensity 
     def compute_CI(case_name):
@@ -224,57 +236,467 @@ if not os.path.exists(cum_intensity_file):
     CI = {name: da for name, da in results}
 
     # To Dataset
-    CI_ds = xr.Dataset(CI)
+    CI_ds = xr.Dataset({name: ds for name, ds in CI.items()})
+    
+    # Check
+    # print(temp_surf_seasonal.isel(years=1999-1980, eta_rho=201, xi_rho=1083).temp_surf.values)
+    # print(ds_mhw.isel(years=1999-1980, eta_rho=201, xi_rho=1083).det_1deg.values)
+    # print(ds_mhw.isel(years=1999-1980, eta_rho=201, xi_rho=1083).duration.values)
+    # print(temp_surf_clim_seasonal.isel(eta_rho=201, xi_rho=1083).clim_sst.values)
+    # print(CI_ds['1deg'].isel(eta_rho=201, xi_rho=1083).values)
+
 
     # Save
     CI_ds.to_netcdf(cum_intensity_file)
 
 else: 
-    CI_ds= xr.open_dataset(cum_intensity_file)
+    CI_ds = xr.open_dataset(cum_intensity_file)
+
+# Check
+print(f"Min CI (1°C): {CI_ds['1deg'].where(CI_ds['1deg'] > 0).min().values}") #0.266326904296875 °C days
+print(f"Max CI (1°C): {CI_ds['1deg'].max().values}") # 397.5961456298828 °C days
+
+print(f"Min CI (3°C): {CI_ds['3deg'].where(CI_ds['3deg'] > 0).min().values}") # 0.36895751953125 °C days
+print(f"Max CI (3°C): {CI_ds['3deg'].max().values}") # 386.8313751220703 °C days
+
+# Find when and where the minimum CI (above 0) occurred
+# ci_1deg  = CI_ds['1deg']
+# ci_masked = ci_1deg.where(ci_1deg > 0)
+
+# min_val = ci_masked.min().values
+# min_loc = ci_masked.where(ci_masked == ci_masked.min(), drop=True)
+
+# print(f"Min CI (1°C): {min_val}")
+# print(f"Year:    {int(min_loc.years.values)}")
+# print(f"eta_rho: {int(min_loc.eta_rho.values)}")
+# print(f"xi_rho:  {int(min_loc.xi_rho.values)}")
+
+
+# compare with the temperature 
 
 # %% ======================== MPAs data ========================
 mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
 south_mask = (mpas_ds['lat_rho'] <= -60)
 mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
-mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#c77c27"),
-            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#e05c8a"),
+mpa_dict = {"Weddell Sea": (mpas_ds.mask_ws, "#5f0f40"),
             "East Antarctic": (mpas_ds.mask_ea, "#C00225"),
-            "Weddell Sea": (mpas_ds.mask_ws, "#5f0f40"),
+            "Ross Sea": (mpas_ds.mask_rs, "#c77c27"),
+            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#e05c8a"),
             "Antarctic Peninsula": (mpas_ds.mask_ap, "#867308")}
 
-mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
-             "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
+mpa_masks = {"WS": ("Weddell Sea", mpas_south60S.mask_ws),
              "EA": ("East Antarctic", mpas_south60S.mask_ea),
-             "WS": ("Weddell Sea", mpas_south60S.mask_ws),
+             "RS": ("Ross Sea", mpas_south60S.mask_rs),
+             "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
              "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
 
 # %% ======================== Time series for CI and change in biomass ========================
 years_coord = np.arange(1980, 2019)
 
-# -- Mean over areas
-# Southern Ocean
+# ----- Mean over areas
+# -- Southern Ocean
+# Biomass gain change
 p_change_SO = np.nanmean(p_actual_change_median_cell.biomass.values.reshape(39, -1), axis=1)
+p_change_SO_absolute = np.abs(p_change_SO)
 CI_SO = {key: np.nanmean(CI_ds[key].values.reshape(39, -1), axis=1)
          for key in CI_ds}
 
-# MPAs
+# Cumulative intensity: only consider MHWs cells (CI > 0) to avoid diluting the signal with many zero cells (non-MHWs)
+# problem: not sam number of cell every year
+# CI_SO = {}
+# for key in CI_ds:
+#     vals = CI_ds[key].values.reshape(39, -1)  # (39, n_cells)
+#     CI_SO[key] = np.array([np.nanmean(np.where(vals[y] > 0, vals[y], np.nan)) for y in range(39)])
+
+# -- MPAs
 p_change_mpas = {}
+p_change_mpas_absolute={}
 mpa_ci = {}
 
 for abbrv, (name, mask) in mpa_masks.items():
     mask_bool = mask.values.astype(bool)   # (231, 1442)
 
-    p_change_mpas[abbrv] = {'name': name,
-        'ts': np.array([np.nanmean(p_actual_change_median_cell.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).biomass.values[y][mask_bool]) for y in range(39)])
-    }
+    # Biomass gain change  
+    p_change_mpas[abbrv] = {'name': name, 'ts': np.array([np.nanmean(p_actual_change_median_cell.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).biomass.values[y][mask_bool]) for y in range(39)])}
+    p_change_mpas_absolute[abbrv] = np.abs(p_change_mpas[abbrv]['ts'])
+
+    # Cumulative intensity
     mpa_ci[abbrv] = {
         'name': name,
         'ts': {key: np.array([np.nanmean(CI_ds[key].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).values[y][mask_bool]) for y in range(39)])
                for key in CI_ds}
     }
 
-# %% ======================== Plot Time series ========================
+    # Cumulative intensity: only consider MHWs cells (CI > 0) to avoid diluting the signal with many zero cells (non-MHWs)
+    # mpa_ci[abbrv] = {'name': name, 'ts': {}}
+    # for key in CI_ds:
+    #     vals_mpa = CI_ds[key].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).values.reshape(39, -1)  # (39, n_cells_mpa)
+    #     mask_flat = mask_bool.reshape(-1)  # flatten MPA mask to match
+    #     ever_mhw_mask_mpa = np.any(vals_mpa > 0, axis=0) & mask_flat  # fixed mask within MPA
+    #     mpa_ci[abbrv]['ts'][key] = np.array([np.nanmean(np.where(ever_mhw_mask_mpa, vals_mpa[y], np.nan)) for y in range(39)])
+
+# %% ======================== Plot TS for all MPAs ========================
+ci_key = '1deg'
+mpa_order = ['WS', 'EA', 'RS', 'SO', 'AP']
+n_mpas = len(mpa_order)
+
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
+
+fig = plt.figure(figsize=(10, 3 * n_mpas))
+
+# Outer grid: one row per MPA, with space between them
+outer_gs = GridSpec(n_mpas, 1, figure=fig, hspace=0.45)
+
+axes = []
+for idx in range(n_mpas):
+    # Inner grid: CI + biomass tightly packed
+    inner_gs = GridSpecFromSubplotSpec(2, 1,
+                                       subplot_spec=outer_gs[idx],
+                                       height_ratios=[1, 1],
+                                       hspace=0.05)
+    axes.append((fig.add_subplot(inner_gs[0]),   # ax_ci
+                 fig.add_subplot(inner_gs[1])))   # ax_bio
+
+for idx, abbrv in enumerate(mpa_order):
+    name, mask  = mpa_masks[abbrv]
+    ax_ci, ax_bio = axes[idx]
+    mpa_color = mpa_dict[name][1]
+
+    # -- CI subplot
+    ci_ts = mpa_ci[abbrv]['ts'][ci_key]
+    ax_ci.bar(years_coord, ci_ts, color=mpa_color, alpha=0.75, width=0.9)
+    ax_ci.set_ylabel('CI [°C · days]', fontsize=9)
+    ax_ci.tick_params(labelsize=8, bottom=False)
+    ax_ci.set_ylim(0, np.nanmax(ci_ts) * 1.2)
+    ax_ci.set_xlim(1980-0.5, 2018+0.5)
+    # Title inside the plot to avoid clipping
+    ax_ci.text(0.01, 0.92, f'{name} ({abbrv})',
+               transform=ax_ci.transAxes, fontsize=10,
+               fontweight='bold', va='top')
+
+    # -- Biomass subplot
+    bio_ts  = p_change_mpas[abbrv]['ts']
+    bio_abs = p_change_mpas_absolute[abbrv]
+
+    bar_colors = ['#94D2BD' if v >= 0 else '#AEA8DE' for v in bio_ts]
+    ax_bio.bar(years_coord, bio_ts, width=0.9, color=bar_colors, alpha=0.75)
+    ax_bio.set_ylabel('Biomass \nChange [\%]', fontsize=9)
+    ax_bio.axhline(0, color='black', lw=0.5, ls=':', alpha=0.6)
+    ax_bio.tick_params(labelsize=8)
+    bio_max = np.nanmax(bio_abs) * 1.2
+    ax_bio.set_ylim(-bio_max, bio_max)
+
+    # -- Year of maximum abs biomass change for each MPA
+    max_idx  = np.argmax(ci_ts)
+    max_year = int(years_coord[max_idx])
+    # print(max_year)
+
+    base_ticks = [1980, 1990, 2000, 2010, 2018]
+    all_ticks  = sorted(set(base_ticks) | {max_year})
+    ax_bio.set_xticks(all_ticks)
+    ax_bio.set_xlim(1980-0.5, 2018+0.5)
+
+    tick_labels = [str(t) for t in all_ticks]
+    tick_colors = ['dimgrey' if t == max_year else 'black' for t in all_ticks]
+
+    ax_bio.set_xticklabels(tick_labels, fontsize=8)
+
+    for label, color in zip(ax_bio.get_xticklabels(), tick_colors):
+        label.set_color(color)
+        if label.get_text() == str(max_year):
+            label.set_fontweight('bold')
+            label.set_rotation(35)
+            # label.set_ha('right')
+        else:
+            label.set_rotation(0)
+
+# -- Single legend below all subplots
+bio_handles = [
+    Patch(facecolor='#94D2BD', alpha=0.75, label='Biomass gain'),
+    Patch(facecolor='#AEA8DE', alpha=0.75, label='Biomass loss'),]
+
+fig.legend(
+    handles=bio_handles,
+    fontsize=8, framealpha=0.85,
+    loc='lower center', ncol=4,
+    bbox_to_anchor=(0.5, 0.01)
+)
+
+fig.suptitle(rf'MHW $\geq$ 90th perc and {ci_key[0]}°C', fontsize=11)
+fig.subplots_adjust(hspace=0.5, left=0.1, right=0.95, top=0.97, bottom=0.06)
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/CI_biomass_{ci_key[0]}deg.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+# %% ======================== Mask Biomass change for each MPAs ========================
+mpa_biomass_cells = {}
+mpa_CI_cell = {}
+
+for abbrv, (name, mask) in mpa_masks.items():
+    # test
+    # abbrv='AP'
+    # name = mpa_masks[abbrv][0]
+    # mask = mpa_masks[abbrv][1]
+
+    # Cropping dataset to match dim
+    mask_bool = mask.astype(bool)
+    biomass_change_cell_reformat = p_actual_change_median_cell.isel(xi_rho=slice(0, mask_bool.xi_rho.size))
+    CI_cell_reformat = CI_ds.isel(xi_rho=slice(0, mask_bool.xi_rho.size))
+
+    # broadcast mask over years automatically
+    biomass_masked = biomass_change_cell_reformat.biomass.where(mask_bool.data)
+    CI_masked = CI_cell_reformat['1deg'].where(mask_bool.data)
+
+    mpa_biomass_cells[abbrv] = biomass_masked
+    mpa_CI_cell[abbrv] = CI_masked
+
+    print(f'{abbrv} done.')
+
+# -- Check
+abbrv = 'AP'
+ci_ap = mpa_CI_cell[abbrv]
+
+# Min (above 0)
+ci_ap_pos = ci_ap.where(ci_ap > 0)
+min_val = float(ci_ap_pos.min().values)
+max_val = float(ci_ap.max().values)
+print(f"Min CI AP (>0): {min_val:.6f}") #0.274467 °C days
+print(f"Max CI AP:      {max_val:.4f}") #317.2082 °C days
+
+# # Where/when min
+# min_idx  = ci_ap_pos.argmin(dim=['years', 'eta_rho', 'xi_rho'])
+# year_idx = int(min_idx['years'].values)
+# eta_idx  = int(min_idx['eta_rho'].values)
+# xi_idx   = int(min_idx['xi_rho'].values)
+# print(f"\n-- Minimum --")
+# print(f"Year:    {int(ci_ap.years[year_idx].values)}")
+# print(f"eta_rho: {eta_idx}, xi_rho: {xi_idx}")
+# print(f"Lon: {mpas_ds.lon_rho.values[eta_idx, xi_idx]:.2f}")
+# print(f"Lat: {mpas_ds.lat_rho.values[eta_idx, xi_idx]:.2f}")
+
+# # Where/when max
+# max_idx  = ci_ap.argmax(dim=['years', 'eta_rho', 'xi_rho'])
+# year_idx = int(max_idx['years'].values)
+# eta_idx  = int(max_idx['eta_rho'].values)
+# xi_idx   = int(max_idx['xi_rho'].values)
+# print(f"\n-- Maximum --")
+# print(f"Year:    {int(ci_ap.years[year_idx].values)}")
+# print(f"eta_rho: {eta_idx}, xi_rho: {xi_idx}")
+# print(f"Lon: {mpas_ds.lon_rho.values[eta_idx, xi_idx]:.2f}")
+# print(f"Lat: {mpas_ds.lat_rho.values[eta_idx, xi_idx]:.2f}")
+
+# %% ======================== Maps of Seasonal Biomass gain change for MPA only ========================
 ci_key = '3deg'
+from skimage import measure
+plot='report'
+
+# Setting
+lw = 1.0 if plot == 'slides' else 0.5
+lw_grid = 0.7 if plot == 'slides' else 0.3
+gridlabel_kwargs = {'size': 10, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+subtitle_kwargs  = {'fontsize': 12, 'fontweight': 'bold'}
+
+# Circular boundary
+theta = np.linspace(0, 2 * np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+
+# Colormap
+cmap_bio = LinearSegmentedColormap.from_list('purple_white_teal',
+               ["#AEA8DE", "white", "#94D2BD"])
+norm_bio = mcolors.TwoSlopeNorm(vmin=-50, vcenter=0, vmax=50)
+
+# --- Figure ---
+fig, axes = plt.subplots(n_mpas, 1, figsize=(4, 10),
+                         subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+
+for idx, abbrv in enumerate(mpa_order):
+    # print(idx, abbrv)
+
+    ax = axes[idx]
+
+    # -- Retrieve years of maximum absolute biomass change for each MPA
+    max_idx  = np.argmax(mpa_ci[abbrv]['ts'][ci_key])
+    max_year = int(years_coord[max_idx])
+
+    data = mpa_biomass_cells[abbrv].isel(years=max_idx)
+
+    # Circular boundary
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Features
+    ax.coastlines(color='black', linewidth=lw, zorder=5)
+    ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    # Plot
+    pcm = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+                        transform=ccrs.PlateCarree(),
+                        cmap=cmap_bio, norm=norm_bio,
+                        rasterized=True, zorder=1)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=lw_grid, zorder=20)
+    gl.xlabels_top  = False
+    gl.ylabels_right = False
+    gl.xlabel_style = gridlabel_kwargs
+    gl.ylabel_style = gridlabel_kwargs
+    gl.xformatter = LongitudeFormatter()
+    gl.yformatter = LatitudeFormatter()
+    
+    # MPA boundaries
+    lon_np   = mpas_ds.lon_rho.values
+    lat_np   = mpas_ds.lat_rho.values
+    mask_2d  = mpa_masks[abbrv][1].values  # boolean mask for this MPA
+
+    contours = measure.find_contours(mask_2d.astype(float), 0.5)
+    for contour in contours:
+        eta_idx = contour[:, 0].astype(int).clip(0, lon_np.shape[0] - 1)
+        xi_idx  = contour[:, 1].astype(int).clip(0, lon_np.shape[1] - 1)
+        ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+                color=mpa_dict[mpa_masks[abbrv][0]][1],
+                linewidth=0.5, transform=ccrs.PlateCarree(), zorder=2)
+        
+    ax.text(-0.2, 1, rf'{max_year} ({abbrv})',
+                transform=ax.transAxes, fontsize=6, verticalalignment='top',
+                bbox=dict(boxstyle='round, pad=0.3', facecolor='white', edgecolor='gray', alpha=0.85))
+
+# Shared colorbar
+cbar = fig.colorbar(pcm, ax=axes, orientation='horizontal', extend='both',
+                    fraction=0.03, pad=0.05, shrink=0.6)
+
+cbar.set_label('Biomass change [\%]', fontsize=9)
+cbar.set_ticks(np.arange(-50, 51, 10))
+cbar.ax.tick_params(labelsize=7)
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/maps_biomass_{ci_key[0]}deg.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+
+
+
+# %% ======================== Maps of CI for MPA only ========================
+from skimage import measure
+plot='report'
+ci_key = '3deg'
+
+# Setting
+lw = 1.0 if plot == 'slides' else 0.5
+lw_grid = 0.7 if plot == 'slides' else 0.3
+gridlabel_kwargs = {'size': 10, 'rotation': 0} if plot == 'slides' else {'size': 6, 'rotation': 0}
+subtitle_kwargs  = {'fontsize': 12, 'fontweight': 'bold'}
+
+# Circular boundary
+theta = np.linspace(0, 2 * np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+
+# Colormap
+cmap_bio = 'viridis'
+# norm_bio = mcolors.TwoSlopeNorm(vmin=-50, vcenter=0, vmax=50)
+
+# --- Figure ---
+fig, axes = plt.subplots(n_mpas, 1, figsize=(4, 10),
+                         subplot_kw={'projection': ccrs.SouthPolarStereo()})
+
+for idx, abbrv in enumerate(mpa_order):
+    ax = axes[idx]
+
+    max_idx  = np.argmax(mpa_ci[abbrv]['ts'][ci_key])
+    max_year = int(years_coord[max_idx])
+    data = mpa_CI_cell[abbrv].isel(years=max_idx)
+
+    # -- Colormaps (1 per MPA)
+    mpa_name  = mpa_masks[abbrv][0]
+    mpa_color = mpa_dict[mpa_name][1]
+    import matplotlib.colors as mcolors
+    rgb = mcolors.to_rgb(mpa_color)
+    pastel = tuple(0.85 + 0.15 * c for c in rgb)   # very close to white
+    dark   = tuple(0.35 * c for c in rgb)            # much darker
+    cmap_mpa = LinearSegmentedColormap.from_list(f'cmap_{abbrv}', [pastel, mpa_color, dark])
+    cmap_mpa.set_under('white')
+
+    data_vals = data.values
+    # vmin = float(np.nanmin(data_vals[data_vals > 0]))
+    # vmax = float(np.nanmax(data_vals))
+    # from matplotlib.colors import LogNorm
+    # norm_mpa = LogNorm(vmin=1, vmax=200)
+
+    import matplotlib.colors as mcolors
+    norm_mpa = mcolors.Normalize(
+    vmin=5,
+    vmax=np.nanmax(data_vals)-50)
+    # norm_mpa = mcolors.Normalize(vmin=0, vmax=200)
+
+    # Circular boundary
+    ax.set_boundary(circle, transform=ax.transAxes)
+
+    # Features
+    ax.coastlines(color='black', linewidth=lw, zorder=5)
+    ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+    ax.set_facecolor('lightgrey')
+
+    mpa_fill = xr.where(mpa_masks[abbrv][1], 1.0, np.nan)
+    ax.pcolormesh(data.lon_rho, data.lat_rho, mpa_fill,
+                  transform=ccrs.PlateCarree(),
+                  cmap=mcolors.ListedColormap(['white']),
+                  vmin=0, vmax=2,
+                  rasterized=True, zorder=1)
+    # Plot
+    pcm = ax.pcolormesh(data.lon_rho, data.lat_rho, data,
+                        transform=ccrs.PlateCarree(),
+                        cmap=cmap_mpa, norm=norm_mpa,
+                        rasterized=True, zorder=1)
+
+    # Gridlines
+    gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=lw_grid, zorder=20)
+    gl.xlabels_top   = False
+    gl.ylabels_right = False
+    gl.xlabel_style  = gridlabel_kwargs
+    gl.ylabel_style  = gridlabel_kwargs
+    gl.xformatter    = LongitudeFormatter()
+    gl.yformatter    = LatitudeFormatter()
+
+    # MPA boundary
+    lon_np  = mpas_ds.lon_rho.values
+    lat_np  = mpas_ds.lat_rho.values
+    mask_2d = mpa_masks[abbrv][1].values
+
+    contours = measure.find_contours(mask_2d.astype(float), 0.5)
+    for contour in contours:
+        eta_idx = contour[:, 0].astype(int).clip(0, lon_np.shape[0] - 1)
+        xi_idx  = contour[:, 1].astype(int).clip(0, lon_np.shape[1] - 1)
+        ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+                color='black', linewidth=0.5,
+                transform=ccrs.PlateCarree(), zorder=2)
+
+    ax.text(-0.2, 1, rf'{max_year} ({abbrv})',
+            transform=ax.transAxes, fontsize=6, verticalalignment='top',
+            bbox=dict(boxstyle='round, pad=0.3', facecolor='white', edgecolor='gray', alpha=0.85))
+
+    # -- Colorbars 
+    cbar = fig.colorbar(pcm, ax=ax, orientation='vertical',
+                        extend='max', fraction=0.046, pad=0.04, shrink=0.8)
+    cbar.set_label('CI [°C days]', fontsize=6)
+    cbar.ax.tick_params(labelsize=6)
+
+    # from matplotlib.ticker import LogLocator, LogFormatter
+    # cbar.ax.yaxis.set_major_locator(LogLocator(base=10, numticks=4))
+    # cbar.ax.yaxis.set_minor_locator(LogLocator(base=10, subs=[]))
+    # cbar.ax.yaxis.set_major_formatter(LogFormatter(base=10, labelOnlyBase=True))
+
+# -- Legend
+from matplotlib.patches import Patch
+no_mhw_patch = Patch(facecolor='white', edgecolor='gray', linewidth=0.5,
+                     label='No MHWs (CI = 0)')
+fig.legend(handles=[no_mhw_patch], loc='lower center',
+           bbox_to_anchor=(0.5, 0.08), fontsize=7, framealpha=0.85)
+
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/maps_CI_{ci_key[0]}deg.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+
+# %% ======================== Plot Time series ========================
+ci_key = '1deg'
 
 fig, ax = plt.subplots(figsize=(10, 4))
 
