@@ -89,6 +89,23 @@ temp_avg_100m_SO_allyrs = xr.open_dataset(os.path.join(path_growth_inputs, 'temp
 temp_stacked = temp_avg_100m_SO_allyrs.stack(time=("year", "days")) #shape (14600, 231, 1442)
 temp_stacked = temp_stacked.transpose("time", "eta_rho", "xi_rho")
 
+# %% ======================== MPAs data ========================
+mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
+south_mask = (mpas_ds['lat_rho'] <= -60)
+mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
+
+mpa_dict = {"Weddell Sea": (mpas_south60S.mask_ws, "#5f0f40"),
+            "East Antarctic": (mpas_south60S.mask_ea, "#C00225"),
+            "Ross Sea": (mpas_south60S.mask_rs, "#c77c27"),
+            "South Orkney Islands southern shelf":  (mpas_south60S.mask_o,  "#e05c8a"),
+            "Antarctic Peninsula": (mpas_south60S.mask_ap, "#867308")}
+
+mpa_masks = {"WS": ("Weddell Sea", mpas_south60S.mask_ws),
+             "EA": ("East Antarctic", mpas_south60S.mask_ea),
+             "RS": ("Ross Sea", mpas_south60S.mask_rs),
+             "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
+             "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
+
 # %% ======================== Functions ========================
 def compute_trend_cell_vectorized(ieta):
     """
@@ -248,6 +265,7 @@ else:
     slopes_dec = trends_100mavg_ds.slope * 10
 
 # %% ======================== Visualisation ========================
+from skimage import measure
 fig = plt.figure(figsize=(6, 6))
 gs = gridspec.GridSpec(nrows=1, ncols=1)
 ax = fig.add_subplot(gs[0], projection=ccrs.SouthPolarStereo())
@@ -258,22 +276,41 @@ verts = np.vstack([np.sin(theta), np.cos(theta)]).T
 circle = mpath.Path(verts * 0.5 + 0.5)
 ax.set_boundary(circle, transform=ax.transAxes)
 
-# Base map features
-ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=2)
-ax.coastlines(color='black', linewidth=0.7, zorder=3)
+# Features
+ax.coastlines(color='black', linewidth=0.5, zorder=5)
+ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+ax.set_facecolor('lightgrey')
 
 # Plot slope
 # im = ax.pcolormesh(trends_100mavg_ds.lon_rho, trends_100mavg_ds.lat_rho, 
 #                    trends_100mavg_ds.slope, cmap='coolwarm', transform=ccrs.PlateCarree(), zorder=1)
 im = ax.pcolormesh(trends_100mavg_ds.lon_rho, trends_100mavg_ds.lat_rho, 
                    trends_100mavg_ds.slope*40, cmap='coolwarm', 
-                   vmin=-1.5, vmax=1.5, transform=ccrs.PlateCarree(), zorder=1)
+                   vmin=-1.5, vmax=1.5, transform=ccrs.PlateCarree(), zorder=1, rasterized=True)
 # im = ax.pcolormesh(trends_100mavg_ds.lon_rho, trends_100mavg_ds.lat_rho, trends_100mavg_ds.r2, cmap='Blues', vmin=0, vmax=0.25, transform=ccrs.PlateCarree(), zorder=1)
 
 # Gridlines
 gl = ax.gridlines(draw_labels=True, linewidth=0.5, color='gray', alpha=0.3, linestyle='--')
 gl.xlabel_style = {'size': 9, 'rotation': 0} 
 gl.ylabel_style = {'size': 9, 'rotation': 0} 
+
+# -- MPA boundaries --
+lon = mpas_ds.lon_rho
+lat = mpas_ds.lat_rho
+for name, (mask, color) in mpa_dict.items():
+    mask_2d = mask.values if hasattr(mask, "values") else mask
+    lon_np  = lon.values
+    lat_np  = lat.values
+
+    contours = measure.find_contours(mask_2d.astype(float), 0.5)
+
+    for contour in contours:
+        eta_idx = contour[:, 0].astype(int)
+        xi_idx  = contour[:, 1].astype(int)
+        ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+                color=color, linewidth=1,
+                transform=ccrs.PlateCarree(), zorder=2)
+
 
 # Colorbar
 cbar = plt.colorbar(im, ax=ax, orientation='vertical', shrink=0.7, pad=0.05, extend='both')
@@ -284,7 +321,8 @@ cbar.set_label("Warming [°C]")
 # plt.title('ROMS 100m-avg temperature\n Slope of Linear trend: mx+b', fontsize=15)
 plt.title('ROMS 100m-avg temperature\n Warming after 40years', fontsize=15)
 # plt.title('ROMS 100m-avg temperature\n Evaluation of Linear trend', fontsize=15)
-plt.show()
+# plt.show()
+fig.savefig('D_Paper_Scripts/figures/sup_mat/temp_trend_100mavg.pdf', dpi=300, bbox_inches='tight')
 
 # %% ======================== Removing trend (no warming signal)========================
 detrended_temp_seasons_file = os.path.join(path_surrogates, f'detrended_signal/temp_detrended_seasonal.nc')
@@ -425,31 +463,6 @@ plt.xlim(1980-1, 2019+1)
 plt.tight_layout()
 plt.show()
 
-# %% ======================== Defining MPAs ========================
-# == Load data
-mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc') #shape (434, 1440)
-
-# == Fix extent 
-# South of 60°S
-south_mask = (mpas_ds['lat_rho'] <= -60)
-mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
-
-# == Settings plot
-mpa_dict = {
-    "Ross Sea": (mpas_ds.mask_rs, "#5F0F40"),
-    "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#FFBA08"),
-    "East Antarctic": (mpas_ds.mask_ea, "#E36414"),
-    "Weddell Sea": (mpas_ds.mask_ws, "#4F772D"),
-    "Antarctic Peninsula": (mpas_ds.mask_ap, "#0A9396")
-}
-
-
-mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
-             "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
-             "EA": ("East Antarctic", mpas_south60S.mask_ea),
-             "WS": ("Weddell Sea", mpas_south60S.mask_ws),
-             "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
-
 
 # %% ======================== Warming and trend in MPAs ========================
 # -- Mask trend in the MPA
@@ -546,39 +559,63 @@ for region in mpa_masks.keys():
 
 # %% ======================== Visualisation ========================
 # ------------------ Daily MPA-mean time series ------------------
-mpa_choice = "RS"
+mpa_choice="RS" #EA, AP, WS, RS, SO
 
 temp_plot = temp_mpa_ds[mpa_choice]
 
-temp_mpa_stacked = temp_plot.avg_temp.stack(time=("years", "days"))
-ntime = temp_mpa_stacked.time.size
-
-y_obs_daily = temp_mpa_stacked.mean(
+# Spatial mean within MPA
+# temp_mpa_stacked = temp_plot.avg_temp.stack(time=("years", "days"))
+temp_mpa_mean_daily = temp_plot.avg_temp.mean(
     dim=("eta_rho", "xi_rho"),
     skipna=True
-).values  # (14600,)
+)
+# ntime = temp_mpa_stacked.time.size
 
-time = np.arange(ntime)
-t_years = time / 365.0
+# Convert daily temperatures to annual means
+temp_mpa_annual = temp_mpa_mean_daily.groupby("years").mean("days")
+y_obs_annual = temp_mpa_annual.values
 
-# ------------------ Fit trend on DAILY data ------------------
-slope_mpa, intercept_mpa = np.polyfit(t_years, y_obs_daily, 1)
-
+# Trend over years
+years = np.arange(len(y_obs_annual))
+slope_mpa, intercept_mpa = np.polyfit(years, y_obs_annual, 1)
 print("MPA mean slope (°C/dec):", slope_mpa * 10)
 
+# fitted trend
+y_fit = slope_mpa * years + intercept_mpa
+
+# y_obs_daily = temp_mpa_stacked.mean(
+#     dim=("eta_rho", "xi_rho"),
+#     skipna=True
+# ).values  # (14600,)
+
+# time = np.arange(ntime)
+# t_years = time / 365.0
+
+# ------------------ Fit trend on DAILY data ------------------
+# slope_mpa, intercept_mpa = np.polyfit(t_years, y_obs_daily, 1)
+
+# print("MPA mean slope (°C/dec):", slope_mpa * 10)
+
 # Reconstruct fitted trend
-y_fit = slope_mpa * t_years + intercept_mpa
+# y_fit = slope_mpa * t_years + intercept_mpa
 
 # ------------------ Plot ------------------
-plt.figure(figsize=(12,5))
-plt.plot(time, y_obs_daily, "-", label="ROMS (MPA mean)", alpha=0.7, color="#0A9396")
-plt.plot(time, y_fit, "r--", label="Linear trend (daily fit)", linewidth=2)
-plt.xlabel("Days", fontsize=16)
-plt.ylabel("Temperature [°C]", fontsize=16)
-plt.title(f"ROMS Temperature – MPA mean ({mpa_choice})", fontsize=18)
-plt.legend(fontsize=14)
+fig = plt.figure(figsize=(5,2))
+ax = fig.add_subplot(1, 1, 1)
+# Title above the plot
+ax.text(0.01, 1.18, f'{mpa_masks[mpa_choice][0]}',
+            transform=ax.transAxes, fontsize=10,
+            fontweight='bold', va='top',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=mpa_dict[mpa_masks[mpa_choice][0]][1], linewidth=0.8))
+plt.plot(1980+t_years, y_obs_daily, "-", label="", alpha=0.7, color= mpa_dict[mpa_masks[mpa_choice][0]][1], linewidth=1)
+plt.plot(1980+t_years, y_fit, "--", color='red',label=f"Linear trend (slope: {slope_mpa * 10:.2f}°C/dec)", linewidth=1)
+plt.xlabel("Time", fontsize=10)
+plt.ylabel("Temperature [°C]", fontsize=10)
+# plt.title(f"ROMS Temperature – MPA mean ({mpa_choice})", fontsize=14)
+plt.legend(fontsize=10)
 plt.tight_layout()
-plt.show()
+# plt.show()
+fig.savefig(f'D_Paper_Scripts/figures/sup_mat/temp_trend_MPA_{mpa_choice}.pdf', dpi=300, bbox_inches='tight')
 
 
 # %%
