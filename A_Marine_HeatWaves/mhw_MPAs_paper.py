@@ -65,6 +65,7 @@ print("Working directory set to:", os.getcwd())
 
 # Directories
 path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
+path_fixed_baseline = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs'
 path_duration = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/mhw_durations'
 path_det = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth'
 path_det_summer = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/det_depth/austral_summer'
@@ -328,8 +329,238 @@ plt.tight_layout()
 plt.show()
 # plt.savefig(os.path.join(os.getcwd(), f'A_Marine_HeatWaves/figures_outputs/MPAs/mhw_duration_1_3deg.pdf'), dpi=200, format='pdf', bbox_inches='tight')
 
+# %% ===================================================
+#           Chla and MHWs duration relation
+# ======================================================
+# %% ======================== Load chla data ========================
+mhw_choice = '1deg'
+mhw_choice_duration = duration_1deg
 
-# # %% ======================== Mask ========================
+ds_ci = xr.open_dataset(os.path.join(path_fixed_baseline, 'mhw_cumulative_intensity.nc'))[mhw_choice].mean(dim=['years']).isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+ds_chla = xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_detrended_seasonal.nc')) 
+ds_chla = ds_chla.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))#shape (39, 181, 231, 1440)
+ds_chla['years'] = ds_chla['years']-1980
+
+# Select only the cells that have experienced MHWs 
+ds_chla_mhw = ds_chla.chla.where(mhw_choice_duration.values>0)
+ds_chla_mhw_mean = ds_chla_mhw.mean(dim=['years', 'days']) #shape (231, 1440)
+
+# %% ======================== Create diamond-shaped bivariate legend ========================
+# Classify a 2D field into tertiles (0=low, 1=mid, 2=high)
+def tertile_class(da):
+    vals = da.values
+    valid = vals[~np.isnan(vals)]
+    q1, q2 = np.nanpercentile(valid, [33.33, 66.67])
+    cls = np.full(vals.shape, np.nan)
+    cls[vals <= q1] = 0
+    cls[(vals > q1) & (vals <= q2)] = 1
+    cls[vals > q2] = 2
+    return cls
+
+def fixed_class(da, bins):
+    vals = da.values
+    cls = np.full(vals.shape, np.nan)
+
+    for i in range(len(bins)-1):
+        mask = (vals >= bins[i]) & (vals < bins[i+1])
+        cls[mask] = i
+
+    # last class
+    cls[vals >= bins[-1]] = len(bins)-1
+
+    return cls
+
+# Chl-a thresholds (mg m-3)
+chla_bins = [0, 0.5, 1]
+
+# MHW cumulative intensity thresholds (degree-days)
+mhw_bins = [0, 2, 10]
+
+chla_class = fixed_class(ds_chla_mhw_mean, chla_bins)
+mhw_class  = fixed_class(ds_ci, mhw_bins)
+
+bivar_index = np.full(mhw_class.shape, np.nan)
+valid_mask = ~np.isnan(mhw_class) & ~np.isnan(chla_class)
+bivar_index[valid_mask] = (chla_class[valid_mask] * 3 + mhw_class[valid_mask])
+
+# %% ======================== Plot bivariate map ========================
+from matplotlib.colors import ListedColormap
+from matplotlib.transforms import Affine2D
+import matplotlib.patches as mpatches
+
+# Bivariate color palette (3x3, pink/teal ramp)
+# palette = [
+#     '#ffffffff', '#f2aaadff', '#e27177ff',   # chla_class=0 (low):  mhw 0,1,2
+#     '#bde2fcff', '#ac94aaff', '#9d5f74ff',   # chla_class=1 (mid):  mhw 0,1,2
+#     '#7ca1e5ff', '#726a9bff', '#684667ff',   # chla_class=2 (high): mhw 0,1,2
+# ]
+palette = [
+    '#ffffffff', '#f2e08aff', '#d9b23fff',   # chla_class=0 (low):  mhw 0,1,2
+    '#bde2fcff', '#a8a271ff', '#7c8a3aff',   # chla_class=1 (mid):  mhw 0,1,2
+    '#7ca1e5ff', '#7c9668ff', '#4f6b32ff',   # chla_class=2 (high): mhw 0,1,2
+]
+cmap = ListedColormap(palette)
+
+fig = plt.figure(figsize=(6.3228348611/1.5,6.3228348611/2))
+ax = plt.subplot(projection=ccrs.SouthPolarStereo())
+
+theta = np.linspace(0, 2 * np.pi, 200)
+verts = np.vstack([np.sin(theta), np.cos(theta)]).T
+circle = mpath.Path(verts * 0.5 + 0.5)
+ax.set_boundary(circle, transform=ax.transAxes)
+ax.set_extent([-180, 180, -90, -60], crs=ccrs.PlateCarree())
+ax.coastlines(color='black', linewidth=0.4, zorder=5)
+ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+ax.set_facecolor('lightgrey')
+
+ax.pcolormesh(ds_chla.lon_rho, ds_chla.lat_rho, bivar_index,
+    transform=ccrs.PlateCarree(), cmap=cmap, shading='auto', zorder=1, rasterized=True)
+# ax.set_title("MHW CI and Chl-a during MHWs (above1°C and  90th perc)", fontsize=13)
+
+
+# MPA boundaries
+lon = mpas_ds.lon_rho
+lat = mpas_ds.lat_rho
+for name, (mask, color) in mpa_dict.items():
+    mask_2d = mask.values if hasattr(mask, "values") else mask
+    lon_np  = lon.values
+    lat_np  = lat.values
+
+    contours = measure.find_contours(mask_2d.astype(float), 0.5)
+    for contour in contours:
+        eta_idx = contour[:, 0].astype(int)
+        xi_idx  = contour[:, 1].astype(int)
+        ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+                color=color, linewidth=1,
+                transform=ccrs.PlateCarree(), zorder=2)
+# Gridlines
+lw_grid = 0.7
+gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5, linestyle='--', linewidth=lw_grid, zorder=7)
+gl.xlabels_top = False
+gl.ylabels_right = False
+gridlabel_kwargs = {'size': 7, 'rotation': 0} 
+gl.xlabel_style = gridlabel_kwargs
+gl.ylabel_style = gridlabel_kwargs
+gl.xformatter = LongitudeFormatter()
+gl.yformatter = LatitudeFormatter()
+    
+# -- Diamond-shaped bivariate legend 
+legend_ax = fig.add_axes([-0.001, -0.001, 0.28, 0.28])
+legend_ax.set_xlim(-1.4, 1.4)
+legend_ax.set_ylim(-1.4, 1.4)
+legend_ax.set_aspect('equal')
+
+size = 0.9
+
+for chla_c in range(3):
+    for mhw_c in range(3):
+        color = palette[chla_c * 3 + mhw_c]
+        x = (mhw_c - 1) * size
+        y = (chla_c - 1) * size
+        square = mpatches.Rectangle(
+            (x-size/2, y-size/2),
+            size,
+            size,
+            facecolor=color,
+            edgecolor=None,
+            linewidth=0.5
+        )
+
+        legend_ax.add_patch(square)
+
+# Remove axes background
+legend_ax.patch.set_alpha(0)
+legend_ax.set_xticks([])
+legend_ax.set_yticks([])
+
+# X labels (MHW CI)
+x_labels = [rf"$<$ {mhw_bins[1]}", f"{mhw_bins[1]}–{mhw_bins[2]}", rf"$>$ {mhw_bins[2]}"]
+for i, label in enumerate(x_labels):
+    x = (i - 1) * size
+    legend_ax.text(x, -1.55 * size, label, ha='center', va='top', fontsize=7)
+
+
+# Y labels (Chla)
+y_labels = [rf"$<$ {chla_bins[1]}", f"{chla_bins[1]}–{chla_bins[2]}", rf"$>$ {chla_bins[2]}"]
+for i, label in enumerate(y_labels):
+    y = (i - 1) * size
+    legend_ax.text(-1.55 * size, y, label, ha='right', va='center', fontsize=7)
+
+
+# Axis titles
+legend_ax.text(0, -2.5 * size, r"MHW CI (°C $\cdot$ days)", ha='center', fontsize=8)
+legend_ax.text(-3 * size, 0, "Chl-a (mg m$^{-3}$)", ha='center', va='center', rotation=90, fontsize=8)
+
+# Remove frame
+for spine in legend_ax.spines.values():
+    spine.set_visible(False)
+
+plt.tight_layout()
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/fig4_relation_mhws_chla.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+
+# %% ============== Scatter plot for each MPA ========================
+fig, axes = plt.subplots(5,1, figsize=(3, 7), sharex=False, sharey=False)
+mpa_colors = {
+    "RS": "#c77c27",
+    "SO": "#e05c8a",
+    "EA": "#C00225",
+    "WS": "#5f0f40",
+    "AP": "#867308"
+}
+
+
+for ax, (code, (name, mask)) in zip(axes, mpa_masks.items()):
+
+    # MPA data
+    ci_mpa = ds_ci.where(mask)
+    chla_mpa = ds_chla_mhw_mean.where(mask)
+    x = ci_mpa.values.ravel()
+    y = chla_mpa.values.ravel()
+
+    # Remove missing values
+    valid = (~np.isnan(x)) & (~np.isnan(y))
+    x = x[valid]
+    y = y[valid]
+
+    ax.scatter(x, y, s=8, alpha=0.5, color=mpa_colors[code], edgecolor='none', rasterized=True)
+    # ax.set_title(name, fontsize=10)
+    # ax.set_title(name, fontsize=10, loc='left', bbox=dict(facecolor='none', 
+    #                                           edgecolor=mpa_colors[code], 
+    #                                           boxstyle='round,pad=0.3', alpha=0.7))    
+    # ax.grid(alpha=0.3)
+
+    # Adding Spearman correlation coeff -- "When MHW intensity increases, does Chl-a generally increase or decrease?" +1 0 -1
+    # from scipy.stats import spearmanr
+    # rho, p = spearmanr(x, y, nan_policy='omit')
+    # ax.text(0.05, 0.95, f"$\\rho$={rho:.2f}\np={p:.2g}", transform=ax.transAxes, va='top', fontsize=9)
+
+    # Adding LOWESS -- shape of the relationship
+    # from statsmodels.nonparametric.smoothers_lowess import lowess
+    # order = np.argsort(x)
+    # smooth = lowess(y[order], x[order], frac=0.3)
+    # ax.plot(smooth[:,0], smooth[:,1], color='black', lw=2)
+
+    # Add median point
+    ax.scatter(np.median(x), np.median(y), s=40, color='black', marker='x', zorder=5)
+    ax.set_ylim(0,np.round(y.max())+1)
+    ax.set_xlim(0,np.round(x.max())+1)
+
+# Common labels
+# axes[0].set_ylabel("Mean Chl-a during MHWs (mg m$^{-3}$)", fontsize=10)
+
+for ax in axes:
+    ax.set_xlabel(r"MHW CI (°C $\cdot$ days)", fontsize=9)
+    ax.set_ylabel("Chl-a during \nMHWs(mg m$^{-3}$)", fontsize=9)
+
+
+plt.tight_layout()
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/fig4_scatter_mhws_chla.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+
+# %% ======================== Mask ========================
 # # Note: all the MHW events have a duration > 5days.
 # mhw_events_surface = xr.open_dataset(os.path.join(path_combined_thesh, 'duration_AND_thresh_5mSEASON.nc')) #shape (39, 181, 231, 1442)
 # mhw_events_surface = mhw_events_surface.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))  #shape (39, 181, 231, 1440)
