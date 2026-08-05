@@ -6,7 +6,7 @@ Attribution of MHW to change in biomass
 @author: Marguerite Larriere (mlarriere)
 """
 
-# %% ======================== PACKAGES========================
+# %% ======================== PACKAGES ========================
 import os
 import xarray as xr
 import numpy as np
@@ -87,14 +87,24 @@ mpas_ds =xr.open_dataset('/home/jwongmeng/work/ROMS/scripts/coords/MPA_mask.nc')
 south_mask = (mpas_ds['lat_rho'] <= -60)
 mpas_south60S =  mpas_ds.where(south_mask, drop=True) #shape (231, 1440)
 
+mpa_dict = {"Ross Sea": (mpas_ds.mask_rs, "#c77c27"),
+            "South Orkney Islands southern shelf":  (mpas_ds.mask_o,  "#e05c8a"),
+            "East Antarctic": (mpas_ds.mask_ea, "#C00225"),
+            "Weddell Sea": (mpas_ds.mask_ws, "#5f0f40"),
+            "Antarctic Peninsula": (mpas_ds.mask_ap, "#867308")}
+
 mpa_masks = {"RS": ("Ross Sea", mpas_south60S.mask_rs),
              "SO": ("South Orkney Islands southern shelf", mpas_south60S.mask_o),
              "EA": ("East Antarctic", mpas_south60S.mask_ea),
              "WS": ("Weddell Sea", mpas_south60S.mask_ws),
              "AP": ("Antarctic Peninsula", mpas_south60S.mask_ap),}
+
 mpa_colors = {
-    'RS': '#c77c27', 'SO': '#e05c8a',
-    'EA': '#C00225', 'WS': '#5f0f40', 'AP': '#867308',
+    "RS": "#c77c27",
+    "SO": "#e05c8a",
+    "EA": "#C00225",
+    "WS": "#5f0f40",
+    "AP": "#867308"
 }
 # --- Calculate MPAs area and volume
 # Load data
@@ -108,6 +118,7 @@ volume_roms_100m = volume_roms['volume'].isel(z_rho=slice(0, 14)).sum(dim='z_rho
 # Mask latitudes south of 60°S (lat_rho <= -60)
 area_60S_SO = area_SO_surf.where(area_roms['lat_rho'] <= -60, drop=True)
 volume_60S_SO_100m = volume_roms_100m.where(volume_roms['lat_rho'] <= -60, drop=True)
+area_SO_np = area_60S_SO.values #in km2 -- shape (231, 1440)
 
 area_mpa = {}
 volume_mpa = {}
@@ -122,23 +133,62 @@ for abbrv, (name, mask) in mpa_masks.items():
 surrogate_names = {"clim": "Climatology", "actual": "Actual Conditions", "climtrend":"Climatology wih trend", "nowarming": "No Warming"}
 mpa_abbrs = list(mpa_masks.keys())
 
-files_interp = [os.path.join(path_biomass_ts_MPAs, f"{sur}_biomass_{abbrv}.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
+files_interp = [os.path.join(path_biomass_ts_MPAs, f"{sur}_{abbrv}_biomass.nc") for sur in surrogate_names.keys() for abbrv in mpa_masks.keys()]
 biomass_mpas = {}
 
 for abbrv, (mpa_name, _) in mpa_masks.items():
     biomass_mpas[abbrv] = {}
 
     for surrog in surrogate_names.keys():
-        fname = os.path.join(path_biomass_ts_MPAs, f"{surrog}_biomass_{abbrv}.nc")
+        fname = os.path.join(path_biomass_ts_MPAs, f"{surrog}_{abbrv}_biomass.nc")
         biomass_mpas[abbrv][surrog] = xr.open_dataset(fname)
 
-# %% ================================================
-#                       Attributions
-# ===================================================
+# %% ======================== Plot surrogates for 1 MPA (to check) ========================
+# # Last update before holidays: very long to compute! Need to save the spatial biomass average per MPAs!
+# abbrv = 'WS'
+# surrog_colors = {
+#     'clim':      '#2166ac',
+#     'actual':    '#d6604d',
+#     'climtrend': '#4dac26',
+#     'nowarming': '#984ea3',
+# }
+
+# years_coord = np.arange(1980, 2019)
+
+# fig, ax = plt.subplots(1, 1, figsize=(12, 4))
+
+# for surrog, label in surrogate_names.items():
+#     da = biomass_mpas[abbrv][surrog]['biomass'] 
+#     da_yr = da.mean(dim=('days', 'eta_rho', 'xi_rho'))
+#     boot_mean = da_yr.mean(dim='bootstraps') 
+#     boot_std  = da_yr.std(dim='bootstraps') 
+
+#     ax.plot(years_coord, boot_mean.values, color=surrog_colors[surrog], lw=1.6, label=label)
+#     ax.fill_between(years_coord,
+#                     (boot_mean - boot_std).values,
+#                     (boot_mean + boot_std).values,
+#                     color=surrog_colors[surrog], alpha=0.15)
+
+# ax.set_title(f'{abbrv} - Surrogates Biomass', fontsize=14, fontweight='bold',
+#              color=mpa_colors[abbrv], loc='left', pad=4)
+# ax.set_ylabel('Biomass [mg/m³]', fontsize=11, color='dimgray')
+# ax.set_xlabel('Years', fontsize=12)
+# ax.tick_params(axis='y', labelsize=10)
+# ax.spines[['top', 'right']].set_visible(False)
+# ax.axhline(0, color='gray', lw=0.5, ls='--', alpha=0.4)
+# ax.set_xlim(1980, 2018)
+# ax.legend(fontsize=10, ncol=4, framealpha=0.6, loc='upper right')
+# plt.tight_layout()
+# plt.show()
+
+
+# %% =====================================================================================
+#           Attribution of seasonal biomass gain to MHWs and long term T°C trend
+#    =====================================================================================
 path_attribution = os.path.join(path_surrogates, 'attributions')
 path_attribution_mpas = os.path.join(path_attribution, 'mpas')
 
-# %% ===== Step1. Seasonal gains for the different surrogates
+# %% ======================== Step1. Seasonal gains for the different surrogates ========================
 def compute_and_save_seasonal_gain(abbrv):
     """Compute seasonal gain for all surrogates of one MPA and save to netCDF."""
     mpa_name, _ = mpa_masks[abbrv]
@@ -161,22 +211,22 @@ def compute_and_save_seasonal_gain(abbrv):
 # Run in parallel
 abbrvs = list(mpa_masks.keys())
 results = process_map(compute_and_save_seasonal_gain, abbrvs, max_workers=5, desc="Seasonal gain")
-seasonal_gain_mpa = dict(results)
+seasonal_gain_mpa = dict(results) #seasonal_gain_mpa['RS']['clim']  shape (39, 10, 231, 1440)
 
-# %% ===== Step2. Percentage of change relative to climatology per grid cell
-def compute_p_change(abbrv):
-    """Percentage change relative to climatology per grid cell."""
-    fpath = os.path.join(path_attribution_mpas, f'p_change_{abbrv}.nc')
+# %% ======================== Step2. Change relative to climatology per grid cell (fraction) ========================
+def compute_biomass_change(abbrv):
+    """Fraction of change relative to climatology per grid cell."""
+    fpath = os.path.join(path_attribution_mpas, f'bio_change_{abbrv}.nc')
 
     if not os.path.exists(fpath):
-        p_change = {}
+        bio_change = {}
         for surrog in [s for s in surrogate_names if s != "clim"]:
-            p_change[surrog] = (
+            bio_change[surrog] = (
                 (seasonal_gain_mpa[abbrv][surrog] - seasonal_gain_mpa[abbrv]['clim'])
-                / seasonal_gain_mpa[abbrv]['clim'] * 100
+                / seasonal_gain_mpa[abbrv]['clim']
             )  # shape (39, 10, eta_rho, xi_rho)
 
-        xr.Dataset(p_change).to_netcdf(fpath)
+        xr.Dataset(bio_change).to_netcdf(fpath)
         print(f"[{abbrv}] Computed and saved.")
 
     ds = xr.open_dataset(fpath)
@@ -187,97 +237,447 @@ def compute_p_change(abbrv):
 
 # Run in parallel
 abbrvs = list(mpa_masks.keys())
-results = process_map(compute_p_change, abbrvs, max_workers=5, desc="% of change")
-p_change_interp_mpa = dict(results)
+results = process_map(compute_biomass_change, abbrvs, max_workers=5, desc="Fraction of change")
+bio_change_interp_mpa = dict(results)
 
-# %% ===== Step3. Impact of the warming and MHWs per grid cell and spatial average (Step4)
-def compute_impact(abbrv):
-    """Compute MHW and warming impacts for one MPA."""
-    fpath = os.path.join(path_attribution_mpas, f'impact_{abbrv}.nc')
+# %% ======================== Step3. Contributions of warming and MHWs per grid cell and spatial average (Step4)
+def compute_contribution(abbrv):
+    """Compute MHW and warming contributions for one MPA."""
+    fpath = os.path.join(path_attribution_mpas, f'attrib_{abbrv}.nc')
 
     if not os.path.exists(fpath):
-        impact_mhws    = p_change_interp_mpa[abbrv]['actual'] - p_change_interp_mpa[abbrv]['climtrend']  # shape (39, 10, eta_rho, xi_rho)
-        impact_warming = p_change_interp_mpa[abbrv]['actual'] - p_change_interp_mpa[abbrv]['nowarming']  # shape (39, 10, eta_rho, xi_rho)
+        # abbrv='WS'
+        contrib_mhws = bio_change_interp_mpa[abbrv]['actual'] - bio_change_interp_mpa[abbrv]['climtrend']  # shape (39, 10, 231, 1440)
+        contrib_warming = bio_change_interp_mpa[abbrv]['actual'] - bio_change_interp_mpa[abbrv]['nowarming']  # shape (39, 10, 231, 1440)
+        residual = bio_change_interp_mpa[abbrv]['actual'] - contrib_mhws - contrib_warming #residuals are mainly the chla 'contribution' according to the Atkinson model
 
-        xr.Dataset({'mhws': impact_mhws, 'warming': impact_warming}).to_netcdf(fpath)
+        # Quick check 
+        # check_sum = contrib_mhws.isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200) + contrib_warming.isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200) + residual.isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200)
+        # print((check_sum-p_change_interp_mpa[abbrv]['actual'].isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200)).values) #should be close to 0
+
+        ds_out = xr.Dataset(data_vars={'mhws': (contrib_mhws.dims, contrib_mhws.data,
+                                                 {'description': 'Contribution of MHWs [%] to the change in seasonal krill biomass.'}),
+                                        'warming': (contrib_warming.dims, contrib_warming.data,
+                                                    {'description': 'Contribution of long-term warming [%] to the change in seasonal krill biomass.'}),
+                                        'residual': (residual.dims, residual.data,
+                                                     {'description': 'Residual term computed as reference - mhws - warming. Represents Chla contributions and an unexplained part.'})
+                                        },
+                            )
+        ds_out.to_netcdf(fpath)
+        # xr.Dataset({'mhws': contrib_mhws, 'warming': contrib_warming, 'residual': residual}).to_netcdf(fpath)
         print(f"[{abbrv}] Computed and saved.")
 
     ds = xr.open_dataset(fpath)
-    impact_mhws    = ds['mhws']
-    impact_warming = ds['warming']
+    contrib_mhws = ds['mhws']
+    contrib_warming = ds['warming']
+    residual = ds['residual']
     ds.close()
     print(f"[{abbrv}] Loaded.")
 
     return abbrv, {
-        'mhws':         impact_mhws,
-        'warming':      impact_warming,
-        'mhws_mean':    impact_mhws.mean(dim=('bootstraps', 'eta_rho', 'xi_rho')),    # shape (39,)
-        'warming_mean': impact_warming.mean(dim=('bootstraps', 'eta_rho', 'xi_rho')), # shape (39,)
-    }
+        'mhws':         contrib_mhws,
+        'warming':      contrib_warming,
+        'residual':     residual
+        }
 
 # Run in parallel
 abbrvs = list(mpa_masks.keys())
-results = process_map(compute_impact, abbrvs, max_workers=5, desc="Impact")
+results = process_map(compute_contribution, abbrvs, max_workers=5, desc="Attributions")
 results = dict(results)
 
-# Reformat
-impact_mhws_mpa = {abbrv: results[abbrv]['mhws'] for abbrv in abbrvs}
-impact_warming_mpa = {abbrv: results[abbrv]['warming'] for abbrv in abbrvs}
-impact_mhws_mpa_mean = {abbrv: results[abbrv]['mhws_mean'] for abbrv in abbrvs}
-impact_warming_mpa_mean = {abbrv: results[abbrv]['warming_mean'] for abbrv in abbrvs}
+attrib_ds_mpa = {}
+for abbrv in mpa_masks:
+    attrib_ds_mpa[abbrv] = xr.Dataset(
+        {"attrib_mhws": results[abbrv]["mhws"],
+         "attrib_warming": results[abbrv]["warming"],
+         "residual": results[abbrv]["residual"],
+        }
+    )
 
-# %% ======================== Plot surrogates for 1 MPAs (check) ========================
-abbrv = 'WS'
-surrog_colors = {
-    'clim':      '#2166ac',
-    'actual':    '#d6604d',
-    'climtrend': '#4dac26',
-    'nowarming': '#984ea3',
-}
-years_coord = np.arange(1980, 2019)
+# %% ======================== Mask the attributions -- MHW cells only ========================
+def compute_and_save_mpa(abbrv):
+    # abbrv='RS'
+    print(f'     {mpa_masks[abbrv][0]}')
+    
+    # --- MHWs mask
+    mhw = xr.open_dataset(os.path.join(path_combined_thesh, "mpas/interpolated", f"duration_AND_thresh_{abbrv}.nc"))
+    duration_mask = mhw["duration"] > 0
+    det = {i: mhw[f"det_{i}deg"] == 1 for i in [1, 2, 3, 4]}
+    intensity_masks = {
+        "90perc": duration_mask.any("days"),
+        "1deg": (duration_mask & det[1]).any("days"),
+        "2deg": (duration_mask & det[2]).any("days"),
+        "3deg": (duration_mask & det[3]).any("days"),
+        "4deg": (duration_mask & det[4]).any("days"),
+    }
 
-fig, ax = plt.subplots(1, 1, figsize=(12, 4))
+    # Select the attributions computed before for the selected MPA
+    attrib_ds = attrib_ds_mpa[abbrv]
+    bio = bio_change_interp_mpa[abbrv]["actual"]
+    coords = {
+        "lon_rho": mhw["lon_rho"],
+        "lat_rho": mhw["lat_rho"],
+        "years": attrib_ds['attrib_mhws'].years,
+        "bootstraps": attrib_ds['attrib_mhws'].bootstraps,
+        "eta_rho": attrib_ds['attrib_mhws'].eta_rho,
+        "xi_rho": attrib_ds['attrib_mhws'].xi_rho,
+    }
 
-for surrog, label in surrogate_names.items():
-    da = biomass_mpas[abbrv][surrog]['biomass']         # (years, bootstraps, days, eta, xi)
-    yearly = da.mean(dim=('days', 'eta_rho', 'xi_rho'))     # (years, bootstraps)
-    boot_mean = yearly.mean(dim='bootstraps')                  # (years,)
-    boot_std  = yearly.std(dim='bootstraps')                   # (years,)
+    # --- Attribution datasets
+    def build(varname, desc):
+        data_vars = {}
 
-    ax.plot(years_coord, boot_mean.values, color=surrog_colors[surrog], lw=1.6, label=label)
-    ax.fill_between(years_coord,
-                    (boot_mean - boot_std).values,
-                    (boot_mean + boot_std).values,
-                    color=surrog_colors[surrog], alpha=0.15)
+        for suffix, mask in intensity_masks.items():
+            data_vars[f'{varname}_{suffix}'] = attrib_ds[varname].where(mask)
 
-ax.set_title(f'{abbrv} - Surrogates Biomass', fontsize=14, fontweight='bold',
-             color=mpa_colors[abbrv], loc='left', pad=4)
-ax.set_ylabel('Biomass [mg/m³]', fontsize=11, color='dimgray')
-ax.set_xlabel('Years', fontsize=12)
-ax.tick_params(axis='y', labelsize=10)
-ax.spines[['top', 'right']].set_visible(False)
-ax.axhline(0, color='gray', lw=0.5, ls='--', alpha=0.4)
-ax.set_xlim(1980, 2018)
-ax.legend(fontsize=10, ncol=4, framealpha=0.6, loc='upper right')
-plt.tight_layout()
-plt.show()
+        return xr.Dataset(data_vars=data_vars,
+                          coords=coords,
+                          attrs={"mpa": mpa_masks[abbrv][0],   
+                                 "description": f"{desc} change in biomass -- cells selected have experienced MHWs of ideg intensity"}
+                         )
+
+    ds_mhws = build("attrib_mhws", 'Contribution of MHWs to ')
+    ds_warming = build("attrib_warming", 'Contribution of long term thermal trend to')
+    ds_residual = build("residual", 'Residuals of attributions to')
+
+    # --- Biomass dataset
+    ds_bio = xr.Dataset(
+        data_vars={f'biomass_{suffix}': bio.where(mask) for suffix, mask in intensity_masks.items()},
+        coords=coords,
+        attrs={
+            "mpa": mpa_masks[abbrv][0],
+            "description": "Seasonal biomass change relative to climatology, masked by MHW intensity",
+        },
+    )
+
+    mhw.close()
+
+    return ds_mhws, ds_warming, ds_residual, ds_bio
+
+# Loop over the MPAs
+for abbrv in mpa_masks:
+    f_mhws = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_mhws.nc")
+    f_warm = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_warming.nc")
+    f_res  = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_residual.nc")
+    f_bio  = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_biomass.nc")
+
+    if not all(map(os.path.exists, [f_mhws, f_warm, f_res, f_bio])):
+        print('Masking in process....')
+        ds_mhws, ds_warm, ds_res, ds_bio = compute_and_save_mpa(abbrv)
+        ds_mhws.to_netcdf(f_mhws)
+        ds_warm.to_netcdf(f_warm)
+        ds_res.to_netcdf(f_res)
+        ds_bio.to_netcdf(f_bio)
+    
+# %% ======================== Statistics: median and std dev and sptaial avf ========================
+attrib_stats_mpa = {}
+thresholds = ['1deg', '3deg']
+
+for abbrv, (name, mask) in mpa_masks.items():
+    # abbrv='RS'
+    print(abbrv)
+
+    # Defining the MPA spatial mask
+    name=mpa_masks[abbrv][0]
+    mask=mpa_masks[abbrv][1]
+
+    mask_bool = mask.values.astype(bool) # (231, 1442)
+    # area_60S_SO.where(mask_bool).plot()
+    total_mpa_area = np.nansum(area_SO_np[mask_bool])
+
+    # ---------------- Load data ----------------
+    f_mhws = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_mhws.nc")
+    f_warm = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_warming.nc")
+    f_res  = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_residual.nc")
+    f_bio  = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_biomass.nc")
+
+    ds_mhws = xr.open_dataset(f_mhws)
+    ds_warm = xr.open_dataset(f_warm)
+    ds_res  = xr.open_dataset(f_res)
+    ds_bio  = xr.open_dataset(f_bio)
+
+    # ---------------- Statistics ----------------
+    attrib_stats_mpa[abbrv] = {'ts': {}}
+
+    for key in thresholds:
+        print(key)
+        # print(f'Sum contribution MHWs in yr 0: {np.nansum(ds_mhws[f"attrib_mhws_{key}"].isel(bootstraps=0, years=0).sum())}')
+        # print(f'Sum contribution MHWs in yr 1: {np.nansum(ds_mhws[f"attrib_mhws_{key}"].isel(bootstraps=0, years=1).sum())}')
+        # print(f'Sum contribution MHWs in yr 2: {np.nansum(ds_mhws[f"attrib_mhws_{key}"].isel(bootstraps=0, years=2).sum())}')
+        # print(f'Sum contribution MHWs in yr 20: {np.nansum(ds_mhws[f"attrib_mhws_{key}"].isel(bootstraps=0, years=20).sum())}')
+        mhw_var  = ds_mhws[f'attrib_mhws_{key}'].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).values
+        warm_var = ds_warm[f'attrib_warming_{key}'].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).values
+        res_var  = ds_res[f'residual_{key}'].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).values
+        bio_var = ds_bio[f'biomass_{key}'].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)).values
+
+        n_years, n_boot = mhw_var.shape[0], mhw_var.shape[1]
+
+        mhw_ts  = np.full((n_years, n_boot), np.nan)
+        warm_ts = np.full((n_years, n_boot), np.nan)
+        res_ts  = np.full((n_years, n_boot), np.nan)
+        bio_ts  = np.full((n_years, n_boot), np.nan)
+
+        # Fixed denominator for spatial avg: area of cells EVER affected by MHWs of this threshold, across all years (i.e. MHWs footprint)
+        ever_affected = mask_bool & np.isfinite(area_SO_np) & np.isfinite(mhw_var[:, 0]).any(axis=0)  # (231, 1440)
+        print(f'Number of cells ever affected: {np.sum(ever_affected)}')
+        fixed_area = np.nansum(area_SO_np[ever_affected])
+        print(f'Footprint area: {fixed_area}km2')
+
+        for y in range(n_years):
+            # y = 20
+            mhw_yr  = mhw_var[y]   # shape (10, 231, 1440)
+            warm_yr = warm_var[y]
+            res_yr  = res_var[y]
+            bio_yr = bio_var[y]
+
+            # Select cells inside MPA that have been affected by MHWs THIS year
+            valid_affected_cells_yr = ever_affected & np.isfinite(mhw_yr[0]) #shape (231, 1440) -- True/False
+            # if y == 0 or y == 1 or y == 2 or y == 20: 
+                # print(f'Number of cells affected in year {y}: {np.sum(valid_affected_cells_yr)}')
+                # print(f'Sum contribution MHWs in yr {y}: {np.nansum(mhw_yr[:, valid_affected_cells_yr], axis=1)}')
+
+            if np.any(valid_affected_cells_yr) and (total_mpa_area > 0):
+                weights = area_SO_np[valid_affected_cells_yr] 
+                # Area weighted
+                mhw_ts[y]  = np.nansum(mhw_yr[:, valid_affected_cells_yr]  * weights, axis=1) / total_mpa_area
+                warm_ts[y] = np.nansum(warm_yr[:, valid_affected_cells_yr] * weights, axis=1) / total_mpa_area
+                res_ts[y]  = np.nansum(res_yr[:, valid_affected_cells_yr]  * weights, axis=1) / total_mpa_area
+                bio_ts[y]  = np.nansum(bio_yr[:, valid_affected_cells_yr]  * weights, axis=1) / total_mpa_area
+
+            else:
+                mhw_ts[y] = np.nan
+                warm_ts[y] = np.nan
+                res_ts[y] = np.nan
+                bio_ts[y] = np.nan
+
+        # To Dataset
+        attrib_stats_mpa[abbrv]['ts'][key] = {
+                'mhws_median':  np.nanmedian(mhw_ts,  axis=1)*100,  # convert to percentage
+                'mhws_std':     np.nanstd(mhw_ts,     axis=1)*100,  # convert to percentage
+                'warm_median':  np.nanmedian(warm_ts, axis=1)*100,  # convert to percentage
+                'warm_std':     np.nanstd(warm_ts,    axis=1)*100,  # convert to percentage
+                'res_median':   np.nanmedian(res_ts,  axis=1)*100,  # convert to percentage
+                'res_std':      np.nanstd(res_ts,     axis=1)*100,  # convert to percentage
+                'bio_median':   np.nanmedian(bio_ts,  axis=1)*100,  # convert to percentage
+                'bio_std':      np.nanstd(bio_ts,     axis=1)*100,  # convert to percentage
+                'fixed_area':   fixed_area, 
+                'total_mpa_area': total_mpa_area
+                }
+        
+
+    ds_mhws.close()
+    ds_warm.close()
+    ds_res.close()
+    ds_bio.close()
+
+
+# %% ======================== Maps of attribution ========================
+# import matplotlib.ticker as mticker
+# from skimage import measure
+# from mpl_toolkits.axes_grid1 import make_axes_locatable
+# from cartopy.mpl.gridliner import LongitudeFormatter, LatitudeFormatter
+
+# mhw_key = '1deg' #'1deg' or '3deg'
+# stat= 'std'  # 'median' or 'std'
+# plot = 'report'
+
+# def percentage(mpa_dict, category, stat, varname, scale=100):
+#     return mpa_dict[category][stat][varname] * scale
+
+# # --- Colormap and norm ---
+# from matplotlib.colors import ListedColormap, BoundaryNorm, Normalize
+# quantile95_biomass = percentage(attrib_stats_mpa['RS'], 'biomass', stat, f'biomass_{mhw_key}').quantile(0.95).values
+# quantile5_biomass = percentage(attrib_stats_mpa['RS'], 'biomass', stat, f'biomass_{mhw_key}').quantile(0.05).values
+# value_bio = np.max(np.abs([quantile95_biomass, quantile5_biomass]))
+# cmap_biomass = LinearSegmentedColormap.from_list('purple_white_teal', ["#AEA8DE", "white", "#94D2BD"])
+# norm_biomass = mcolors.TwoSlopeNorm(vmin=-value_bio, vcenter=0, vmax=value_bio)
+
+# quantile95_mhws = percentage(attrib_stats_mpa['RS'], 'mhws', stat, f'attrib_mhws_{mhw_key}').quantile(0.95).values
+# quantile5_mhws = percentage(attrib_stats_mpa['RS'], 'mhws', stat, f'attrib_mhws_{mhw_key}').quantile(0.05).values
+# value_mhws=np.max(np.abs([quantile95_mhws, quantile5_mhws]))
+# cmap_mhws = LinearSegmentedColormap.from_list('cian_white_orange', ["#0A9396", "white", "#CA6702"])
+# norm_mhws = mcolors.TwoSlopeNorm(vmin=-value_mhws, vcenter=0, vmax=value_mhws)
+
+# quantile95_warming = percentage(attrib_stats_mpa['RS'], 'warming', stat, f'attrib_warming_{mhw_key}').quantile(0.95).values
+# quantile5_warming = percentage(attrib_stats_mpa['RS'], 'warming', stat, f'attrib_warming_{mhw_key}').quantile(0.05).values
+# value_warming=np.max(np.abs([quantile95_warming, quantile5_warming]))
+# cmap_lt = LinearSegmentedColormap.from_list('blue_to_purple', ["#5B8FC7", "#ADC7E3", "#FFFFFF", "#896572", "#412143"])
+# norm_lt = Normalize(vmin=-value_warming, vmax=value_warming)
+
+# quantile95_res= percentage(attrib_stats_mpa['RS'], 'residual', stat, f'residual_{mhw_key}').quantile(0.95).values
+# quantile5_res = percentage(attrib_stats_mpa['RS'], 'residual', stat, f'residual_{mhw_key}').quantile(0.05).values
+# value_resid=np.max(np.abs([quantile95_res, quantile5_res]))
+# cmap_resid = LinearSegmentedColormap.from_list('greenish', ["#6F8A8E",'#738F93', "#FFFFFF", "#898433", "#676427"])
+# norm_resid = mcolors.TwoSlopeNorm(vmin=-value_resid, vcenter=0, vmax=value_resid)
+
+
+# # --- Data to plot ---
+# panels = [('biomass', stat, f'biomass_{mhw_key}', 'Seasonal biomass change w.r.t clim', cmap_biomass,  norm_biomass, 'Biomass change w.r.t clim [\%]'),
+#           ('mhws', stat, f'attrib_mhws_{mhw_key}', 'Attribution to MHWs', cmap_mhws, norm_mhws, r'$\Delta_{MHWs}$ [\%]'),
+#           ('warming', stat, f'attrib_warming_{mhw_key}', 'Attribution to Long-term thermal trend ', cmap_lt, norm_lt, r'$\Delta_{bkgd}$ [\%]'),
+#           ('residual', stat, f'residual_{mhw_key}', 'Residuals', cmap_resid, norm_resid, r'$\Delta_{res}$ [\%]'),
+#          ]
+
+# lon_np = mpas_ds.lon_rho.values
+# lat_np = mpas_ds.lat_rho.values
+# lon_np_norm = np.where(lon_np > 180, lon_np - 360, lon_np)
+
+# mpa_boundaries = {}
+
+# # --- Font size settings ---
+# maintitle_kwargs = {'fontsize': 18} if plot == 'slides' else {'fontsize': 10}
+# subtitle_kwargs  = {'fontsize': 15} if plot == 'slides' else {'fontsize': 9}
+# label_kwargs     = {'fontsize': 14} if plot == 'slides' else {'fontsize': 9}
+# tick_kwargs      = {'labelsize': 13} if plot == 'slides' else {'labelsize': 9}
+# lw = 1   if plot == 'slides' else 0.5
+# lw_grid= 0.7 if plot == 'slides' else 0.3
+# gridlabel_kwargs = {'size': 10, 'rotation': 0} if plot == 'slides' else {'size': 8, 'rotation': 0}
+
+
+# # --- Figure ---
+# fig = plt.figure(figsize=(8, 8))
+# gs  = gridspec.GridSpec(nrows=2, ncols=2, figure=fig)
+
+# theta  = np.linspace(0, 2 * np.pi, 200)
+# verts  = np.vstack([np.sin(theta), np.cos(theta)]).T
+# circle = mpath.Path(verts * 0.5 + 0.5)
+    
+
+# for i, (category, stat, varname, title, cmap, norm, cbar_label) in enumerate(panels):
+#     row, col = divmod(i, 2)
+#     ax = fig.add_subplot(gs[row, col], projection=ccrs.SouthPolarStereo())
+
+#     # Circular boundary
+#     ax.set_boundary(circle, transform=ax.transAxes)
+    
+#     # Features
+#     ax.coastlines(color='black', linewidth=lw, zorder=5)
+#     ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
+#     ax.set_facecolor('lightgrey')
+
+#     # -- Plot data --
+#     pcm = None
+#     for mpa_name, mpa_data in attrib_stats_mpa.items():
+#         try:
+#             ds = mpa_data[category][stat]
+#         except KeyError:
+#             continue
+#         if varname not in ds.data_vars:
+#             continue
+
+#         lon = ds['lon_rho'].values
+#         lat = ds['lat_rho'].values
+#         data = ds[varname].values
+
+#         pcm = ax.pcolormesh(lon, lat, data*100,  # Convert to percentage
+#                             transform=ccrs.PlateCarree(),
+#                             cmap=cmap, norm=norm,
+#                             shading='auto', zorder=2, rasterized=True)
+
+#     # -- Colorbar --
+#     if pcm is not None:
+#         divider = make_axes_locatable(ax)
+#         cax = divider.append_axes("bottom", size="5%", pad=0.15,
+#                                    axes_class=plt.Axes)
+#         cbar = fig.colorbar(pcm, cax=cax, orientation='horizontal', extend='both')
+#         cbar.ax.tick_params(labelsize=8)
+#         cbar.set_label(cbar_label, **label_kwargs)
+#     else:
+#         print(f"⚠️ No data found for panel '{title}' "
+#               f"(category='{category}', stat='{stat}', var='{varname}')")
+
+    
+#     # Gridlines
+#     gl = ax.gridlines(draw_labels=True, color='gray', alpha=0.5,
+#                       linestyle='--', linewidth=lw_grid, zorder=20)
+#     gl.xlabels_top  = False
+#     gl.ylabels_right = False
+#     gl.xlabel_style = gridlabel_kwargs
+#     gl.ylabel_style = gridlabel_kwargs
+#     gl.xformatter = LongitudeFormatter()
+#     gl.yformatter = LatitudeFormatter()
+
+#     # -- MPA boundaries --
+#     lon = mpas_ds.lon_rho
+#     lat = mpas_ds.lat_rho
+#     for name, (mask, color) in mpa_dict.items():
+#         mask_2d = mask.values if hasattr(mask, "values") else mask
+#         lon_np  = lon.values
+#         lat_np  = lat.values
+
+#         contours = measure.find_contours(mask_2d.astype(float), 0.5)
+
+#         for contour in contours:
+#             eta_idx = contour[:, 0].astype(int)
+#             xi_idx  = contour[:, 1].astype(int)
+#             ax.plot(lon_np[eta_idx, xi_idx], lat_np[eta_idx, xi_idx],
+#                     color=color, alpha=0.8, linewidth=1,
+#                     transform=ccrs.PlateCarree(), zorder=2)
+
+#     # ax.set_title(title, fontsize=11, fontweight='bold')
+
+# from matplotlib.patches import Patch
+# no_mhw_patch = Patch(facecolor='lightgrey', edgecolor='gray', linewidth=0.5, label='No MHWs detected')
+# fig.legend(handles=[no_mhw_patch], loc='lower center',
+#            bbox_to_anchor=(0.5, -0.01), frameon=True, **label_kwargs)
+
+
+# # fig.suptitle(f'Attribution of changes in seasonal biomass under MHWs of {mhw_key[0]}°C', fontsize=14, fontweight='bold', y=0.98)
+# plt.show()
+# # plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/fig3_attributions_maps_mpas_{mhw_key}_{stat}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+
+
+
+
+# %% ======================== Total percentage of change [%] ========================
+# Spatial mean for each MPAs -- area weighted
+# total_change_med = {abbrv: bio_change_interp_mpa[abbrv]['actual'].median(dim=['bootstraps']).mean(dim=['eta_rho', 'xi_rho']) for abbrv in mpa_colors}
+# total_change_std = {abbrv: bio_change_interp_mpa[abbrv]['actual'].std(dim=['bootstraps']).mean(dim=['eta_rho', 'xi_rho']) for abbrv in mpa_colors}
+
+# total_change_mean = {
+#     abbrv: bio_change_interp_mpa[abbrv]['actual']
+#         .mean(dim=['bootstraps'])
+#         .weighted(area_mpa[abbrv].fillna(0))
+#         .mean(dim=['eta_rho', 'xi_rho'])
+#     for abbrv in mpa_colors
+# }
+
+# total_change_med = {
+#     abbrv: bio_change_interp_mpa[abbrv]['actual']
+#         .weighted(area_mpa[abbrv].fillna(0))
+#         .quantile(0.5, dim=['eta_rho', 'xi_rho'])
+#         .median(dim='bootstraps')
+#     for abbrv in mpa_colors
+# }
+
+# total_change_std = {
+#     abbrv: bio_change_interp_mpa[abbrv]['actual']
+#         .std(dim=['bootstraps'])
+#         .weighted(area_mpa[abbrv].fillna(0))
+#         .mean(dim=['eta_rho', 'xi_rho'])
+#     for abbrv in mpa_colors
+# }
+# %% ======================== Spatial mean ========================
+# impact_mhws_mpa = {abbrv: results[abbrv]['mhws'] for abbrv in abbrvs}
+# impact_warming_mpa = {abbrv: results[abbrv]['warming'] for abbrv in abbrvs}
+# residual_mpa = {abbrv: results[abbrv]['residual'] for abbrv in abbrvs}
+# impact_mhws_mpa_mean = {abbrv: impact_mhws_mpa[abbrv].mean(dim=['eta_rho', 'xi_rho'])}
+# impact_warming_mpa_mean = {abbrv: results[abbrv]['warming_mean'] for abbrv in abbrvs}
+# residual_mpa_mean = {abbrv: results[abbrv]['residual_mean'] for abbrv in abbrvs}
 
 # %% ======================== Plot Attributions (TimeSeries) ========================
 import matplotlib.colors as mcolors_lib
 import matplotlib.patches as mpatches
 
+mhw_choice = '1deg'  #1deg 3deg
 years_coord = np.arange(1980, 2019)
-
-mpa_colors = {
-    'RS': '#c77c27', 'SO': '#e05c8a',
-    'EA': '#C00225', 'WS': '#5f0f40', 'AP': '#867308',
-}
-mpa_labels = {
-    'RS': 'Ross Sea', 'SO': 'South Orkney Islands',
-    'EA': 'East Antarctic', 'WS': 'Weddell Sea', 'AP': 'Antarctic Peninsula',
-}
-
-def lighten(hex_color, factor=0.45):
+if mhw_choice == '3deg':
+    mpa_colors = {"AP": "#867308", "WS": "#5f0f40", "EA": "#C00225", "RS": "#c77c27"}
+    nplots=4
+else: 
+    mpa_colors = {"AP": "#867308", "SO": "#e05c8a", "WS": "#5f0f40", "EA": "#C00225", "RS": "#c77c27"}
+    nplots=5
+def lighten(hex_color, factor=0.5):
     rgb = mcolors_lib.to_rgb(hex_color)
     return tuple(1 - (1 - c) * factor for c in rgb)
 
@@ -285,72 +685,102 @@ def darken(hex_color, factor=0.6):
     rgb = mcolors_lib.to_rgb(hex_color)
     return tuple(c * factor for c in rgb)
 
-# --- total % change (actual vs clim) ---
-total_change_mean = {
-    abbrv: p_change_interp_mpa[abbrv]['actual'].mean(dim='bootstraps')
-    for abbrv in mpa_colors
-}
-
-fig, axes = plt.subplots(5, 1, figsize=(12, 15), sharex=True)
+fig, axes = plt.subplots(nplots, 1, figsize=(5, 8), sharex=True)
 fig.subplots_adjust(hspace=0.4)
 
 for i, (abbrv, ax) in enumerate(zip(mpa_colors.keys(), axes)):
     base  = mpa_colors[abbrv]
-    light = lighten(base, factor=0.45)
+    light = lighten(base, factor=0.5)
     dark  = darken(base,  factor=0.6)
 
-    mhw   = impact_mhws_mpa_mean[abbrv].values
-    warm  = impact_warming_mpa_mean[abbrv].values
-    total = total_change_mean[abbrv].values
+    # --- Extract data ---
+    mhw = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['mhws_median']
+    warm = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['warm_median'] 
+    residual = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['res_median']
+    bio_ts = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['bio_median']
+    bio_ts_std = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['bio_std']
 
-    # --- left axis: attribution fills (percentage points) ---
-    ax.fill_between(years_coord, 0, np.where(warm > 0, warm, 0), color=dark,  alpha=0.85)
-    ax.fill_between(years_coord, 0, np.where(warm < 0, warm, 0), color=dark,  alpha=0.85)
-    ax.fill_between(years_coord, 0, np.where(mhw  > 0, mhw,  0), color=light, alpha=0.85)
-    ax.fill_between(years_coord, 0, np.where(mhw  < 0, mhw,  0), color=light, alpha=0.85)
+    # Exposure fraction for this MPA and threshold 
+    total_mpa_area = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['total_mpa_area']
+    fixed_area = attrib_stats_mpa[abbrv]['ts'][mhw_choice]['fixed_area']
+    exposure_pct = 100 * fixed_area / total_mpa_area
+
+    ax2 = ax.twinx()
+    ax2.set_zorder(0)
+    ax.set_zorder(2)
+
+    ax.patch.set_visible(False)   # important
+    ax2.patch.set_alpha(0.0)      # important
+
+    # --- left axis: contribution ---
+    ax.plot(years_coord, warm, color='#5B8FC7', lw=1, label=r'$\Delta_{bkgd}$', zorder=2)
+    ax.plot(years_coord, mhw, color='#CA6702', lw=1, label=r'$\Delta_{MHWs}$', zorder=3)
+    ax.plot(years_coord, residual, color='#898433', lw=1, label=r'$\Delta_{res}$', zorder=4)
+
+    # ax.axhline(0, color='0.7', lw=0.8)
     ax.axhline(0, color='gray', lw=0.6, ls='-', alpha=0.4)
     ax.set_xlim(1980, 2018)
-    ax.set_ylabel('Difference in \% [\%pt.]', fontsize=12, color='dimgray')
-    ax.tick_params(axis='y', labelsize=10, labelcolor='dimgray')
+    ax.set_ylabel('Contribution [\%]', fontsize=12, color='black')
+    ax.tick_params(axis='y', labelsize=10, labelcolor='black')
     ax.spines[['top', 'right']].set_visible(False)
 
-    # --- right axis: total % change ---
-    ax2 = ax.twinx()
-    ax2.plot(years_coord, total, color='#1a1a1a', lw=1.6, ls='--', zorder=5)
-    ax2.set_ylabel('Change w.r.t clim [\%]', fontsize=12, color='#1a1a1a')
-    ax2.tick_params(axis='y', labelsize=10, labelcolor='#1a1a1a')
-    ax2.spines[['top', 'left']].set_visible(False)
-
-    # keep right spine visible but subtle
-    ax2.spines['right'].set_linewidth(0.6)
-    ax2.spines['right'].set_color('#aaaaaa')
+    # --- right axis: Biomass subplot
+    bar_colors = ['#94D2BD' if v >= 0 else '#AEA8DE' for v in bio_ts]
+    ax2.bar(years_coord, bio_ts, width=0.9, color=bar_colors, alpha=0.4, zorder=1)
+    # ax2.bar(years_coord, bio_ts, width=0.9, color=bar_colors, alpha=0.4, zorder=1,
+        # yerr=bio_ts_std, error_kw=dict(ecolor='0.3', elinewidth=0.8, capsize=2, alpha=0.6),)
+    ax2.set_ylabel('Biomass Change [\%]', fontsize=12)
+    ax2.axhline(0, color='black', lw=0.5, ls=':', alpha=0.6)
+    ax2.tick_params(labelsize=10)
+    bio_max = np.nanmax(np.abs(bio_ts)) * 1.2
+    ax2.set_ylim(-bio_max, bio_max)
 
     # zero-align the two axes so both 0s sit on the same gridline
-    pp_abs = max(abs(np.nanmin([mhw, warm])), abs(np.nanmax([mhw, warm]))) * 1.25
-    tc_abs = max(abs(np.nanmin(total)), abs(np.nanmax(total))) * 1.25
+    pp_abs = max(abs(np.nanmin([mhw, warm, residual])), abs(np.nanmax([mhw, warm, residual]))) * 1.25
+    tc_abs = max(abs(np.nanmin(bio_ts)), abs(np.nanmax(bio_ts))) * 1.25
     ax.set_ylim(-pp_abs, pp_abs)
     ax2.set_ylim(-tc_abs, tc_abs)
 
-    # --- legend ---
-    patch_mhw  = mpatches.Patch(color=light, alpha=0.85, label='MHW impact [\%pt.]')
-    patch_warm = mpatches.Patch(color=dark,  alpha=0.85, label='Warming impact [\%pt.]')
-    line_total = plt.Line2D([0], [0], color='#1a1a1a', lw=1.6, ls='--', label='Total change [\%]')
-    ax.legend(
-        handles=[patch_mhw, patch_warm, line_total],
-        fontsize=10, loc='upper right',
-        framealpha=0.6, ncol=3,
-        handlelength=1.2, handleheight=0.9,
-        borderpad=0.5, labelspacing=0.3,
-    )
-
-    ax.set_title(f'{mpa_labels[abbrv]} ({abbrv})',
-                 fontsize=14, fontweight='bold', color=base, loc='left', pad=4)
+    ax.set_title(f'{abbrv}',fontsize=14, fontweight='bold', color='black', loc='left', pad=4)
     
+    # --- Legend ---
+    # ax.text(0.02, 0.95, f'MHW footprint: {exposure_pct:.1f}\\% of MPA',
+    #     transform=ax.transAxes, fontsize=9, color='black',
+    #     ha='left', va='top', bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='0.7', alpha=0.75),)
+
+# --- Shared legend ---
+line_warm = plt.Line2D([0], [0], color='#5B8FC7', lw=1.5, label=r'$\Delta_{bkgd}$')
+line_mhw  = plt.Line2D([0], [0], color='#CA6702', lw=1.5, label=r'$\Delta_{MHWs}$')
+line_res  = plt.Line2D([0], [0], color='#898433', lw=1.5, label=r'$\Delta_{res}$')
+
+fig.legend(
+    handles=[line_mhw, line_warm, line_res],
+    fontsize=10, loc='upper center',
+    bbox_to_anchor=(0.5, 1.05),
+    ncol=3, framealpha=0.6,
+    handlelength=1.2, handleheight=0.9,
+    borderpad=0.5, labelspacing=0.3,
+)
+
 axes[-1].set_xlabel('Years', fontsize=12)
-fig.suptitle('Biomass attribution: MHW and Warming vs. Total change',fontsize=15, y=1.005)
+# patch_mhw  = mpatches.Patch(color=light, alpha=0.85, label=r'$\Delta_{MHWs}$ [\%pt.]')
+# patch_warm = mpatches.Patch(color=dark,  alpha=0.85, label=r'$\Delta_{bkgd}$ [\%pt.]')
+# # patch_residual = mpatches.Patch(color='black', alpha=0.85, label=r'\Delta_{res} [%pt.]')
+# line_residual = plt.Line2D([0], [0], color='black',lw=1.8,
+# ls=':',
+# label=r'$\Delta_{res}$ [\%pt.]'
+# )
+# ax.legend(
+#     handles=[patch_mhw, patch_warm, line_residual],
+#     fontsize=10, loc='upper right',
+#     framealpha=0.6, ncol=4,
+#     handlelength=1.2, handleheight=0.9,
+#     borderpad=0.5, labelspacing=0.3,
+# )
+# fig.suptitle('Biomass attribution: MHW and Warming vs. Total change\nNote that the different terms are averafed spatially and thus don''t add up',fontsize=15, y=1.005)
 plt.tight_layout()
-plt.show()
-# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/attributions.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+# plt.show()
+plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/fig3_attributions_ts_{mhw_choice}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
 
 # %% ======================== MHWs Metrics ========================
 # 1. MHW duration
