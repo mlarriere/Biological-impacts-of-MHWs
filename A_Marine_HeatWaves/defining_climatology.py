@@ -24,7 +24,7 @@ from matplotlib.lines import Line2D
 
 from joblib import Parallel, delayed
 
-# %% Figure settings 
+# %% -------------------------------- Figure settings --------------------------------
 import matplotlib as mpl
 mpl.rcParams.update({
     "text.usetex": True,
@@ -39,7 +39,7 @@ mpl.rcParams.update({
     "text.latex.preamble": r"\usepackage{mathptmx}",  # to match your Overleaf font
 })
 
-# %% Settings
+# %% --------------------------------Settings--------------------------------
 # Set working directory
 working_dir = "/home/mlarriere/Projects/biological_impacts_MHWs/Biological-impacts-of-MHWs/"
 os.chdir(working_dir)
@@ -82,18 +82,20 @@ if baseline=='fixed30yrs':
 absolute_thresholds = [1, 2, 3, 4] # Fixed absolute threshold
 
 
-# %%# %% ---- Climatology for each eta
-def calculate_climSST(ieta, baseline):
-
-    print(f"Processing eta {ieta}...")
-    start_time = time.time()
-
+# %% -------------------------------- Climatology for each eta --------------------------------
+def calculate_climSST(args):
     # ieta =200
+    ieta, baseline = args
+
+    # print(f"Processing eta {ieta}...")
+    # start_time = time.time()
+
     # Read data
     fn = path_mhw + file_var + 'eta' + str(ieta) + '.nc' #dim: (year: 41, day: 365, z_rho: 35, xi_rho: 1442)
-    ds_original = xr.open_dataset(fn)[var][1:31,0:365,:,:] #Extracts daily data : only 30yr + consider 365 days per year. shape:(30, 365, 35, 1442)
-    # ds_original_surf = ds_original.isel(z_rho=0) #select only surf for faster computing
-    ds_original_100m = ds_original.isel(z_rho=slice(0,14)) #first 100m depth - 14 levels
+    ds_original = xr.open_dataset(fn)[var] #Extracts daily temperature data : only 30yr + consider 365 days per year. shape:(30, 365, 35, 1442)
+    ds_orginal_30yrs = xr.open_dataset(fn)[var][1:31,0:365,:,:]
+    ds_original_surf = ds_original.isel(year=slice(1,41), z_rho=0) #select only surf for anomalies calculation
+    ds_original_100m = ds_orginal_30yrs.isel(z_rho=slice(0,14)) #first 100m depth - 14 levels
     # print(np.unique(ds_original.lat_rho.values))
     # ds_original.values[np.isnan(ds_original.values)] = 0 # Set to 0 so that det = False at nans
     
@@ -125,15 +127,57 @@ def calculate_climSST(ieta, baseline):
     # relative_threshold[:, 0, 1000]
     # window11d_sst.isel(xi_rho=1000, z_rho=0)
 
-    # Apply mask
+    # Apply land mask
     relative_threshold = np.where(mask_nanvalues, relative_threshold, np.nan) #shape (365, 14, 1442)
     climatology30yrs = np.where(mask_nanvalues, climatology30yrs, np.nan) #shape (365, 14, 1442)
 
-    # Write to dataset
-    # dict_vars = {}
-    # dict_vars['relative_threshold'] = (["years", "day","nz", "xi_rho"], relative_threshold)
-    # dict_vars['climatology'] = (["day","nz", "xi_rho"], climatology30yrs)
+    # Anomalies calculation - at surface only
+    sst_anomalies = ds_original_surf.values - climatology30yrs[:, 0, :][np.newaxis, :, :]
 
+    # Keep only anomalies when 90th percentile threshold is exceeded
+    relative_thresh_mask = ds_original_surf.values > relative_threshold[:, 0, :][np.newaxis, :, :]
+    sst_anomalies_90th = np.where(relative_thresh_mask, sst_anomalies, np.nan)
+    print('Min of SST anomalies (90th percentile):', np.nanmin(sst_anomalies_90th))
+    print('Max of SST anomalies (90th percentile):', np.nanmax(sst_anomalies_90th))
+
+    # Plot to check
+    plot=False
+    if plot==True:
+        ixi=1200
+        iyear = 0
+        plt.figure(figsize=(10, 5))
+        sst_2016 = ds_original_surf.values[iyear, :, ixi]
+        clim_2016 = climatology30yrs[:, 0, ixi]
+        threshold_2016 = relative_threshold[:, 0, ixi]
+        anom_2016 = sst_anomalies_90th[iyear, :, ixi]
+        print('Min of SST anomalies (90th percentile) in 2016:', np.nanmin(anom_2016))
+        print('Max of SST anomalies (90th percentile) in 2016:', np.nanmax(anom_2016))
+        
+        days = np.arange(365)
+
+        fig, ax = plt.subplots(figsize=(14, 5))
+
+        # Red fill: anomaly where SST exceeds 90th percentile
+        ax.fill_between(days, clim_2016, sst_2016,
+                        where=(sst_2016 > threshold_2016), 
+                        color='orange', alpha=0.5, label=rf'SST anomaly ($>$90th percentile)')
+
+        # Climatology
+        ax.plot(days, clim_2016, color='gray', linewidth=1.5, linestyle='--', label='Climatology')
+
+        # SST
+        ax.plot(days, sst_2016, color='red', linewidth=1.2, label='SST 2016')
+
+        # 90th percentile
+        ax.plot(days, threshold_2016, color='purple', linewidth=1.2, label='90th percentile')
+
+        ax.set_xlabel('Day of year')
+        ax.set_ylabel('SST (°C)')
+        ax.legend(frameon=True)
+        plt.tight_layout()
+        plt.show()  
+
+    # Write to dataset
     ds_rel_threshold = xr.Dataset(
         data_vars= dict(relative_threshold = (["day", "z_rho", "xi_rho"], relative_threshold)),
         coords=dict(
@@ -153,6 +197,15 @@ def calculate_climSST(ieta, baseline):
         attrs = {'climatology': 'Daily climatology SST - median value obtained from a seasonally varying 11‐day moving window - baseline 1980-2009 (30yrs)'}
         ) 
 
+    ds_anom = xr.Dataset(
+        data_vars= dict(anomalies =(["year", "day", "xi_rho"], sst_anomalies_90th)),
+        coords=dict(
+            lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+            lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+            ),
+        attrs = {'anomalies': 'Daily SST anomalies. Only when SST exceeds the 90th percentile threshold.'}
+    )
+
     
     # Save output
     output_file_clim = os.path.join(output_path_clim, f"clim_{ieta}.nc")
@@ -162,30 +215,38 @@ def calculate_climSST(ieta, baseline):
     output_file_thresh = os.path.join(output_path_clim, f"thresh_90perc_{ieta}.nc")
     if not os.path.exists(output_file_thresh):
         ds_rel_threshold.to_netcdf(output_file_thresh, mode='w')  
-    
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    print(f"Processing time for eta {ieta}: {elapsed_time:.2f} seconds")
 
-    return climatology30yrs, relative_threshold
+    output_file_anom = os.path.join(output_path_clim, f"anomalies/anom_90perc_{ieta}.nc")
+    if not os.path.exists(output_file_anom):
+        ds_anom.to_netcdf(output_file_anom, mode='w')  
+    
+    # end_time = time.time()
+    # elapsed_time = end_time - start_time
+    # print(f"Processing time for eta {ieta}: {elapsed_time:.2f} seconds")
+
+    return climatology30yrs, relative_threshold, sst_anomalies_90th
 
 # Calling function
-results = Parallel(n_jobs=30)(delayed(calculate_climSST)(ieta, baseline) for ieta in range(0, neta)) # Computing time per eta ~15-20s,  in total ~4min
-# ---> error to fix: <ipython-input-3-bbb4c30461f8>:36: RuntimeWarning: All-NaN slice encountered
+from tqdm.contrib.concurrent import process_map
+args = [(ieta, baseline) for ieta in range(neta)]
+results = process_map(calculate_climSST, args, max_workers=30, chunksize=1)
+# results = Parallel(n_jobs=30)(delayed(calculate_climSST)(ieta, baseline) for ieta in range(0, neta)) # Computing time per eta ~15-20s,  in total ~4min
 
 
 # %% Merging all eta in same dataset
-ds_clim, ds_rel_threshold = zip(*results)
+ds_clim, ds_rel_threshold , ds_anom= zip(*results)
 
 # Datasets initialization 
 nz = ds_rel_threshold[0].shape[1]
 clim_sst_surf = np.full((ndays, nz, neta, nxi), np.nan, dtype=np.float32) #dim (365, 14, 434, 1442)
 relative_threshold_surf =  np.full((ndays, nz, neta, nxi), np.nan, dtype=np.float32) #dim (365, 14, 434, 1442)
+sst_anomalies_90th = np.full((40, ndays, neta, nxi), np.nan, dtype=np.float32) #dim (40, 365, 434, 1442) - surface only 
 
 # Loop over neta and write all eta in same Dataset - aggregation 
 for ieta in range(0, neta):
     clim_sst_surf[:, :, ieta, :] = ds_clim[ieta]  
     relative_threshold_surf[:, :, ieta, :] = ds_rel_threshold[ieta]
+    sst_anomalies_90th[:, :, ieta, :] = ds_anom[ieta]
 
 # Reformating
 ds_clim_sst_surf = xr.Dataset(
@@ -206,6 +267,15 @@ ds_rel_threshold_surf = xr.Dataset(
     attrs=dict(description='Daily climatological relative threshold (90th percentile) - computed using a seasonally varying 11‐day moving window '),
         ) 
 
+ds_anomalies_surf = xr.Dataset(
+    data_vars=dict(anomalies = (["years", "days", "eta_rho", "xi_rho"], sst_anomalies_90th)),
+    coords=dict(
+        lon_rho=(["eta_rho", "xi_rho"], ds_roms.lon_rho.values), #(434, 1442)
+        lat_rho=(["eta_rho", "xi_rho"], ds_roms.lat_rho.values), #(434, 1442)
+        ),
+    attrs=dict(description='Daily SST anomalies. Only when SST exceeds the 90th percentile threshold.'),
+        )
+
 # Save outputs
 # output_file_clim_sst = os.path.join(output_path_clim, f"climSST_surf.nc")
 output_file_clim_sst = os.path.join(output_path_clim, f"clim_temp_100m.nc")
@@ -216,6 +286,10 @@ if not os.path.exists(output_file_clim_sst):
 output_file_rel_threshold = os.path.join(output_path_clim, f"threshold_90perc_100m.nc")
 if not os.path.exists(output_file_rel_threshold):
     ds_rel_threshold_surf.to_netcdf(output_file_rel_threshold, mode='w') 
+
+output_file_anomalies = os.path.join(output_path_clim, f"anomalies/anomalies_surf_90perc.nc")
+if not os.path.exists(output_file_anomalies):
+    ds_anomalies_surf.to_netcdf(output_file_anomalies, mode='w')
 
 #%% ---------------------------------------------------------- PLOTS (slide) ----------------------------------------------------------
 # Settings and data
