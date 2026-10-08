@@ -64,6 +64,7 @@ os.chdir(working_dir)
 print("Working directory set to:", os.getcwd())
 
 # Directories
+path_main = '/nfs/sea/work/mlarriere/mhw_krill_SO/'
 path_clim = '/nfs/sea/work/mlarriere/mhw_krill_SO/clim30yrs/'
 path_fixed_baseline = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs'
 path_duration = '/nfs/sea/work/mlarriere/mhw_krill_SO/fixed_baseline30yrs/mhw_durations'
@@ -185,11 +186,11 @@ mhw_dur_mhw = mhw_dur.where(mhw_dur > 0)
 # -- MHWs >= 90th percentile and 1°C
 duration_1deg = mhw_dur_mhw.where(mhw_events_surface['det_1deg'] == 1) #shape (39, 181, 231, 1440)
 # -- MHWs >= 90th percentile and 3°C
-duration_3deg = mhw_dur_mhw.where(mhw_events_surface['det_3deg'] == 1) #shape (39, 181, 231, 1440)
+# duration_3deg = mhw_dur_mhw.where(mhw_events_surface['det_3deg'] == 1) #shape (39, 181, 231, 1440)
 
 # Calculate mean duration across time dimension
 mean_duration_1deg = duration_1deg.mean(dim=['years', 'days']) #min=5days, max: 293days
-mean_duration_3deg = duration_3deg.mean(dim=['years', 'days']) #min=7days, max: 386days
+# mean_duration_3deg = duration_3deg.mean(dim=['years', 'days']) #min=7days, max: 386days
 
 # %% ======================== Plot Paper ========================
 from matplotlib.colors import BoundaryNorm, LinearSegmentedColormap
@@ -341,53 +342,154 @@ ds_chla = xr.open_dataset(os.path.join(path_growth_inputs, 'chla_surf_allyears_d
 ds_chla = ds_chla.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))#shape (39, 181, 231, 1440)
 ds_chla['years'] = ds_chla['years']-1980
 
-# Select only the cells that have experienced MHWs 
-ds_chla_mhw = ds_chla.chla.where(mhw_choice_duration.values>0)
-ds_chla_mhw_mean = ds_chla_mhw.mean(dim=['years', 'days']) #shape (231, 1440)
+# Select only the cells that have experienced MHWs -- chla values kept only during MHWs events (time and space)
+ds_chla_mhw = ds_chla.chla.where(mhw_choice_duration.values>0) #shape (39, 181, 231, 1440)
+
+# %% ======================== Chla relative to clim condition (anomalies) ========================
+# Climatological chla concentration (mean over 1980-2009) -- from chla_anomalies.py
+ds_chla_clim = xr.open_dataset(os.path.join(os.path.join(path_growth_inputs, 'chla_anomalies'), 'chla_clim.nc')) #shape (365, 231, 1442)
+ds_chla_clim = ds_chla_clim.isel(xi_rho=slice(0, mpas_south60S.xi_rho.size)) #shape (365, 231, 1440)
+season_days = np.concatenate([np.arange(304, 365), np.arange(0, 121)])  # Nov 1 - Apr 30 (181 days)
+ds_chla_clim = ds_chla_clim.isel(days=season_days) #shape (181, 231, 1440)
+
+# Chla relative to climatology (anomalies) during MHWs
+ds_chla_mhw_relative_clim = ds_chla_mhw - ds_chla_clim.chla_clim #shape (39, 180, 231, 1440)
+
+# Average over time -- shape (231, 1440)
+# ds_chla_mhw_relative_clim_avg = ds_chla_mhw_relative_clim.mean(dim=['years', 'days']) #shape (231, 1440)
+
+
+#%% ======================== MHW intensity =========================
+mhw_intensity = xr.open_dataset(os.path.join(path_clim, 'anomalies/anomalies_surf_90perc_combined_season.nc'))
+mhw_intensity_1deg = mhw_intensity['anom_90th_1deg'].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
+mhw_intensity_3deg = mhw_intensity['anom_90th_3deg'].isel(xi_rho=slice(0, mpas_south60S.xi_rho.size))
 
 # %% ======================== Create diamond-shaped bivariate legend ========================
-# Classify a 2D field into tertiles (0=low, 1=mid, 2=high)
-def tertile_class(da):
-    vals = da.values
-    valid = vals[~np.isnan(vals)]
-    q1, q2 = np.nanpercentile(valid, [33.33, 66.67])
-    cls = np.full(vals.shape, np.nan)
-    cls[vals <= q1] = 0
-    cls[(vals > q1) & (vals <= q2)] = 1
-    cls[vals > q2] = 2
-    return cls
+# === Align the datasets -- shape (39, 181, 231, 1440)
+intensity  = mhw_intensity_1deg.drop_vars('days_of_yr').assign_coords(days=ds_chla_mhw_relative_clim.days)
+chla = ds_chla_mhw_relative_clim
+intensity, chla = xr.align(intensity, chla, join='exact')
 
-def fixed_class(da, bins):
-    vals = da.values
-    cls = np.full(vals.shape, np.nan)
+print(' ----- Values ----- ')
+print('Chla:', chla.values[0,0,200,890])
+print('Intensity:', intensity.values[0,0,200,890])
 
-    for i in range(len(bins)-1):
-        mask = (vals >= bins[i]) & (vals < bins[i+1])
-        cls[mask] = i
+# Dealing with Nan values
+valid_mask = (~np.isnan(chla.values) & ~np.isnan(intensity.values))
 
-    # last class
-    cls[vals >= bins[-1]] = len(bins)-1
+# === Classify data for every year, day and grid cell
+print('----- Edges ----- ')
+edges_file = os.path.join(path_main, 'bivariate', 'bivariate_edges.nc')
+if not os.path.exists(edges_file):
+    print('Computing edges...')
+    chla_33rd = chla.quantile(0.33, dim=['years', 'days', 'eta_rho', 'xi_rho'], skipna=True)
+    chla_66th = chla.quantile(0.66, dim=['years', 'days', 'eta_rho', 'xi_rho'], skipna=True)
+    
+    intensity_33rd = intensity.quantile(0.33, dim=['years', 'days', 'eta_rho', 'xi_rho'], skipna=True)
+    intensity_66th = intensity.quantile(0.66, dim=['years', 'days', 'eta_rho', 'xi_rho'], skipna=True)
 
-    return cls
+    # Create dataset
+    edges_ds = xr.Dataset({"chla_33rd": chla_33rd.values, "chla_66th": chla_66th.values,
+                           "intensity_33rd": intensity_33rd.values, "intensity_66th": intensity_66th.values},
+                           attrs={"description": "Edges for bivariate classification of Chla and MHW intensity during MHWs (1°C and 90th percentile).\\"
+                                                 "We use a 3x3 bivariate classification, hence we take 1/3 and 2/3 quantiles to define the edges."})
+    edges_ds.to_netcdf(edges_file)
 
-# Chl-a thresholds (mg m-3)
-chla_bins = [0, 0.5, 1]
+else:
+    edges_ds = xr.open_dataset(edges_file)
 
-# MHW cumulative intensity thresholds (degree-days)
-mhw_bins = [0, 2, 10]
+# chla_edges = [edges_ds.chla_33rd.values, edges_ds.chla_66th.values]
+chla_edges = [0, 1] #we want to compare chla relative to clim so either enhance or reduce w.r.t to clim
+print('chla edges:', chla_edges)
 
-chla_class = fixed_class(ds_chla_mhw_mean, chla_bins)
-mhw_class  = fixed_class(ds_ci, mhw_bins)
+intensity_edges = [edges_ds.intensity_33rd.values, edges_ds.intensity_66th.values]
+print('intensity edges:', intensity_edges)
 
-bivar_index = np.full(mhw_class.shape, np.nan)
-valid_mask = ~np.isnan(mhw_class) & ~np.isnan(chla_class)
-bivar_index[valid_mask] = (chla_class[valid_mask] * 3 + mhw_class[valid_mask])
+# intensity_edges = [1, 2]
+
+# Initialization of the classification with Nan
+chla_class = np.full(chla.shape, np.nan)
+intensity_class = np.full(intensity.shape, np.nan)
+
+# Digitize only valid values
+chla_class[valid_mask] = np.digitize(chla.values[valid_mask], chla_edges)
+intensity_class[valid_mask] = np.digitize(intensity.values[valid_mask], intensity_edges)
+
+print(' ----- Classes ----- ')
+print('Chla class:', chla_class[0,0,200,890])
+print('Intensity class:', intensity_class[0,0,200,890])
+
+# === Bivariate categories
+bivar_class = chla_class * 3 + intensity_class
+
+# To DataArray
+bivar_class_ds = xr.Dataset({"bivar_class": (["years", "days", "eta_rho", "xi_rho"], bivar_class)},
+                            coords={"years": chla.years, "days": chla.days, "eta_rho": chla.eta_rho, "xi_rho": chla.xi_rho},
+                            attrs= {"description": "Bivariate classification of Chla and MHW intensity during MHWs (1°C and 90th percentile).",
+                                    "chla bins": chla_edges, 
+                                    "intensity bins": intensity_edges})
+
+print(' ----- Bivariate Categorie ----- ')
+print(bivar_class_ds.bivar_class.values[0,0,200,890])
+
+# %% ======================== Most frequent bivariate category ========================
+def most_frequent_class(x):
+    # Test
+    # x=bivar_class_ds.bivar_class.isel(eta_rho=200, xi_rho=890).values
+    
+    # Prepare data 
+    x = x.ravel() #flatten years days
+    x = x[~np.isnan(x)] #remove Nans
+
+    # If no valid values, return NaN
+    if len(x) == 0:
+        return np.nan
+
+    # Count occurrences for each class (0–8)
+    counts = np.bincount(x.astype(int), minlength=9)
+
+    # Return the most frequent class
+    return np.argmax(counts)
+
+
+bivar_class_mode = xr.apply_ufunc(most_frequent_class, bivar_class_ds.bivar_class,
+                                  input_core_dims=[["years", "days"]], output_core_dims=[[]],
+                                  vectorize=True, output_dtypes=[float])
+
+bivar_class_mode.name = "bivar_class_freq"
+
+# def fixed_class(da, bins):
+    # vals = da.values
+    # cls = np.full(vals.shape, np.nan)
+
+    # for i in range(len(bins)-1):
+    #     mask = (vals >= bins[i]) & (vals < bins[i+1])
+    #     cls[mask] = i
+
+    # # last class
+    # cls[vals >= bins[-1]] = len(bins)-1
+
+    # return cls
+
+# # Delta Chl-a thresholds (mg m-3)
+# chla_bins = [-1, 0, 1]
+
+# # Intensity bins
+# intensity_bins = [-4, -2, 0, 2, 4]
+
+# chla_class = fixed_class(ds_chla_mhw_relative_clim, chla_bins)
+# mhw_class_1deg  = fixed_class(mhw_intensity_1deg, intensity_bins)
+# mhw_class_3deg  = fixed_class(mhw_intensity_3deg, intensity_bins)
+
+# bivar_index = np.full(mhw_class_1deg.shape, np.nan)
+# valid_mask = ~np.isnan(mhw_class_1deg) & ~np.isnan(chla_class)
+# bivar_index[valid_mask] = (chla_class[valid_mask] * 3 + mhw_class_1deg[valid_mask])
 
 # %% ======================== Plot bivariate map ========================
 from matplotlib.colors import ListedColormap
 from matplotlib.transforms import Affine2D
 import matplotlib.patches as mpatches
-
+from skimage import measure
 # Bivariate color palette (3x3, pink/teal ramp)
 # palette = [
 #     '#ffffffff', '#f2aaadff', '#e27177ff',   # chla_class=0 (low):  mhw 0,1,2
@@ -413,8 +515,12 @@ ax.coastlines(color='black', linewidth=0.4, zorder=5)
 ax.add_feature(cfeature.LAND, zorder=4, facecolor='#F6F6F3')
 ax.set_facecolor('lightgrey')
 
-ax.pcolormesh(ds_chla.lon_rho, ds_chla.lat_rho, bivar_index,
-    transform=ccrs.PlateCarree(), cmap=cmap, shading='auto', zorder=1, rasterized=True)
+ax.pcolormesh(ds_chla.lon_rho, ds_chla.lat_rho, bivar_class_mode,
+              transform=ccrs.PlateCarree(), cmap=cmap, vmin=-0.5, vmax=8.5,
+              alpha=0.4, shading='auto', zorder=1, rasterized=True)
+
+# ax.pcolormesh(ds_chla.lon_rho, ds_chla.lat_rho, bivar_index,
+    # transform=ccrs.PlateCarree(), cmap=cmap, shading='auto', zorder=1, rasterized=True)
 # ax.set_title("MHW CI and Chl-a during MHWs (above1°C and  90th perc)", fontsize=13)
 
 
@@ -474,22 +580,22 @@ legend_ax.set_xticks([])
 legend_ax.set_yticks([])
 
 # X labels (MHW CI)
-x_labels = [rf"$<$ {mhw_bins[1]}", f"{mhw_bins[1]}–{mhw_bins[2]}", rf"$>$ {mhw_bins[2]}"]
+x_labels = [rf"$<$ {intensity_edges[0]:.2f}", f"{intensity_edges[0]:.2f}–{intensity_edges[1]:.2f}", rf"$>$ {intensity_edges[1]:.2f}"]
 for i, label in enumerate(x_labels):
     x = (i - 1) * size
     legend_ax.text(x, -1.55 * size, label, ha='center', va='top', fontsize=7)
 
 
 # Y labels (Chla)
-y_labels = [rf"$<$ {chla_bins[1]}", f"{chla_bins[1]}–{chla_bins[2]}", rf"$>$ {chla_bins[2]}"]
+y_labels = [rf"$<$ {chla_edges[0]:.2f}", f"{chla_edges[0]:.2f}–{chla_edges[1]:.2f}", rf"$>$ {chla_edges[1]:.2f}"]
 for i, label in enumerate(y_labels):
     y = (i - 1) * size
     legend_ax.text(-1.55 * size, y, label, ha='right', va='center', fontsize=7)
 
 
 # Axis titles
-legend_ax.text(0, -2.5 * size, r"MHW CI (°C $\cdot$ days)", ha='center', fontsize=8)
-legend_ax.text(-3 * size, 0, "Chl-a (mg m$^{-3}$)", ha='center', va='center', rotation=90, fontsize=8)
+legend_ax.text(0, -2.5 * size, r"MHW intensity [°C]", ha='center', fontsize=8)
+legend_ax.text(-3 * size, 0, r"$\Delta_{Chl-a}$ [mg m$^{-3}$]", ha='center', va='center', rotation=90, fontsize=8)
 
 # Remove frame
 for spine in legend_ax.spines.values():
@@ -502,22 +608,17 @@ plt.show()
 
 # %% ============== Scatter plot for each MPA ========================
 fig, axes = plt.subplots(5,1, figsize=(3, 7), sharex=False, sharey=False)
-mpa_colors = {
-    "RS": "#c77c27",
-    "SO": "#e05c8a",
-    "EA": "#C00225",
-    "WS": "#5f0f40",
-    "AP": "#867308"
-}
-
+mpa_colors = {"RS": "#c77c27", "SO": "#e05c8a",
+              "EA": "#C00225", "WS": "#5f0f40",
+              "AP": "#867308"}
 
 for ax, (code, (name, mask)) in zip(axes, mpa_masks.items()):
 
     # MPA data
     ci_mpa = ds_ci.where(mask)
-    chla_mpa = ds_chla_mhw_mean.where(mask)
+    chla_mpa_during_mhws = ds_chla_mhw_relative_clim_avg.where(mask)
     x = ci_mpa.values.ravel()
-    y = chla_mpa.values.ravel()
+    y = chla_mpa_during_mhws.values.ravel()
 
     # Remove missing values
     valid = (~np.isnan(x)) & (~np.isnan(y))
@@ -543,16 +644,16 @@ for ax, (code, (name, mask)) in zip(axes, mpa_masks.items()):
     # ax.plot(smooth[:,0], smooth[:,1], color='black', lw=2)
 
     # Add median point
-    ax.scatter(np.median(x), np.median(y), s=40, color='black', marker='x', zorder=5)
-    ax.set_ylim(0,np.round(y.max())+1)
-    ax.set_xlim(0,np.round(x.max())+1)
+    # ax.scatter(np.median(x), np.median(y), s=40, color='black', marker='x', zorder=5)
+    # ax.set_ylim(np.round(y.min())-1,np.round(y.max())+1)
+    # ax.set_xlim(0,np.round(x.max())+1)
 
 # Common labels
 # axes[0].set_ylabel("Mean Chl-a during MHWs (mg m$^{-3}$)", fontsize=10)
 
 for ax in axes:
-    ax.set_xlabel(r"MHW CI (°C $\cdot$ days)", fontsize=9)
-    ax.set_ylabel("Chl-a during \nMHWs(mg m$^{-3}$)", fontsize=9)
+    ax.set_xlabel(r"MHW CI [°C $\cdot$ days]", fontsize=9)
+    ax.set_ylabel(r"$\Delta_{Chla}$ [mg $m^{-3}$]", fontsize=9)
 
 
 plt.tight_layout()
