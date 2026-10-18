@@ -106,24 +106,11 @@ detrended_temp = xr.open_dataset(detrended_temp_seasons_file) #shape (40, 181, 2
 # %% ================= Krill Settings =================
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from B_Growth_Model.Atkinson2006_model import length_Atkinson2006 
-
 import importlib
 import functions_length
 importlib.reload(functions_length)
 
-from functions_length import (
-    STAGE_LENGTHS,
-    STAGE_LIST,
-    length_to_mass,
-    length_single_year,
-    compute_world,
-    compute_stage,
-    save_if_not_exists,
-)
-
-from functools import partial
-from tqdm.contrib.concurrent import process_map
+from functions_length import (STAGE_LENGTHS, STAGE_LIST, compute_stage, save_if_not_exists)
 
 stage_lengths = STAGE_LENGTHS
 stage_list = STAGE_LIST
@@ -134,133 +121,6 @@ WORLDS = {
     "clim_trended": (chla_surf_SO_allyrs, temp_clim_trended, "Clim Trended", 10,),
     "no_warming": (chla_surf_SO_allyrs, detrended_temp, "No Warming", 10,),
 }
-
-
-# # --- Parameters
-# stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
-
-# def length_to_mass(length_array, p = 10**(-4.19), r=3.89):
-#     ''' Constants from Atkinson et al (2006)'''
-#     mass_array = p*length_array**r #in mg
-#     return mass_array
-
-# %%  ================================== Functions to run length and mass under different scenarios for krill population ==================================
-
-# Function to run years in parallel
-# def length_single_year(yr, stage, chla_ds, temp_ds, sensitivity_param=None, sensitivity=0):
-#     # yr=0
-#     chla = chla_ds.chla.isel(years=yr)
-#     temp = temp_ds.avg_temp.isel(years=yr)
-
-#     length = length_Atkinson2006(chla=chla, temp=temp, initial_length=stage_lengths[stage], maturity_stage=stage, sensitivity_param=sensitivity_param, sensitivity=sensitivity) #(181, 231, 1442)
-#     mass = length_to_mass(length)
-
-#     return length, mass
-
-
-# def compute_world(stage, chla_ds, temp_ds, label, max_workers=4, sensitivity_param=None, sensitivity=0):
-#     # test
-#     # stage='juvenile'
-#     # chla_ds=chla_surf_SO_allyrs
-#     # temp_ds=temp_avg_100m_SO_allyrs
-#     # label='actual'
-#     # max_workers=4
-    
-#     # print(f"  → {label}")
-#     print(f"  → {label} | "
-#         f"{sensitivity_param or 'baseline'} | {sensitivity:+.0%}")
-
-#     # COmpute length and mass - results=list of length 39
-#     func = partial(length_single_year, stage=stage, chla_ds=chla_ds, temp_ds=temp_ds, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
-#     results = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | {stage}")
-
-#     # Initialisation
-#     nyears, nday, neta, nxi = 39, 181, 231, 1442
-#     length_out_da = xr.DataArray(np.empty((nyears, nday, neta, nxi), dtype=np.float32),
-#                                  dims=("years", "days", "eta_rho", "xi_rho"),
-#                                  coords={"years": np.arange(nyears),
-#                                          "lat": chla_ds.lat_rho,
-#                                          "lon": chla_ds.lon_rho,},)
-
-#     mass_out_da = xr.DataArray(np.empty((nyears, nday, neta, nxi), dtype=np.float32),
-#                                dims=("years", "days", "eta_rho", "xi_rho"),
-#                                coords=length_out_da.coords,)
-
-#     for y, (length, mass) in enumerate(results):
-#         length_out_da[y, :, :, :] = length.values.astype(np.float32)
-#         mass_out_da[y, :, :, :]   = mass.values.astype(np.float32)
-
-#         del length, mass
-
-#     return length_out_da, mass_out_da
-
-
-# def compute_stage(stage, sensitivity_param=None, sensitivity=0):
-#     # stage='juvenile'
-
-#     # ---------- World 1: Climatology
-#     print("  → Climatology")
-#     clim_length, clim_mass = compute_world(stage, chla_clim_expanded, temp_clim_expanded, label="Climatology", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
-
-#     # ---------- World 2: Actual
-#     actual_length, actual_mass = compute_world(stage, chla_surf_SO_allyrs, temp_avg_100m_SO_allyrs, label="Actual", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
-
-#     # ---------- World 3: No MHWs
-#     clim_trended_length, clim_trended_mass = compute_world(stage, chla_surf_SO_allyrs, temp_clim_trended, label="Clim Trended", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
-
-#     # ---------- World 4: No Warming
-#     warming_length, warming_mass = compute_world(stage, chla_surf_SO_allyrs, detrended_temp, label="No Warming", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
-
-#     return {"stage": stage,
-#             "clim_length": clim_length, "clim_mass": clim_mass,
-#             "actual_length": actual_length, "actual_mass": actual_mass,
-#             "clim_trended_length": clim_trended_length, "clim_trended_mass": clim_trended_mass,
-#             "warming_length": warming_length, "warming_mass": warming_mass,
-            # }
-
-
-
-
-
-# def compute_stage(stage, sensitivity_param=None, sensitivity=0):
-#     results = {}
-
-#     for world_key, (chla_ds, temp_ds, label, workers) in WORLDS.items():
-
-#         length, mass = compute_world(stage=stage, chla_ds=chla_ds, temp_ds=temp_ds, label=label, max_workers=workers,
-#                                      sensitivity_param=sensitivity_param, sensitivity=sensitivity,)
-
-#         results[f"{world_key}_length"] = length
-#         results[f"{world_key}_mass"] = mass
-
-#     return results
-
-
-# # Put to datasets with stages as variables and store to file
-# stage_list = list(stage_lengths.keys())
-# def save_if_not_exists(ds, filepath, description=None, temperature=None, chla = None, units=None):
-#     # create directory if needed
-#     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
-#     # if the file exists, remove it 
-#     if os.path.exists(filepath):
-#         print(f"Removing existing file: {filepath}")
-#         os.remove(filepath)
-
-#     # Metadata
-#     if description is not None:
-#         ds.attrs["description"] = description
-#     if units is not None:
-#         ds.attrs["units"] = units
-#     if temperature is not None:
-#         ds.attrs["temperature"] = temperature
-#     if chla is not None:
-#         ds.attrs["chla"] = chla
-#     ds.attrs["date"] = datetime.today().strftime('%d %B %Y')
-
-#     # Write
-#     ds.to_netcdf(filepath, mode="w", engine="netcdf4")
-#     print(f"Saved: {filepath}")
 
 # %%  ================================== Krill Population Southern Ocean ==================================
 path_surrogates_krill = os.path.join(path_surrogates, f'mass_length')
