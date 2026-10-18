@@ -108,113 +108,159 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from B_Growth_Model.Atkinson2006_model import length_Atkinson2006 
 
-# --- Parameters
-stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
+import importlib
+import functions_length
+importlib.reload(functions_length)
 
-def length_to_mass(length_array, p = 10**(-4.19), r=3.89):
-    ''' Constants from Atkinson et al (2006)'''
-    mass_array = p*length_array**r #in mg
-    return mass_array
+from functions_length import (
+    STAGE_LENGTHS,
+    STAGE_LIST,
+    length_to_mass,
+    length_single_year,
+    compute_world,
+    compute_stage,
+    save_if_not_exists,
+)
 
-# %%  ================================== Functions to run length and mass under different scenarios for krill population ==================================
 from functools import partial
 from tqdm.contrib.concurrent import process_map
 
+stage_lengths = STAGE_LENGTHS
+stage_list = STAGE_LIST
+
+WORLDS = {
+    "clim": (chla_clim_expanded, temp_clim_expanded, "Climatology", 10,),
+    "actual": (chla_surf_SO_allyrs, temp_avg_100m_SO_allyrs, "Actual", 10,),
+    "clim_trended": (chla_surf_SO_allyrs, temp_clim_trended, "Clim Trended", 10,),
+    "no_warming": (chla_surf_SO_allyrs, detrended_temp, "No Warming", 10,),
+}
+
+
+# # --- Parameters
+# stage_lengths = {'juvenile': 25, 'immature': 30, 'mature': 40, 'gravid': 45}
+
+# def length_to_mass(length_array, p = 10**(-4.19), r=3.89):
+#     ''' Constants from Atkinson et al (2006)'''
+#     mass_array = p*length_array**r #in mg
+#     return mass_array
+
+# %%  ================================== Functions to run length and mass under different scenarios for krill population ==================================
+
 # Function to run years in parallel
-def length_single_year(yr, stage, chla_ds, temp_ds):
-    chla = chla_ds.chla.isel(years=yr)
-    temp = temp_ds.avg_temp.isel(years=yr)
+# def length_single_year(yr, stage, chla_ds, temp_ds, sensitivity_param=None, sensitivity=0):
+#     # yr=0
+#     chla = chla_ds.chla.isel(years=yr)
+#     temp = temp_ds.avg_temp.isel(years=yr)
 
-    length = length_Atkinson2006(chla=chla, temp=temp, initial_length=stage_lengths[stage], maturity_stage=stage) #(181, 231, 1442)
-    mass = length_to_mass(length)
+#     length = length_Atkinson2006(chla=chla, temp=temp, initial_length=stage_lengths[stage], maturity_stage=stage, sensitivity_param=sensitivity_param, sensitivity=sensitivity) #(181, 231, 1442)
+#     mass = length_to_mass(length)
 
-    return length, mass
+#     return length, mass
 
 
-def compute_world(stage, chla_ds, temp_ds, label, max_workers=4):
-    # test
-    # stage='juvenile'
-    # chla_ds=chla_surf_SO_allyrs
-    # temp_ds=temp_avg_100m_SO_allyrs
-    # label='actual'
-    # max_workers=4
+# def compute_world(stage, chla_ds, temp_ds, label, max_workers=4, sensitivity_param=None, sensitivity=0):
+#     # test
+#     # stage='juvenile'
+#     # chla_ds=chla_surf_SO_allyrs
+#     # temp_ds=temp_avg_100m_SO_allyrs
+#     # label='actual'
+#     # max_workers=4
     
-    print(f"  → {label}")
+#     # print(f"  → {label}")
+#     print(f"  → {label} | "
+#         f"{sensitivity_param or 'baseline'} | {sensitivity:+.0%}")
 
-    # COmpute length and mass - results=list of length 39
-    func = partial(length_single_year, stage=stage, chla_ds=chla_ds, temp_ds=temp_ds)
-    results = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | {stage}")
+#     # COmpute length and mass - results=list of length 39
+#     func = partial(length_single_year, stage=stage, chla_ds=chla_ds, temp_ds=temp_ds, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
+#     results = process_map(func, range(39), max_workers=max_workers, chunksize=1, desc=f"{label} | {stage}")
 
-    # Initialisation
-    nyears, nday, neta, nxi = 39, 181, 231, 1442
-    length_out_da = xr.DataArray(np.empty((nyears, nday, neta, nxi), dtype=np.float32),
-                                 dims=("years", "days", "eta_rho", "xi_rho"),
-                                 coords={"years": np.arange(nyears),
-                                         "lat": chla_ds.lat_rho,
-                                         "lon": chla_ds.lon_rho,},)
+#     # Initialisation
+#     nyears, nday, neta, nxi = 39, 181, 231, 1442
+#     length_out_da = xr.DataArray(np.empty((nyears, nday, neta, nxi), dtype=np.float32),
+#                                  dims=("years", "days", "eta_rho", "xi_rho"),
+#                                  coords={"years": np.arange(nyears),
+#                                          "lat": chla_ds.lat_rho,
+#                                          "lon": chla_ds.lon_rho,},)
 
-    mass_out_da = xr.DataArray(np.empty((nyears, nday, neta, nxi), dtype=np.float32),
-                               dims=("years", "days", "eta_rho", "xi_rho"),
-                               coords=length_out_da.coords,)
+#     mass_out_da = xr.DataArray(np.empty((nyears, nday, neta, nxi), dtype=np.float32),
+#                                dims=("years", "days", "eta_rho", "xi_rho"),
+#                                coords=length_out_da.coords,)
 
-    for y, (length, mass) in enumerate(results):
-        length_out_da[y, :, :, :] = length.values.astype(np.float32)
-        mass_out_da[y, :, :, :]   = mass.values.astype(np.float32)
+#     for y, (length, mass) in enumerate(results):
+#         length_out_da[y, :, :, :] = length.values.astype(np.float32)
+#         mass_out_da[y, :, :, :]   = mass.values.astype(np.float32)
 
-        del length, mass
+#         del length, mass
 
-    return length_out_da, mass_out_da
-
-
-def compute_stage(stage):
-    # stage='juvenile'
-
-    # ---------- World 1: Climatology
-    print("  → Climatology")
-    clim_length, clim_mass = compute_world(stage, chla_clim_expanded, temp_clim_expanded, label="Climatology", max_workers=10)
-
-    # ---------- World 2: Actual
-    actual_length, actual_mass = compute_world(stage, chla_surf_SO_allyrs, temp_avg_100m_SO_allyrs, label="Actual", max_workers=10)
-
-    # ---------- World 3: No MHWs
-    clim_trended_length, clim_trended_mass = compute_world(stage, chla_surf_SO_allyrs, temp_clim_trended, label="Clim Trended", max_workers=4)
-
-    # ---------- World 4: No Warming
-    warming_length, warming_mass = compute_world(stage, chla_surf_SO_allyrs, detrended_temp, label="No Warming", max_workers=4)
-
-    return {"stage": stage,
-            "clim_length": clim_length, "clim_mass": clim_mass,
-            "actual_length": actual_length, "actual_mass": actual_mass,
-            "clim_trended_length": clim_trended_length, "clim_trended_mass": clim_trended_mass,
-            "warming_length": warming_length, "warming_mass": warming_mass,
-            }
+#     return length_out_da, mass_out_da
 
 
-# Put to datasets with stages as variables and store to file
-stage_list = list(stage_lengths.keys())
-def save_if_not_exists(ds, filepath, description=None, temperature=None, chla = None, units=None):
-    # create directory if needed
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+# def compute_stage(stage, sensitivity_param=None, sensitivity=0):
+#     # stage='juvenile'
 
-    # if the file exists, remove it 
-    if os.path.exists(filepath):
-        print(f"Removing existing file: {filepath}")
-        os.remove(filepath)
+#     # ---------- World 1: Climatology
+#     print("  → Climatology")
+#     clim_length, clim_mass = compute_world(stage, chla_clim_expanded, temp_clim_expanded, label="Climatology", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
 
-    # Metadata
-    if description is not None:
-        ds.attrs["description"] = description
-    if units is not None:
-        ds.attrs["units"] = units
-    if temperature is not None:
-        ds.attrs["temperature"] = temperature
-    if chla is not None:
-        ds.attrs["chla"] = chla
-    ds.attrs["date"] = datetime.today().strftime('%d %B %Y')
+#     # ---------- World 2: Actual
+#     actual_length, actual_mass = compute_world(stage, chla_surf_SO_allyrs, temp_avg_100m_SO_allyrs, label="Actual", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
 
-    # Write
-    ds.to_netcdf(filepath, mode="w", engine="netcdf4")
-    print(f"Saved: {filepath}")
+#     # ---------- World 3: No MHWs
+#     clim_trended_length, clim_trended_mass = compute_world(stage, chla_surf_SO_allyrs, temp_clim_trended, label="Clim Trended", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
+
+#     # ---------- World 4: No Warming
+#     warming_length, warming_mass = compute_world(stage, chla_surf_SO_allyrs, detrended_temp, label="No Warming", max_workers=10, sensitivity_param=sensitivity_param, sensitivity=sensitivity)
+
+#     return {"stage": stage,
+#             "clim_length": clim_length, "clim_mass": clim_mass,
+#             "actual_length": actual_length, "actual_mass": actual_mass,
+#             "clim_trended_length": clim_trended_length, "clim_trended_mass": clim_trended_mass,
+#             "warming_length": warming_length, "warming_mass": warming_mass,
+            # }
+
+
+
+
+
+# def compute_stage(stage, sensitivity_param=None, sensitivity=0):
+#     results = {}
+
+#     for world_key, (chla_ds, temp_ds, label, workers) in WORLDS.items():
+
+#         length, mass = compute_world(stage=stage, chla_ds=chla_ds, temp_ds=temp_ds, label=label, max_workers=workers,
+#                                      sensitivity_param=sensitivity_param, sensitivity=sensitivity,)
+
+#         results[f"{world_key}_length"] = length
+#         results[f"{world_key}_mass"] = mass
+
+#     return results
+
+
+# # Put to datasets with stages as variables and store to file
+# stage_list = list(stage_lengths.keys())
+# def save_if_not_exists(ds, filepath, description=None, temperature=None, chla = None, units=None):
+#     # create directory if needed
+#     os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+#     # if the file exists, remove it 
+#     if os.path.exists(filepath):
+#         print(f"Removing existing file: {filepath}")
+#         os.remove(filepath)
+
+#     # Metadata
+#     if description is not None:
+#         ds.attrs["description"] = description
+#     if units is not None:
+#         ds.attrs["units"] = units
+#     if temperature is not None:
+#         ds.attrs["temperature"] = temperature
+#     if chla is not None:
+#         ds.attrs["chla"] = chla
+#     ds.attrs["date"] = datetime.today().strftime('%d %B %Y')
+
+#     # Write
+#     ds.to_netcdf(filepath, mode="w", engine="netcdf4")
+#     print(f"Saved: {filepath}")
 
 # %%  ================================== Krill Population Southern Ocean ==================================
 path_surrogates_krill = os.path.join(path_surrogates, f'mass_length')
@@ -268,7 +314,7 @@ else:
         print(f"\n=== Stage: {stage} ===")
 
         # --- Call function to compute the different worlds for each stage (~15min per stage)
-        res = compute_stage(stage)
+        res = compute_stage(stage, WORLDS)
 
         # --- Extract results
         clim_length_ds[stage] = res["clim_length"]
@@ -280,8 +326,8 @@ else:
         clim_trended_length_ds[stage] = res['clim_trended_length']
         clim_trended_mass_ds[stage] = res['clim_trended_mass']
 
-        nowarming_length_ds[stage] = res["warming_length"]
-        nowarming_mass_ds[stage]   = res["warming_mass"]
+        nowarming_length_ds[stage] = res["no_warming_length"]
+        nowarming_mass_ds[stage]   = res["no_warming_mass"]
 
     # -- Store results to datasets and save file
     # 1. Climatology
@@ -327,4 +373,115 @@ else:
                                                      units='mg')
 
 
-# %%
+# %%  ================================== Sensitivity analysis of the growth model ==================================
+stage_list = list(stage_lengths.keys())
+
+# Sensitivity scenarios
+experiments = [
+    ("d_minus10", "d", -0.10),
+    ("d_plus10",  "d",  0.10),
+    ("e_minus10", "e", -0.10),
+    ("e_plus10",  "e",  0.10),
+    ("f_minus10", "f", -0.10),
+    ("f_plus10",  "f",  0.10),
+    ("g_minus10", "g", -0.10),
+    ("g_plus10",  "g",  0.10),
+]
+
+
+
+# Metadata for files
+WORLD_METADATA = {
+    "clim": {
+        "label": "Climatology",
+        "temperature": "Climatological temperature (growth seasons 30-year average).",
+        "chla": "Climatological Chla (growth seasons 30-year average).",
+        "period": "1980-2009",
+    },
+    "actual": {
+        "label": "Actual",
+        "temperature": "Actual temperature (growth seasons daily).",
+        "chla": "Actual Chla (growth seasons daily).",
+        "period": "1980-2018",
+    },
+    "clim_trended": {
+        "label": "Clim Trended (No MHWs)",
+        "temperature": "Climatological temperature with warming trend applied.",
+        "chla": "Climatological Chla (growth seasons daily).",
+        "period": "1980-2018",
+    },
+    "no_warming": {
+        "label": "No Global Warming",
+        "temperature": "Actual temperature detrended to remove the warming trend.",
+        "chla": "Actual Chla (growth seasons daily).",
+        "period": "1980-2018",
+    },
+}
+
+
+path_sensitivity = os.path.join(path_surrogates, f'sensitivity_analysis')
+files_sensitivity = [
+    os.path.join(
+        path_sensitivity,
+        f"{exp_name}_{world_key}_mass.nc"
+    )
+    for exp_name, _, _ in experiments
+    for world_key in WORLD_METADATA
+]
+
+if all(os.path.exists(f) for f in files_sensitivity):
+    print("All sensitivity mass files already exist.")
+
+else:
+    for exp_name, param, change in experiments:
+
+        print(f"\n========== Experiment: {exp_name} ==========")
+
+        stage_results = {}
+
+        # Run all maturity stages for this experiment
+        for stage in stage_list:
+            print(f"  Stage: {stage}")
+
+            stage_results[stage] = compute_stage(
+                stage=stage,
+                sensitivity_param=param,
+                sensitivity=change,
+            )
+
+        sensitivity_description = (f"Parameter {param} changed by {change:+.0%}. All other parameters held at baseline values (model4).")
+
+        # Save mass only, with maturity stages as variables
+        for world_key, metadata in WORLD_METADATA.items():
+
+            stage_data = {
+                stage: stage_results[stage][f"{world_key}_mass"]
+                for stage in stage_list
+            }
+
+            ds = xr.Dataset(stage_data)
+
+            filepath = os.path.join(
+                path_sensitivity,
+                f"{exp_name}_{world_key}_mass.nc"
+            )
+
+            description = (
+                f"{metadata['label']} Krill Dry Weight "
+                f"({metadata['period']}).\n"
+                "Weight calculated using Atkinson et al. (2006).\n"
+                f"Sensitivity experiment: {sensitivity_description}"
+            )
+
+            save_if_not_exists(
+                ds,
+                filepath,
+                description=description,
+                temperature=metadata["temperature"],
+                chla=metadata["chla"],
+                units="mg",
+            )
+
+            del ds, stage_data
+
+        del stage_results
