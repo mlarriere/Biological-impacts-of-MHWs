@@ -185,191 +185,72 @@ for abbrv, (mpa_name, _) in mpa_masks.items():
 # %% =====================================================================================
 #           Attribution of seasonal biomass gain to MHWs and long term T°C trend
 #    =====================================================================================
+# -- Load functions and settings -- all functions are run in parallel over the MPAs
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import importlib
+import functions_attribution
+importlib.reload(functions_attribution)
+from functions_attribution import compute_and_save_seasonal_gain, compute_contribution, compute_biomass_change, mask_mhws_contribution
 path_attribution = os.path.join(path_surrogates, 'attributions')
 path_attribution_mpas = os.path.join(path_attribution, 'mpas')
-
-# %% ======================== Step1. Seasonal gains for the different surrogates ========================
-def compute_and_save_seasonal_gain(abbrv):
-    """Compute seasonal gain for all surrogates of one MPA and save to netCDF."""
-    mpa_name, _ = mpa_masks[abbrv]
-    fpath = os.path.join(path_attribution_mpas, f'seasonal_gain_{abbrv}.nc')
-
-    if not os.path.exists(fpath):
-        gain = {}
-        for surrog in surrogate_names.keys():
-            gain[surrog] = (biomass_mpas[abbrv][surrog].isel(days=-1) - biomass_mpas[abbrv][surrog].isel(days=0)).biomass  # shape (39, 10, 231, 1440)
-
-        xr.Dataset(gain).to_netcdf(fpath)
-        print(f"{abbrv} -- computed and saved.")
-
-    ds = xr.open_dataset(fpath)
-    result = {surrog: ds[surrog] for surrog in surrogate_names}
-    ds.close()
-    return abbrv, result
-
-
-# Run in parallel
 abbrvs = list(mpa_masks.keys())
-results = process_map(compute_and_save_seasonal_gain, abbrvs, max_workers=5, desc="Seasonal gain")
+
+# ===== Step1. Seasonal gains for the different surrogates =====
+args_step1 = [(abbrv, mpa_masks, biomass_mpas, surrogate_names, path_attribution_mpas) for abbrv in abbrvs]
+results = process_map(compute_and_save_seasonal_gain, args_step1, max_workers=5, desc="Seasonal gain")
 seasonal_gain_mpa = dict(results) #seasonal_gain_mpa['RS']['clim']  shape (39, 10, 231, 1440)
 
-# %% ======================== Step2. Change relative to climatology per grid cell (fraction) ========================
-def compute_biomass_change(abbrv):
-    """Fraction of change relative to climatology per grid cell."""
-    fpath = os.path.join(path_attribution_mpas, f'bio_change_{abbrv}.nc')
-
-    if not os.path.exists(fpath):
-        bio_change = {}
-        for surrog in [s for s in surrogate_names if s != "clim"]:
-            bio_change[surrog] = (
-                (seasonal_gain_mpa[abbrv][surrog] - seasonal_gain_mpa[abbrv]['clim'])
-                / seasonal_gain_mpa[abbrv]['clim']
-            )  # shape (39, 10, eta_rho, xi_rho)
-
-        xr.Dataset(bio_change).to_netcdf(fpath)
-        print(f"[{abbrv}] Computed and saved.")
-
-    ds = xr.open_dataset(fpath)
-    result = {surrog: ds[surrog] for surrog in surrogate_names if surrog != "clim"}
-    ds.close()
-    print(f"[{abbrv}] Loaded.")
-    return abbrv, result
-
-# Run in parallel
-abbrvs = list(mpa_masks.keys())
-results = process_map(compute_biomass_change, abbrvs, max_workers=5, desc="Fraction of change")
+# ===== Step2. Change relative to climatology per grid cell (fraction) =====
+args_step2 = [(abbrv, seasonal_gain_mpa, surrogate_names, path_attribution_mpas) for abbrv in abbrvs]
+results = process_map(compute_biomass_change, args_step2, max_workers=5, desc="Fraction of change")
 bio_change_interp_mpa = dict(results)
 
-# %% ======================== Step3. Contributions of warming and MHWs per grid cell and spatial average (Step4)
-def compute_contribution(abbrv):
-    """Compute MHW and warming contributions for one MPA."""
-    fpath = os.path.join(path_attribution_mpas, f'attrib_{abbrv}.nc')
-
-    if not os.path.exists(fpath):
-        # abbrv='WS'
-        contrib_mhws = bio_change_interp_mpa[abbrv]['actual'] - bio_change_interp_mpa[abbrv]['climtrend']  # shape (39, 10, 231, 1440)
-        contrib_warming = bio_change_interp_mpa[abbrv]['actual'] - bio_change_interp_mpa[abbrv]['nowarming']  # shape (39, 10, 231, 1440)
-        residual = bio_change_interp_mpa[abbrv]['actual'] - contrib_mhws - contrib_warming #residuals are mainly the chla 'contribution' according to the Atkinson model
-
-        # Quick check 
-        # check_sum = contrib_mhws.isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200) + contrib_warming.isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200) + residual.isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200)
-        # print((check_sum-p_change_interp_mpa[abbrv]['actual'].isel(years=35, bootstraps=0, eta_rho=50, xi_rho=1200)).values) #should be close to 0
-
-        ds_out = xr.Dataset(data_vars={'mhws': (contrib_mhws.dims, contrib_mhws.data,
-                                                 {'description': 'Contribution of MHWs [%] to the change in seasonal krill biomass.'}),
-                                        'warming': (contrib_warming.dims, contrib_warming.data,
-                                                    {'description': 'Contribution of long-term warming [%] to the change in seasonal krill biomass.'}),
-                                        'residual': (residual.dims, residual.data,
-                                                     {'description': 'Residual term computed as reference - mhws - warming. Represents Chla contributions and an unexplained part.'})
-                                        },
-                            )
-        ds_out.to_netcdf(fpath)
-        # xr.Dataset({'mhws': contrib_mhws, 'warming': contrib_warming, 'residual': residual}).to_netcdf(fpath)
-        print(f"[{abbrv}] Computed and saved.")
-
-    ds = xr.open_dataset(fpath)
-    contrib_mhws = ds['mhws']
-    contrib_warming = ds['warming']
-    residual = ds['residual']
-    ds.close()
-    print(f"[{abbrv}] Loaded.")
-
-    return abbrv, {
-        'mhws':         contrib_mhws,
-        'warming':      contrib_warming,
-        'residual':     residual
-        }
-
-# Run in parallel
-abbrvs = list(mpa_masks.keys())
-results = process_map(compute_contribution, abbrvs, max_workers=5, desc="Attributions")
+# ===== Step3. Contributions of warming and MHWs per grid cell and spatial average (Step4)
+args_step3 = [(abbrv, bio_change_interp_mpa, path_attribution_mpas) for abbrv in abbrvs]
+results = process_map(compute_contribution, args_step3, max_workers=5, desc="Attributions")
 results = dict(results)
 
 attrib_ds_mpa = {}
 for abbrv in mpa_masks:
-    attrib_ds_mpa[abbrv] = xr.Dataset(
-        {"attrib_mhws": results[abbrv]["mhws"],
-         "attrib_warming": results[abbrv]["warming"],
-         "residual": results[abbrv]["residual"],
-        }
-    )
+    attrib_ds_mpa[abbrv] = xr.Dataset({"attrib_mhws": results[abbrv]["mhws"],
+                                       "attrib_warming": results[abbrv]["warming"],
+                                       "residual": results[abbrv]["residual"]})
 
-# %% ======================== Mask the attributions -- MHW cells only ========================
-def compute_and_save_mpa(abbrv):
-    # abbrv='RS'
-    print(f'     {mpa_masks[abbrv][0]}')
-    
-    # --- MHWs mask
-    mhw = xr.open_dataset(os.path.join(path_combined_thesh, "mpas/interpolated", f"duration_AND_thresh_{abbrv}.nc"))
-    duration_mask = mhw["duration"] > 0
-    det = {i: mhw[f"det_{i}deg"] == 1 for i in [1, 2, 3, 4]}
-    intensity_masks = {
-        "90perc": duration_mask.any("days"),
-        "1deg": (duration_mask & det[1]).any("days"),
-        "2deg": (duration_mask & det[2]).any("days"),
-        "3deg": (duration_mask & det[3]).any("days"),
-        "4deg": (duration_mask & det[4]).any("days"),
-    }
+# ===== Mask the attributions to MHW cells only =====
+path_attribution_mpas_mhws = os.path.join(path_attribution_mpas, "mhws")
 
-    # Select the attributions computed before for the selected MPA
-    attrib_ds = attrib_ds_mpa[abbrv]
-    bio = bio_change_interp_mpa[abbrv]["actual"]
-    coords = {
-        "lon_rho": mhw["lon_rho"],
-        "lat_rho": mhw["lat_rho"],
-        "years": attrib_ds['attrib_mhws'].years,
-        "bootstraps": attrib_ds['attrib_mhws'].bootstraps,
-        "eta_rho": attrib_ds['attrib_mhws'].eta_rho,
-        "xi_rho": attrib_ds['attrib_mhws'].xi_rho,
-    }
-
-    # --- Attribution datasets
-    def build(varname, desc):
-        data_vars = {}
-
-        for suffix, mask in intensity_masks.items():
-            data_vars[f'{varname}_{suffix}'] = attrib_ds[varname].where(mask)
-
-        return xr.Dataset(data_vars=data_vars,
-                          coords=coords,
-                          attrs={"mpa": mpa_masks[abbrv][0],   
-                                 "description": f"{desc} change in biomass -- cells selected have experienced MHWs of ideg intensity"}
-                         )
-
-    ds_mhws = build("attrib_mhws", 'Contribution of MHWs to ')
-    ds_warming = build("attrib_warming", 'Contribution of long term thermal trend to')
-    ds_residual = build("residual", 'Residuals of attributions to')
-
-    # --- Biomass dataset
-    ds_bio = xr.Dataset(
-        data_vars={f'biomass_{suffix}': bio.where(mask) for suffix, mask in intensity_masks.items()},
-        coords=coords,
-        attrs={
-            "mpa": mpa_masks[abbrv][0],
-            "description": "Seasonal biomass change relative to climatology, masked by MHW intensity",
-        },
-    )
-
-    mhw.close()
-
-    return ds_mhws, ds_warming, ds_residual, ds_bio
-
-# Loop over the MPAs
+# Loop over the MPAs and identify which file is missing and need to be processed
+abbrvs_to_process = []
 for abbrv in mpa_masks:
-    f_mhws = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_mhws.nc")
-    f_warm = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_warming.nc")
-    f_res  = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_attrib_residual.nc")
-    f_bio  = os.path.join(path_attribution_mpas, f"mhws/{abbrv}_biomass.nc")
+    f_mhws = os.path.join(path_attribution_mpas_mhws, f"{abbrv}_attrib_mhws.nc")
+    f_warm = os.path.join(path_attribution_mpas_mhws, f"{abbrv}_attrib_warming.nc")
+    f_res  = os.path.join(path_attribution_mpas_mhws, f"{abbrv}_attrib_residual.nc")
+    f_bio  = os.path.join(path_attribution_mpas_mhws, f"{abbrv}_biomass.nc")
 
     if not all(map(os.path.exists, [f_mhws, f_warm, f_res, f_bio])):
-        print('Masking in process....')
-        ds_mhws, ds_warm, ds_res, ds_bio = compute_and_save_mpa(abbrv)
-        ds_mhws.to_netcdf(f_mhws)
-        ds_warm.to_netcdf(f_warm)
-        ds_res.to_netcdf(f_res)
-        ds_bio.to_netcdf(f_bio)
-    
-# %% ======================== Statistics: median and std dev and sptaial avf ========================
+        abbrvs_to_process.append(abbrv)
+
+args_mask_mhws = [(abbrv, mpa_masks, attrib_ds_mpa, bio_change_interp_mpa, path_combined_thesh) for abbrv in abbrvs_to_process]
+if args_mask_mhws:
+    results_masking = process_map(mask_mhws_contribution, args_mask_mhws, max_workers=5, desc='Masking contrib during MHWs')
+
+    # Save
+    for abbrv, (ds_mhws, ds_warming, ds_residual, ds_bio) in zip(abbrvs_to_process, results_masking):
+        ds_mhws.to_netcdf(os.path.join(path_attribution_mpas_mhws, f"{abbrv}_attrib_mhws.nc"))
+        ds_warming.to_netcdf(os.path.join(path_attribution_mpas_mhws, f"{abbrv}_attrib_warming.nc"))
+        ds_residual.to_netcdf(os.path.join(path_attribution_mpas_mhws, f"{abbrv}_attrib_residual.nc"))
+        ds_bio.to_netcdf(os.path.join(path_attribution_mpas_mhws, f"{abbrv}_biomass.nc"))
+        ds_mhws.close()
+        ds_warming.close()
+        ds_residual.close() 
+        ds_bio.close()
+    print(f"[{abbrv}] Masked datasets saved.")
+else:
+    print("All MPAs have already been processed.")
+
+# %% ======================== Statistics: median and std dev and sptaial avg ========================
 attrib_stats_mpa = {}
 thresholds = ['1deg', '3deg']
 
@@ -713,12 +594,12 @@ for i, (abbrv, ax) in enumerate(zip(mpa_colors.keys(), axes)):
     ax2.patch.set_alpha(0.0)      # important
 
     # --- left axis: contribution ---
-    ax.plot(years_coord, warm, color='#5B8FC7', lw=1, label=r'$\Delta_{bkgd}$', zorder=2)
-    ax.plot(years_coord, mhw, color='#CA6702', lw=1, label=r'$\Delta_{MHWs}$', zorder=3)
-    ax.plot(years_coord, residual, color='#898433', lw=1, label=r'$\Delta_{res}$', zorder=4)
+    ax.plot(years_coord, warm, color='#742B4F', linestyle='-', lw=1.5, label=r'$\Delta_{bkgd}$', zorder=2)
+    ax.plot(years_coord, mhw, color='#D47D04', linestyle='-', lw=1.5, label=r'$\Delta_{MHWs}$', zorder=3)
+    ax.plot(years_coord, residual, color='#959037', linestyle='-', lw=1.5, label=r'$\Delta_{res}$', zorder=4)
 
     # ax.axhline(0, color='0.7', lw=0.8)
-    ax.axhline(0, color='gray', lw=0.6, ls='-', alpha=0.4)
+    # ax.axhline(0, color='gray', lw=0.6, ls='-', alpha=0.4)
     ax.set_xlim(1980, 2018)
     ax.set_ylabel('Contribution [\%]', fontsize=12, color='black')
     ax.tick_params(axis='y', labelsize=10, labelcolor='black')
@@ -726,18 +607,18 @@ for i, (abbrv, ax) in enumerate(zip(mpa_colors.keys(), axes)):
 
     # --- right axis: Biomass subplot
     bar_colors = ['#94D2BD' if v >= 0 else '#AEA8DE' for v in bio_ts]
-    ax2.bar(years_coord, bio_ts, width=0.9, color=bar_colors, alpha=0.4, zorder=1)
+    ax2.bar(years_coord, bio_ts, width=0.9, color=bar_colors, alpha=0.5, zorder=1)
     # ax2.bar(years_coord, bio_ts, width=0.9, color=bar_colors, alpha=0.4, zorder=1,
         # yerr=bio_ts_std, error_kw=dict(ecolor='0.3', elinewidth=0.8, capsize=2, alpha=0.6),)
-    ax2.set_ylabel('Biomass Change [\%]', fontsize=12)
+    ax2.set_ylabel('$\Delta$B [\%]', fontsize=12)
     ax2.axhline(0, color='black', lw=0.5, ls=':', alpha=0.6)
     ax2.tick_params(labelsize=10)
     bio_max = np.nanmax(np.abs(bio_ts)) * 1.2
     ax2.set_ylim(-bio_max, bio_max)
 
     # zero-align the two axes so both 0s sit on the same gridline
-    pp_abs = max(abs(np.nanmin([mhw, warm, residual])), abs(np.nanmax([mhw, warm, residual]))) * 1.25
-    tc_abs = max(abs(np.nanmin(bio_ts)), abs(np.nanmax(bio_ts))) * 1.25
+    pp_abs = max(abs(np.nanmin([mhw, warm, residual])), abs(np.nanmax([mhw, warm, residual]))) * 1.05
+    tc_abs = max(abs(np.nanmin(bio_ts)), abs(np.nanmax(bio_ts))) * 1.05
     ax.set_ylim(-pp_abs, pp_abs)
     ax2.set_ylim(-tc_abs, tc_abs)
 
@@ -749,9 +630,9 @@ for i, (abbrv, ax) in enumerate(zip(mpa_colors.keys(), axes)):
     #     ha='left', va='top', bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='0.7', alpha=0.75),)
 
 # --- Shared legend ---
-line_warm = plt.Line2D([0], [0], color='#5B8FC7', lw=1.5, label=r'$\Delta_{bkgd}$')
-line_mhw  = plt.Line2D([0], [0], color='#CA6702', lw=1.5, label=r'$\Delta_{MHWs}$')
-line_res  = plt.Line2D([0], [0], color='#898433', lw=1.5, label=r'$\Delta_{res}$')
+line_warm = plt.Line2D([0], [0], color='#742B4F', lw=1.5, label=r'$\Delta_{bkgd}$')
+line_mhw  = plt.Line2D([0], [0], color='#D47D04', lw=1.5, label=r'$\Delta_{MHWs}$')
+line_res  = plt.Line2D([0], [0], color='#959037', lw=1.5, label=r'$\Delta_{res}$')
 
 fig.legend(
     handles=[line_mhw, line_warm, line_res],
@@ -779,8 +660,8 @@ axes[-1].set_xlabel('Years', fontsize=12)
 # )
 # fig.suptitle('Biomass attribution: MHW and Warming vs. Total change\nNote that the different terms are averafed spatially and thus don''t add up',fontsize=15, y=1.005)
 plt.tight_layout()
-# plt.show()
-plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/fig3_attributions_ts_{mhw_choice}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
+plt.show()
+# plt.savefig(os.path.join(os.getcwd(), f'D_Paper_Scripts/figures/results/fig3_attributions_ts_{mhw_choice}.pdf'), dpi=200, format='pdf', bbox_inches='tight')
 
 # %% ======================== MHWs Metrics ========================
 # 1. MHW duration
@@ -803,7 +684,7 @@ mhw_area_affected_mpas = {region: xr.open_dataset(os.path.join(path_combined_the
 # --- Compute MHW duration per region ---
 def get_mhw_dur(region):
     da = mhw_duration_mpas[region]
-    return da.max(dim='days').where(da.max(dim='days') > 0).mean(dim=['eta_rho', 'xi_rho'])
+    return da.max(dim='days').where(da.max(dim='days') > 0)
 
 # -- Color settings
 import matplotlib.cm as cm
@@ -818,17 +699,18 @@ fig, axes = plt.subplots(2, 3, figsize=(15, 9))
 axes = axes.flatten()
 
 for idx, region in enumerate(mpa_regions):
+    # region='RS'
     ax = axes[idx]
 
     # -- Data
-    mhw_dur     = get_mhw_dur(region)
-    actual_gain = total_seasonal_gain[region]['actual'].median(dim=['algo']).biomass * 1e-12
+    mhw_dur = get_mhw_dur(region)
+    actual_gain = bio_change_interp_mpa[region]['actual'].median(dim=['bootstraps'])
 
-    # -- Align years (coord is 0-38, map to 1980-2018)
-    x = mhw_dur.values
-    y = actual_gain.values
-
-    sc = ax.scatter(x, y, c=years, cmap=cmap, norm=norm,
+    x = mhw_dur.values #shape (39, 231, 1440)
+    y = actual_gain.values #shape (39, 231, 1440)
+    c = np.broadcast_to(years[:, np.newaxis, np.newaxis], x.shape)
+    
+    sc = ax.scatter(x, y, c=c.ravel(), cmap=cmap, norm=norm,
                     s=60, zorder=3, edgecolors='k', linewidths=0.4)
 
     # -- Colorbar per subplot
@@ -863,7 +745,7 @@ for idx, region in enumerate(mpa_regions):
 
     # -- Data (1deg threshold)
     mhw_area    = get_mhw_area(region, threshold_idx=2)
-    actual_gain = total_seasonal_gain[region]['actual'].median(dim=['algo']).biomass * 1e-12
+    actual_gain = bio_change_interp_mpa[region]['actual'].median(dim=['bootstraps'])
 
     x = mhw_area.values
     y = actual_gain.values
